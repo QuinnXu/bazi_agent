@@ -2,9 +2,10 @@
 
 import type React from "react"
 import { useEffect, useRef, useState } from "react"
-import { Send } from "lucide-react"
+import { Send, Calendar } from "lucide-react"
 import { MinimalBackground } from "@/components/minimal-background"
 import { ChatMessage } from "@/components/chat-message"
+import { BaziDialog } from "@/components/bazi-dialog"
 
 interface Message {
   id: string;
@@ -13,22 +14,24 @@ interface Message {
   createdAt: Date;
 }
 
+interface BaziData {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+  isSolar: boolean;
+  isFemale: boolean;
+  longitude: string;
+  latitude: string;
+}
+
 export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [showBaziForm, setShowBaziForm] = useState(false)
+  const [showBaziDialog, setShowBaziDialog] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [baziData, setBaziData] = useState({
-    year: '',
-    month: '',
-    day: '',
-    hour: '',
-    isSolar: true,
-    isFemale: false,
-    longitude: '121.5',
-    latitude: '31.2'
-  })
+  const [baziData, setBaziData] = useState<BaziData | null>(null)
   const [baziAnalysisResult, setBaziAnalysisResult] = useState<string | null>(null)
 
   const scrollToBottom = () => {
@@ -74,13 +77,23 @@ export default function Home() {
         }))
       };
       
-      // Include Bazi analysis result if available
-      if (baziAnalysisResult) {
-        requestData.baziAnalysisResult = baziAnalysisResult;
-        console.log('Including complete Bazi analysis result in chat request');
-        console.log('Bazi result preview:', baziAnalysisResult.substring(0, 100));
-      } else {
-        console.log('No Bazi analysis result available');
+      // Check if user message contains Bazi-related keywords and we have Bazi data
+      const isBaziRelated = userMessage.content.toLowerCase().includes('八字') || 
+                           userMessage.content.toLowerCase().includes('命理') || 
+                           userMessage.content.toLowerCase().includes('运势');
+      
+      if (isBaziRelated && baziData) {
+        requestData.baziData = {
+          year: parseInt(baziData.year),
+          month: parseInt(baziData.month),
+          day: parseInt(baziData.day),
+          hour: parseInt(baziData.hour),
+          isSolar: baziData.isSolar,
+          isFemale: baziData.isFemale,
+          longitude: parseFloat(baziData.longitude),
+          latitude: parseFloat(baziData.latitude)
+        };
+        console.log('Including Bazi data in chat request:', requestData.baziData);
       }
       
       const response = await fetch('/api/chat', {
@@ -95,17 +108,36 @@ export default function Home() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Handle non-streaming response
-      const content = await response.text();
-      
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: content,
+        content: '',
         createdAt: new Date()
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+
+      // Handle streaming response
+      const reader = response.body?.getReader();
+      if (reader) {
+        const decoder = new TextDecoder();
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          
+          // Update the assistant message with the new content
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === assistantMessage.id 
+                ? { ...msg, content: msg.content + chunk }
+                : msg
+            )
+          );
+        }
+      }
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: Message = {
@@ -120,15 +152,7 @@ export default function Home() {
     }
   }
 
-  const handleBaziSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    // Validate required fields
-    if (!baziData.year || !baziData.month || !baziData.day || !baziData.hour) {
-      alert('请填写完整的出生日期和时间信息');
-      return;
-    }
-    
+  const handleBaziSubmit = async (data: BaziData) => {
     try {
       // Get Bazi analysis result
       const response = await fetch('/api/bazi', {
@@ -137,24 +161,25 @@ export default function Home() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          year: parseInt(baziData.year),
-          month: parseInt(baziData.month),
-          day: parseInt(baziData.day),
-          hour: parseInt(baziData.hour),
-          isSolar: baziData.isSolar,
-          isFemale: baziData.isFemale,
-          longitude: parseFloat(baziData.longitude),
-          latitude: parseFloat(baziData.latitude)
+          year: parseInt(data.year),
+          month: parseInt(data.month),
+          day: parseInt(data.day),
+          hour: parseInt(data.hour),
+          isSolar: data.isSolar,
+          isFemale: data.isFemale,
+          longitude: parseFloat(data.longitude),
+          latitude: parseFloat(data.latitude)
         })
       });
 
-      const data = await response.json();
+      const result = await response.json();
       
       if (response.ok) {
-        // Store the complete Bazi analysis result
-        setBaziAnalysisResult(data.baziResult);
-        console.log('Bazi analysis result stored:', data.baziResult);
-        setShowBaziForm(false);
+        // Store the complete Bazi analysis result and data
+        setBaziAnalysisResult(result.baziResult);
+        setBaziData(data);
+        console.log('Bazi analysis result stored:', result.baziResult);
+        setShowBaziDialog(false);
         
         // Add informational message to chat
         const infoMessage: Message = {
@@ -166,7 +191,7 @@ export default function Home() {
         
         setMessages(prev => [...prev, infoMessage]);
       } else {
-        alert(`八字信息验证失败：${data.error}`);
+        alert(`八字信息验证失败：${result.error}`);
       }
     } catch (error) {
       console.error('Error validating Bazi data:', error);
@@ -174,17 +199,11 @@ export default function Home() {
     }
   }
 
-  const handleBaziInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value, type } = e.target
-    const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
-    setBaziData(prev => ({ ...prev, [name]: val }))
-  }
-
   const suggestedPrompts = [
-    "Help me brainstorm ideas",
-    "Explain a complex topic",
-    "Write something creative",
-    "Solve a problem",
+    "帮我头脑风暴一些想法",
+    "解释一个复杂的概念", 
+    "写一些创意内容",
+    "解决一个问题",
   ]
 
   const startWithPrompt = (prompt: string) => {
@@ -206,27 +225,20 @@ export default function Home() {
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto px-4 py-8">
           <div className="max-w-3xl mx-auto">
-            {messages.length === 0 && !showBaziForm ? (
+            {messages.length === 0 ? (
               // Welcome Screen
               <div className="text-center space-y-12 py-20">
                 <div className="space-y-8">
                   <h1 className="text-4xl md:text-6xl font-light text-neutral-800 leading-tight">
-                    How can I help you today?
+                    今天我如何帮助您？
                   </h1>
 
                   <p className="text-lg text-neutral-600 max-w-xl mx-auto leading-relaxed font-light">
-                    Start a conversation below or get a Bazi analysis
+                    开始下面的对话或进行八字分析
                   </p>
                 </div>
 
                 <div className="flex flex-col items-center">
-                  <button
-                    onClick={() => setShowBaziForm(true)}
-                    className="px-6 py-3 rounded-full bg-white/60 backdrop-blur-sm border border-neutral-200/50 text-neutral-700 text-base font-light hover:bg-white/80 hover:border-neutral-300/60 transition-all duration-300 mb-8"
-                  >
-                    Get Bazi Analysis
-                  </button>
-
                   {/* Minimal Suggested Prompts */}
                   <div className="flex flex-wrap gap-3 justify-center max-w-2xl mx-auto">
                     {suggestedPrompts.map((prompt, i) => (
@@ -239,135 +251,6 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
-                </div>
-              </div>
-            ) : showBaziForm ? (
-              // Bazi Form
-              <div className="py-8">
-                <div className="bg-white/70 backdrop-blur-sm border border-neutral-200/40 rounded-2xl p-6 max-w-2xl mx-auto">
-                  <h2 className="text-2xl font-light text-neutral-800 mb-6 text-center">八字排盘</h2>
-                  <form onSubmit={handleBaziSubmit} className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-light text-neutral-700 mb-1">Year</label>
-                        <input
-                          type="number"
-                          name="year"
-                          value={baziData.year}
-                          onChange={handleBaziInputChange}
-                          className="w-full px-4 py-2 rounded-lg bg-white/50 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/60 transition-all duration-300"
-                          placeholder="1990"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-light text-neutral-700 mb-1">Month</label>
-                        <input
-                          type="number"
-                          name="month"
-                          value={baziData.month}
-                          onChange={handleBaziInputChange}
-                          className="w-full px-4 py-2 rounded-lg bg-white/50 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/60 transition-all duration-300"
-                          placeholder="1-12"
-                          min="1"
-                          max="12"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-light text-neutral-700 mb-1">Day</label>
-                        <input
-                          type="number"
-                          name="day"
-                          value={baziData.day}
-                          onChange={handleBaziInputChange}
-                          className="w-full px-4 py-2 rounded-lg bg-white/50 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/60 transition-all duration-300"
-                          placeholder="1-31"
-                          min="1"
-                          max="31"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-light text-neutral-700 mb-1">Hour</label>
-                        <input
-                          type="number"
-                          name="hour"
-                          value={baziData.hour}
-                          onChange={handleBaziInputChange}
-                          className="w-full px-4 py-2 rounded-lg bg-white/50 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/60 transition-all duration-300"
-                          placeholder="0-23"
-                          min="0"
-                          max="23"
-                          required
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-light text-neutral-700 mb-1">Longitude</label>
-                        <input
-                          type="text"
-                          name="longitude"
-                          value={baziData.longitude}
-                          onChange={handleBaziInputChange}
-                          className="w-full px-4 py-2 rounded-lg bg-white/50 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/60 transition-all duration-300"
-                          placeholder="121.5"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-light text-neutral-700 mb-1">Latitude</label>
-                        <input
-                          type="text"
-                          name="latitude"
-                          value={baziData.latitude}
-                          onChange={handleBaziInputChange}
-                          className="w-full px-4 py-2 rounded-lg bg-white/50 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/60 transition-all duration-300"
-                          placeholder="31.2"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center space-x-4">
-                      <label className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          name="isSolar"
-                          checked={baziData.isSolar}
-                          onChange={handleBaziInputChange}
-                          className="rounded text-neutral-800 focus:ring-neutral-500"
-                        />
-                        <span className="text-sm font-light text-neutral-700">Solar Calendar</span>
-                      </label>
-                      <label className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          name="isFemale"
-                          checked={baziData.isFemale}
-                          onChange={handleBaziInputChange}
-                          className="rounded text-neutral-800 focus:ring-neutral-500"
-                        />
-                        <span className="text-sm font-light text-neutral-700">Female</span>
-                      </label>
-                    </div>
-                    
-                    <div className="flex justify-end space-x-3 pt-4">
-                      <button
-                        type="button"
-                        onClick={() => setShowBaziForm(false)}
-                        className="px-4 py-2 rounded-full bg-neutral-100 text-neutral-700 text-sm font-light hover:bg-neutral-200 transition-all duration-300"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        className="px-4 py-2 rounded-full bg-neutral-800 text-white text-sm font-light hover:bg-neutral-700 transition-all duration-300"
-                      >
-                        Submit
-                      </button>
-                    </div>
-                  </form>
                 </div>
               </div>
             ) : (
@@ -391,7 +274,7 @@ export default function Home() {
                             style={{ animationDelay: "0.2s" }}
                           ></div>
                         </div>
-                        <span className="text-sm text-neutral-600 font-light">Thinking</span>
+                        <span className="text-sm text-neutral-600 font-light">思考中</span>
                       </div>
                     </div>
                   </div>
@@ -403,31 +286,46 @@ export default function Home() {
         </div>
 
         {/* Input Area */}
-        {!showBaziForm && (
-          <div className="p-6 bg-white/30 backdrop-blur-xl border-t border-neutral-200/30">
-            <div className="max-w-3xl mx-auto">
-              <form id="chat-form" onSubmit={handleSubmit} className="relative">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={input}
-                    onChange={handleInputChange}
-                    placeholder="Message..."
-                    className="w-full px-6 py-4 pr-14 rounded-full bg-white/70 backdrop-blur-sm border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 font-light focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 text-base"
-                    disabled={isLoading}
-                  />
+        <div className="p-6 bg-white/30 backdrop-blur-xl border-t border-neutral-200/30">
+          <div className="max-w-3xl mx-auto">
+            <form id="chat-form" onSubmit={handleSubmit} className="relative">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={handleInputChange}
+                  placeholder="请输入消息..."
+                  className="w-full px-6 py-4 pr-20 rounded-full bg-white/70 backdrop-blur-sm border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 font-light focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 text-base"
+                  disabled={isLoading}
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBaziDialog(true)}
+                    className="w-10 h-10 rounded-full bg-white/80 hover:bg-white border border-neutral-200/40 flex items-center justify-center text-neutral-600 hover:text-neutral-800 transition-all duration-300"
+                    title="八字分析"
+                  >
+                    <Calendar className="w-4 h-4" />
+                  </button>
                   <button
                     type="submit"
                     disabled={!input.trim() || isLoading}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-white hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
+                    className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-white hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
                   >
                     <Send className="w-4 h-4" />
                   </button>
                 </div>
-              </form>
-            </div>
+              </div>
+            </form>
           </div>
-        )}
+        </div>
+
+        {/* Bazi Dialog */}
+        <BaziDialog
+          isOpen={showBaziDialog}
+          onClose={() => setShowBaziDialog(false)}
+          onSubmit={handleBaziSubmit}
+        />
       </div>
     </div>
   )
