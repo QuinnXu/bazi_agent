@@ -196,8 +196,25 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
               <span className="text-sm font-light text-neutral-700">女性</span>
             </label>
           </div>
-          
-          <div className="flex justify-end space-x-3 pt-4">
+            <div className="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setBaziData({
+                  year: '1994',
+                  month: '9',
+                  day: '23',
+                  hour: '8',
+                  isSolar: true,
+                  isFemale: false,
+                  longitude: '121.5',
+                  latitude: '31.2'
+                });
+              }}
+              className="px-4 py-2 rounded-full bg-blue-100 text-blue-700 text-sm font-light hover:bg-blue-200 transition-all duration-300"
+            >
+              示例
+            </button>
             <button
               type="button"
               onClick={onClose}

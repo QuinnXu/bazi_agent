@@ -1,25 +1,15 @@
 export async function POST(req: Request) {
   try {
     console.log('Chat API called');
-    const { messages, baziData } = await req.json();
+    const { messages, baziAnalysisResult } = await req.json();
     console.log('Messages received:', messages);
-    console.log('Bazi data received:', baziData);
+    console.log('Bazi analysis result received:', baziAnalysisResult);
 
     // Build system prompt with potential Bazi context
     let systemPrompt = "你是一个友好、专业的AI助手，可以用中文和英文与用户交流。";
     
-    if (baziData) {
-      systemPrompt += `\n\n你还是一位精通八字命理的专业命理师。用户的八字信息如下：
-- 出生年份：${baziData.year}年
-- 出生月份：${baziData.month}月
-- 出生日期：${baziData.day}日
-- 出生时辰：${baziData.hour}时
-- 历法：${baziData.isSolar ? '公历' : '农历'}
-- 性别：${baziData.isFemale ? '女' : '男'}
-- 出生地经度：${baziData.longitude}
-- 出生地纬度：${baziData.latitude}
-
-请根据用户的问题，结合八字命理知识为用户提供专业、准确的分析和建议。`;
+    if (baziAnalysisResult) {
+      systemPrompt += `\n\n你还是一位精通八字命理的专业命理师。用户的八字信息如下：\n${baziAnalysisResult}\n\n请根据用户的问题，结合八字命理知识为用户提供专业、准确的分析和建议。`;
     }
 
     // Add system message to the beginning

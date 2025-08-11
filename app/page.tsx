@@ -42,6 +42,11 @@ export default function Home() {
     scrollToBottom()
   }, [messages])
 
+  // Debug effect to track baziAnalysisResult changes
+  useEffect(() => {
+    console.log('baziAnalysisResult state changed:', baziAnalysisResult ? baziAnalysisResult.substring(0, 50) + '...' : 'null');
+  }, [baziAnalysisResult])
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInput(e.target.value);
   }
@@ -77,23 +82,12 @@ export default function Home() {
         }))
       };
       
-      // Check if user message contains Bazi-related keywords and we have Bazi data
-      const isBaziRelated = userMessage.content.toLowerCase().includes('八字') || 
-                           userMessage.content.toLowerCase().includes('命理') || 
-                           userMessage.content.toLowerCase().includes('运势');
-      
-      if (isBaziRelated && baziData) {
-        requestData.baziData = {
-          year: parseInt(baziData.year),
-          month: parseInt(baziData.month),
-          day: parseInt(baziData.day),
-          hour: parseInt(baziData.hour),
-          isSolar: baziData.isSolar,
-          isFemale: baziData.isFemale,
-          longitude: parseFloat(baziData.longitude),
-          latitude: parseFloat(baziData.latitude)
-        };
-        console.log('Including Bazi data in chat request:', requestData.baziData);
+      // Include Bazi analysis result if available
+      if (baziAnalysisResult) {
+        requestData.baziAnalysisResult = baziAnalysisResult;
+        console.log('Including Bazi analysis result in chat request:', baziAnalysisResult.substring(0, 50) + '...');
+      } else {
+        console.log('No Bazi analysis result available');
       }
       
       const response = await fetch('/api/chat', {
@@ -176,9 +170,11 @@ export default function Home() {
       
       if (response.ok) {
         // Store the complete Bazi analysis result and data
+        console.log('Full response from bazi API:', result);
         setBaziAnalysisResult(result.baziResult);
         setBaziData(data);
         console.log('Bazi analysis result stored:', result.baziResult);
+        console.log('Bazi analysis result stored (length):', result.baziResult?.length);
         setShowBaziDialog(false);
         
         // Add informational message to chat
@@ -302,8 +298,8 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setShowBaziDialog(true)}
-                    className="w-10 h-10 rounded-full bg-white/80 hover:bg-white border border-neutral-200/40 flex items-center justify-center text-neutral-600 hover:text-neutral-800 transition-all duration-300"
-                    title="八字分析"
+                    className={`w-10 h-10 rounded-full ${baziAnalysisResult ? 'bg-green-100 border-green-300 text-green-600' : 'bg-white/80 border-neutral-200/40 text-neutral-600'} hover:bg-white border flex items-center justify-center hover:text-neutral-800 transition-all duration-300`}
+                    title={baziAnalysisResult ? "八字已设置" : "八字分析"}
                   >
                     <Calendar className="w-4 h-4" />
                   </button>
