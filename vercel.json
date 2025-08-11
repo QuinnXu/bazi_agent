@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
+  ],
+  "env": {
+    "DEEPSEEK_API_KEY": "@deepseek-api-key",
+    "DEEPSEEK_BASE_URL": "https://api.deepseek.com/v1"
+  },
+  "functions": {
+    "app/api/chat/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/bazi/route.ts": {
+      "maxDuration": 10
+    }
+  }
+}
