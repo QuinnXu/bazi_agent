@@ -31,10 +31,10 @@ export async function POST(req: Request) {
         'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: 'deepseek-reasoner',
         messages: messagesWithSystem,
         temperature: 0.7,
-        max_tokens: 2000,
+        max_tokens: 4000,
         stream: true,
       }),
     });
@@ -50,6 +50,9 @@ export async function POST(req: Request) {
       async start(controller) {
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
+        let buffer = '';
+        let isInThinking = false;
+        let thinkingContent = '';
 
         if (!reader) {
           controller.close();
@@ -66,7 +69,9 @@ export async function POST(req: Request) {
             }
 
             const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split('\n');
+            buffer += chunk;
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
             for (const line of lines) {
               if (line.trim() === '') continue;
@@ -81,11 +86,43 @@ export async function POST(req: Request) {
 
                 try {
                   const parsed = JSON.parse(data);
-                  const content = parsed.choices?.[0]?.delta?.content;
+                  let content = parsed.choices?.[0]?.delta?.content || '';
                   
                   if (content) {
-                    // Send the content as plain text
-                    controller.enqueue(new TextEncoder().encode(content));
+                    // Process thinking tags for deepseek-reasoner
+                    let processedContent = '';
+                    let tempContent = content;
+                    
+                    while (tempContent.length > 0) {
+                      if (isInThinking) {
+                        const thinkingEndIndex = tempContent.indexOf('</thinking>');
+                        if (thinkingEndIndex !== -1) {
+                          thinkingContent += tempContent.substring(0, thinkingEndIndex);
+                          isInThinking = false;
+                          tempContent = tempContent.substring(thinkingEndIndex + '</thinking>'.length);
+                          // Don't send thinking content to frontend
+                        } else {
+                          thinkingContent += tempContent;
+                          tempContent = '';
+                        }
+                      } else {
+                        const thinkingStartIndex = tempContent.indexOf('<thinking>');
+                        if (thinkingStartIndex !== -1) {
+                          processedContent += tempContent.substring(0, thinkingStartIndex);
+                          isInThinking = true;
+                          thinkingContent = '';
+                          tempContent = tempContent.substring(thinkingStartIndex + '<thinking>'.length);
+                        } else {
+                          processedContent += tempContent;
+                          tempContent = '';
+                        }
+                      }
+                    }
+                    
+                    // Only send non-thinking content
+                    if (processedContent) {
+                      controller.enqueue(new TextEncoder().encode(processedContent));
+                    }
                   }
                 } catch (e) {
                   console.error('Error parsing streaming data:', e);
