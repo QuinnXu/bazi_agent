@@ -1,3 +1,7 @@
+// Runtime configuration for Vercel
+export const runtime = 'nodejs'
+export const maxDuration = 10
+
 import { analyzeBazi } from '@/tool/tool/paipan';
 
 export async function POST(req: Request) {
