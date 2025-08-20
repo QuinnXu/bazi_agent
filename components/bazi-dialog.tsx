@@ -31,11 +31,14 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
     longitude: '121.5',
     latitude: '31.2'
   });
-
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
     setBaziData(prev => ({ ...prev, [name]: val }));
+  };
+
+  const handleGenderChange = (isFemale: boolean) => {
+    setBaziData(prev => ({ ...prev, isFemale }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -129,7 +132,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
             </div>
             <div>
               <label className="block text-sm font-light text-neutral-700 mb-1">
-                时辰
+                时间（小时取整数即可）
               </label>
               <input
                 type="number"
@@ -148,7 +151,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-light text-neutral-700 mb-1">
-                经度
+                经度（默认为上海同经度地区）
               </label>
               <input
                 type="text"
@@ -161,7 +164,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
             </div>
             <div>
               <label className="block text-sm font-light text-neutral-700 mb-1">
-                纬度
+                纬度（后续地区功能开发中）
               </label>
               <input
                 type="text"
@@ -173,8 +176,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
               />
             </div>
           </div>
-          
-          <div className="flex items-center space-x-6 py-2">
+            <div className="flex items-center justify-between py-2">
             <label className="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -185,26 +187,42 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
               />
               <span className="text-sm font-light text-neutral-700">阳历</span>
             </label>
-            <label className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                name="isFemale"
-                checked={baziData.isFemale}
-                onChange={handleInputChange}
-                className="rounded text-neutral-800 focus:ring-neutral-500"
-              />
-              <span className="text-sm font-light text-neutral-700">女性</span>
-            </label>
+            
+            <div className="flex items-center space-x-1">
+              <span className="text-sm font-light text-neutral-700 mr-3">性别:</span>
+              <button
+                type="button"
+                onClick={() => handleGenderChange(false)}
+                className={`px-3 py-1 rounded-full text-xs font-light transition-all duration-300 ${
+                  !baziData.isFemale 
+                    ? 'bg-neutral-800 text-white' 
+                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                }`}
+              >
+                男性
+              </button>
+              <button
+                type="button"
+                onClick={() => handleGenderChange(true)}
+                className={`px-3 py-1 rounded-full text-xs font-light transition-all duration-300 ${
+                  baziData.isFemale 
+                    ? 'bg-neutral-800 text-white' 
+                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                }`}
+              >
+                女性
+              </button>
+            </div>
           </div>
             <div className="flex justify-end space-x-3 pt-4">
             <button
               type="button"
               onClick={() => {
                 setBaziData({
-                  year: '1994',
-                  month: '9',
-                  day: '23',
-                  hour: '8',
+                  year: '2000',
+                  month: '1',
+                  day: '1',
+                  hour: '15',
                   isSolar: true,
                   isFemale: false,
                   longitude: '121.5',

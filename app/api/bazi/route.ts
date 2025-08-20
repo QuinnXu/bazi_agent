@@ -1,6 +1,6 @@
 // Runtime configuration for Vercel
 export const runtime = 'nodejs'
-export const maxDuration = 10
+export const maxDuration = 300
 
 import { analyzeBazi } from '@/tool/tool/paipan';
 

@@ -196,10 +196,12 @@ export default function Home() {
   }
 
   const suggestedPrompts = [
-    "帮我头脑风暴一些想法",
-    "解释一个复杂的概念", 
-    "写一些创意内容",
-    "解决一个问题",
+    "我今年事业运如何？",
+    "我该如何进行感情规划？", 
+    "帮我分析一下我的命局",
+    "我的感情状况如何",
+    "我的性格呈现怎样的特点？",
+    "我有哪些特殊的格局",
   ]
 
   const startWithPrompt = (prompt: string) => {
@@ -226,11 +228,11 @@ export default function Home() {
               <div className="text-center space-y-12 py-20">
                 <div className="space-y-8">
                   <h1 className="text-4xl md:text-6xl font-light text-neutral-800 leading-tight">
-                    今天我如何帮助您？
+                    认识更清楚的自己
                   </h1>
 
                   <p className="text-lg text-neutral-600 max-w-xl mx-auto leading-relaxed font-light">
-                    开始下面的对话或进行八字分析
+                    点击右下输入生辰，开始对话进行命理分析
                   </p>
                 </div>
 
@@ -282,7 +284,7 @@ export default function Home() {
         </div>
 
         {/* Input Area */}
-        <div className="p-6 bg-white/30 backdrop-blur-xl border-t border-neutral-200/30">
+        <div className="p-10 bg-white/30 backdrop-blur-xl border-t border-neutral-200/30">
           <div className="max-w-3xl mx-auto">
             <form id="chat-form" onSubmit={handleSubmit} className="relative">
               <div className="relative">
@@ -290,7 +292,7 @@ export default function Home() {
                   type="text"
                   value={input}
                   onChange={handleInputChange}
-                  placeholder="请输入消息..."
+                  placeholder="请点击右侧按钮输入生辰后，输入您想咨询的问题..."
                   className="w-full px-6 py-4 pr-20 rounded-full bg-white/70 backdrop-blur-sm border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 font-light focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 text-base"
                   disabled={isLoading}
                 />
