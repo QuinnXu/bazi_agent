@@ -2,11 +2,6 @@
 
 import React, { useState, useEffect } from "react"
 import { Calendar, X, ChevronDown, MapPin, Clock } from "lucide-react"
-import { Calendar as CalendarComponent } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Button } from "@/components/ui/button"
-import { format } from "date-fns"
-import { zhCN } from "date-fns/locale"
 
 interface BaziData {
   year: string;
@@ -54,8 +49,6 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
   const [selectedProvince, setSelectedProvince] = useState<string>('');
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [isCustomLocation, setIsCustomLocation] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   // 加载地理位置数据
   useEffect(() => {
@@ -108,18 +101,6 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
       }
     }
   }, [selectedProvince, selectedCity, locationData, isCustomLocation]);
-
-  // 当选择日期时，更新年月日
-  useEffect(() => {
-    if (selectedDate) {
-      setBaziData(prev => ({
-        ...prev,
-        year: selectedDate.getFullYear().toString(),
-        month: (selectedDate.getMonth() + 1).toString(),
-        day: selectedDate.getDate().toString()
-      }));
-    }
-  }, [selectedDate]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -221,18 +202,19 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
             </label>
             <div className="grid grid-cols-3 gap-4">
               {/* 年份输入 */}
-              <div>
+              <div className="relative">
                 <input
-                  type="number"
+                  type="text"
                   name="year"
                   value={baziData.year}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                  placeholder="年份"
-                  min="1900"
-                  max="2030"
+                  className="w-full px-3 py-2 pr-8 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  placeholder="1995"
                   required
                 />
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-500 text-sm font-light pointer-events-none">
+                  年
+                </span>
               </div>
               
               {/* 月份下拉选择 */}
@@ -254,18 +236,19 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
               </div>
               
               {/* 日期输入 */}
-              <div>
+              <div className="relative">
                 <input
-                  type="number"
+                  type="text"
                   name="day"
                   value={baziData.day}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                  placeholder="日"
-                  min="1"
-                  max="31"
+                  className="w-full px-3 py-2 pr-8 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  placeholder="1"
                   required
                 />
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-500 text-sm font-light pointer-events-none">
+                  日
+                </span>
               </div>
             </div>
           </div>
@@ -293,20 +276,17 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
                 <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
               </div>
               <div className="relative">
-                <select
+                <input
+                  type="text"
                   value={baziData.minute}
                   onChange={(e) => handleTimeChange('minute', e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                  className="w-full px-3 py-2 pr-8 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  placeholder="00"
                   required
-                >
-                  <option value="">分</option>
-                  {generateTimeOptions(60).map(minute => (
-                    <option key={minute} value={minute}>
-                      {minute}分
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                />
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-500 text-sm font-light pointer-events-none">
+                  分
+                </span>
               </div>
             </div>
           </div>
