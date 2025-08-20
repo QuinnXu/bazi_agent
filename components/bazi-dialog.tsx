@@ -1,13 +1,19 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { Calendar, X, ChevronDown } from "lucide-react"
+import { Calendar, X, ChevronDown, MapPin, Clock } from "lucide-react"
+import { Calendar as CalendarComponent } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Button } from "@/components/ui/button"
+import { format } from "date-fns"
+import { zhCN } from "date-fns/locale"
 
 interface BaziData {
   year: string;
   month: string;
   day: string;
   hour: string;
+  minute: string;
   isSolar: boolean;
   isFemale: boolean;
   longitude: string;
@@ -31,10 +37,11 @@ interface LocationData {
 
 export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
   const [baziData, setBaziData] = useState<BaziData>({
-    year: '',
-    month: '',
-    day: '',
+    year: '1995',
+    month: '1',
+    day: '1',
     hour: '',
+    minute: '',
     isSolar: true,
     isFemale: false,
     longitude: '121.5',
@@ -46,6 +53,9 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
   const [cities, setCities] = useState<string[]>([]);
   const [selectedProvince, setSelectedProvince] = useState<string>('');
   const [selectedCity, setSelectedCity] = useState<string>('');
+  const [isCustomLocation, setIsCustomLocation] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   // 加载地理位置数据
   useEffect(() => {
@@ -85,7 +95,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
 
   // 当选择城市时，更新经纬度
   useEffect(() => {
-    if (selectedProvince && selectedCity && locationData.length > 0) {
+    if (selectedProvince && selectedCity && locationData.length > 0 && !isCustomLocation) {
       const location = locationData.find(
         item => item.province === selectedProvince && item.city === selectedCity
       );
@@ -97,7 +107,19 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
         }));
       }
     }
-  }, [selectedProvince, selectedCity, locationData]);
+  }, [selectedProvince, selectedCity, locationData, isCustomLocation]);
+
+  // 当选择日期时，更新年月日
+  useEffect(() => {
+    if (selectedDate) {
+      setBaziData(prev => ({
+        ...prev,
+        year: selectedDate.getFullYear().toString(),
+        month: (selectedDate.getMonth() + 1).toString(),
+        day: selectedDate.getDate().toString()
+      }));
+    }
+  }, [selectedDate]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -119,6 +141,19 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
     setSelectedCity(city);
   };
 
+  const handleLocationModeToggle = () => {
+    setIsCustomLocation(!isCustomLocation);
+    if (!isCustomLocation) {
+      // 切换到自定义模式时，清除省市选择
+      setSelectedProvince('');
+      setSelectedCity('');
+    }
+  };
+
+  const handleTimeChange = (field: 'hour' | 'minute', value: string) => {
+    setBaziData(prev => ({ ...prev, [field]: value }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -129,6 +164,24 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
     }
     
     onSubmit(baziData);
+  };
+
+  const generateTimeOptions = (max: number) => {
+    return Array.from({ length: max }, (_, i) => 
+      i.toString().padStart(2, '0')
+    );
+  };
+
+  // 生成月份选项
+  const generateMonthOptions = () => {
+    const months = [
+      '一月', '二月', '三月', '四月', '五月', '六月',
+      '七月', '八月', '九月', '十月', '十一月', '十二月'
+    ];
+    return months.map((month, index) => ({
+      value: (index + 1).toString(),
+      label: month
+    }));
   };
 
   if (!isOpen) return null;
@@ -161,146 +214,195 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
 
         {/* 表单 */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-light text-neutral-700 mb-1">
-                年份
-              </label>
-              <input
-                type="number"
-                name="year"
-                value={baziData.year}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                placeholder="1990"
-                required
-              />
+          {/* 日期选择 */}
+          <div className="space-y-3">
+            <label className="block text-sm font-light text-neutral-700">
+              出生日期
+            </label>
+            <div className="grid grid-cols-3 gap-4">
+              {/* 年份输入 */}
+              <div>
+                <input
+                  type="number"
+                  name="year"
+                  value={baziData.year}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  placeholder="年份"
+                  min="1900"
+                  max="2030"
+                  required
+                />
+              </div>
+              
+              {/* 月份下拉选择 */}
+              <div className="relative">
+                <select
+                  name="month"
+                  value={baziData.month}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                  required
+                >
+                  {generateMonthOptions().map(month => (
+                    <option key={month.value} value={month.value}>
+                      {month.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+              </div>
+              
+              {/* 日期输入 */}
+              <div>
+                <input
+                  type="number"
+                  name="day"
+                  value={baziData.day}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  placeholder="日"
+                  min="1"
+                  max="31"
+                  required
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-light text-neutral-700 mb-1">
-                月份
-              </label>
-              <input
-                type="number"
-                name="month"
-                value={baziData.month}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                placeholder="1-12"
-                min="1"
-                max="12"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-light text-neutral-700 mb-1">
-                日期
-              </label>
-              <input
-                type="number"
-                name="day"
-                value={baziData.day}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                placeholder="1-31"
-                min="1"
-                max="31"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-light text-neutral-700 mb-1">
-                时间（小时取整数即可）
-              </label>
-              <input
-                type="number"
-                name="hour"
-                value={baziData.hour}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                placeholder="0-23"
-                min="0"
-                max="23"
-                required
-              />
+          </div>
+
+          {/* 时间选择 */}
+          <div className="space-y-3">
+            <label className="block text-sm font-light text-neutral-700">
+              出生时间
+            </label>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="relative">
+                <select
+                  value={baziData.hour}
+                  onChange={(e) => handleTimeChange('hour', e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                  required
+                >
+                  <option value="">时</option>
+                  {generateTimeOptions(24).map(hour => (
+                    <option key={hour} value={hour}>
+                      {hour}时
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+              </div>
+              <div className="relative">
+                <select
+                  value={baziData.minute}
+                  onChange={(e) => handleTimeChange('minute', e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                  required
+                >
+                  <option value="">分</option>
+                  {generateTimeOptions(60).map(minute => (
+                    <option key={minute} value={minute}>
+                      {minute}分
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+              </div>
             </div>
           </div>
           
-          {/* 地理位置选择 */}
+          {/* 地理位置设置 */}
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="relative">
-                <label className="block text-sm font-light text-neutral-700 mb-1">
-                  省份
-                </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-light text-neutral-700">
+                出生地点
+              </label>
+              <button
+                type="button"
+                onClick={handleLocationModeToggle}
+                className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-light transition-all duration-300 ${
+                  isCustomLocation 
+                    ? 'bg-neutral-800 text-white' 
+                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                }`}
+              >
+                <MapPin className="w-3 h-3" />
+                自定义经纬度
+              </button>
+            </div>
+
+            {!isCustomLocation ? (
+              // 省市选择模式
+              <div className="grid grid-cols-2 gap-4">
                 <div className="relative">
-                  <select
-                    value={selectedProvince}
-                    onChange={handleProvinceChange}
-                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
-                  >
-                    <option value="">请选择省份</option>
-                    {provinces.map(province => (
-                      <option key={province} value={province}>
-                        {province}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                  <div className="relative">
+                    <select
+                      value={selectedProvince}
+                      onChange={handleProvinceChange}
+                      className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                    >
+                      <option value="">请选择省份</option>
+                      {provinces.map(province => (
+                        <option key={province} value={province}>
+                          {province}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                  </div>
+                </div>
+                <div className="relative">
+                  <div className="relative">
+                    <select
+                      value={selectedCity}
+                      onChange={handleCityChange}
+                      disabled={!selectedProvince}
+                      className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">请选择城市</option>
+                      {cities.map(city => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                  </div>
                 </div>
               </div>
-              <div className="relative">
-                <label className="block text-sm font-light text-neutral-700 mb-1">
-                  城市
-                </label>
-                <div className="relative">
-                  <select
-                    value={selectedCity}
-                    onChange={handleCityChange}
-                    disabled={!selectedProvince}
-                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <option value="">请选择城市</option>
-                    {cities.map(city => (
-                      <option key={city} value={city}>
-                        {city}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+            ) : (
+              // 自定义经纬度模式
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-light text-neutral-600 mb-1">
+                    经度
+                  </label>
+                  <input
+                    type="number"
+                    name="longitude"
+                    value={baziData.longitude}
+                    onChange={handleInputChange}
+                    step="0.000001"
+                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                    placeholder="121.5"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-light text-neutral-600 mb-1">
+                    纬度
+                  </label>
+                  <input
+                    type="number"
+                    name="latitude"
+                    value={baziData.latitude}
+                    onChange={handleInputChange}
+                    step="0.000001"
+                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                    placeholder="31.2"
+                  />
                 </div>
               </div>
-            </div>
-            
-            {/* 显示当前经纬度 */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-light text-neutral-700 mb-1">
-                  经度
-                </label>
-                <input
-                  type="text"
-                  name="longitude"
-                  value={baziData.longitude}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-50 border border-neutral-200/40 text-neutral-600 text-sm font-light focus:outline-none"
-                  readOnly
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-light text-neutral-700 mb-1">
-                  纬度
-                </label>
-                <input
-                  type="text"
-                  name="latitude"
-                  value={baziData.latitude}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-50 border border-neutral-200/40 text-neutral-600 text-sm font-light focus:outline-none"
-                  readOnly
-                />
-              </div>
-            </div>
+            )}
           </div>
           
           <div className="flex items-center justify-between py-2">
@@ -351,6 +453,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
                   month: '1',
                   day: '1',
                   hour: '15',
+                  minute: '30',
                   isSolar: true,
                   isFemale: false,
                   longitude: '121.48053886017651',
@@ -358,6 +461,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
                 });
                 setSelectedProvince('上海市');
                 setSelectedCity('市辖区');
+                setIsCustomLocation(false);
               }}
               className="px-4 py-2 rounded-full bg-blue-100 text-blue-700 text-sm font-light hover:bg-blue-200 transition-all duration-300"
             >
