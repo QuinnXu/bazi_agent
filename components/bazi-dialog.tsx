@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useState } from "react"
-import { Calendar, X } from "lucide-react"
+import React, { useState, useEffect } from "react"
+import { Calendar, X, ChevronDown } from "lucide-react"
 
 interface BaziData {
   year: string;
@@ -20,6 +20,15 @@ interface BaziDialogProps {
   onSubmit: (data: BaziData) => void;
 }
 
+interface LocationData {
+  area: string;
+  city: string;
+  country: string;
+  lat: string;
+  lng: string;
+  province: string;
+}
+
 export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
   const [baziData, setBaziData] = useState<BaziData>({
     year: '',
@@ -31,6 +40,65 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
     longitude: '121.5',
     latitude: '31.2'
   });
+
+  const [locationData, setLocationData] = useState<LocationData[]>([]);
+  const [provinces, setProvinces] = useState<string[]>([]);
+  const [cities, setCities] = useState<string[]>([]);
+  const [selectedProvince, setSelectedProvince] = useState<string>('');
+  const [selectedCity, setSelectedCity] = useState<string>('');
+
+  // 加载地理位置数据
+  useEffect(() => {
+    if (isOpen) {
+      fetch('/geodata/data.json')
+        .then(response => response.json())
+        .then((data: LocationData[]) => {
+          setLocationData(data);
+          
+          // 提取省份列表（去重）
+          const uniqueProvinces = Array.from(
+            new Set(data.map(item => item.province).filter(Boolean))
+          );
+          setProvinces(uniqueProvinces);
+        })
+        .catch(error => {
+          console.error('加载地理位置数据失败:', error);
+        });
+    }
+  }, [isOpen]);
+
+  // 当选择省份时，更新城市列表
+  useEffect(() => {
+    if (selectedProvince && locationData.length > 0) {
+      const provinceCities = Array.from(
+        new Set(
+          locationData
+            .filter(item => item.province === selectedProvince)
+            .map(item => item.city)
+            .filter(Boolean)
+        )
+      );
+      setCities(provinceCities);
+      setSelectedCity(''); // 重置城市选择
+    }
+  }, [selectedProvince, locationData]);
+
+  // 当选择城市时，更新经纬度
+  useEffect(() => {
+    if (selectedProvince && selectedCity && locationData.length > 0) {
+      const location = locationData.find(
+        item => item.province === selectedProvince && item.city === selectedCity
+      );
+      if (location) {
+        setBaziData(prev => ({
+          ...prev,
+          longitude: location.lng,
+          latitude: location.lat
+        }));
+      }
+    }
+  }, [selectedProvince, selectedCity, locationData]);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
@@ -39,6 +107,16 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
 
   const handleGenderChange = (isFemale: boolean) => {
     setBaziData(prev => ({ ...prev, isFemale }));
+  };
+
+  const handleProvinceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const province = e.target.value;
+    setSelectedProvince(province);
+  };
+
+  const handleCityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const city = e.target.value;
+    setSelectedCity(city);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -148,35 +226,84 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
             </div>
           </div>
           
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-light text-neutral-700 mb-1">
-                经度（默认为上海同经度地区）
-              </label>
-              <input
-                type="text"
-                name="longitude"
-                value={baziData.longitude}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                placeholder="121.5"
-              />
+          {/* 地理位置选择 */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="relative">
+                <label className="block text-sm font-light text-neutral-700 mb-1">
+                  省份
+                </label>
+                <div className="relative">
+                  <select
+                    value={selectedProvince}
+                    onChange={handleProvinceChange}
+                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                  >
+                    <option value="">请选择省份</option>
+                    {provinces.map(province => (
+                      <option key={province} value={province}>
+                        {province}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                </div>
+              </div>
+              <div className="relative">
+                <label className="block text-sm font-light text-neutral-700 mb-1">
+                  城市
+                </label>
+                <div className="relative">
+                  <select
+                    value={selectedCity}
+                    onChange={handleCityChange}
+                    disabled={!selectedProvince}
+                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="">请选择城市</option>
+                    {cities.map(city => (
+                      <option key={city} value={city}>
+                        {city}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-light text-neutral-700 mb-1">
-                纬度（后续地区功能开发中）
-              </label>
-              <input
-                type="text"
-                name="latitude"
-                value={baziData.latitude}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
-                placeholder="31.2"
-              />
+            
+            {/* 显示当前经纬度 */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-light text-neutral-700 mb-1">
+                  经度
+                </label>
+                <input
+                  type="text"
+                  name="longitude"
+                  value={baziData.longitude}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 rounded-lg bg-neutral-50 border border-neutral-200/40 text-neutral-600 text-sm font-light focus:outline-none"
+                  readOnly
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-light text-neutral-700 mb-1">
+                  纬度
+                </label>
+                <input
+                  type="text"
+                  name="latitude"
+                  value={baziData.latitude}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 rounded-lg bg-neutral-50 border border-neutral-200/40 text-neutral-600 text-sm font-light focus:outline-none"
+                  readOnly
+                />
+              </div>
             </div>
           </div>
-            <div className="flex items-center justify-between py-2">
+          
+          <div className="flex items-center justify-between py-2">
             <label className="flex items-center space-x-2">
               <input
                 type="checkbox"
@@ -214,7 +341,8 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
               </button>
             </div>
           </div>
-            <div className="flex justify-end space-x-3 pt-4">
+          
+          <div className="flex justify-end space-x-3 pt-4">
             <button
               type="button"
               onClick={() => {
@@ -225,9 +353,11 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
                   hour: '15',
                   isSolar: true,
                   isFemale: false,
-                  longitude: '121.5',
-                  latitude: '31.2'
+                  longitude: '121.48053886017651',
+                  latitude: '31.235929042252014'
                 });
+                setSelectedProvince('上海市');
+                setSelectedCity('市辖区');
               }}
               className="px-4 py-2 rounded-full bg-blue-100 text-blue-700 text-sm font-light hover:bg-blue-200 transition-all duration-300"
             >
