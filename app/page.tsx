@@ -31,6 +31,7 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isStreamingStarted, setIsStreamingStarted] = useState(false)
   const [baziData, setBaziData] = useState<BaziData | null>(null)
   const [baziAnalysisResult, setBaziAnalysisResult] = useState<string | null>(null)
 
@@ -70,6 +71,7 @@ export default function Home() {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+    setIsStreamingStarted(false); // 重置流式状态
 
     try {
       console.log('Making chat request...');
@@ -122,6 +124,11 @@ export default function Home() {
 
           const chunk = decoder.decode(value, { stream: true });
           
+          // 标记流式响应已开始
+          if (!isStreamingStarted && chunk.trim()) {
+            setIsStreamingStarted(true);
+          }
+          
           // Update the assistant message with the new content
           setMessages(prev => 
             prev.map(msg => 
@@ -143,6 +150,7 @@ export default function Home() {
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
+      setIsStreamingStarted(false); // 重置状态
     }
   }
 
@@ -221,11 +229,11 @@ export default function Home() {
 
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto px-4 py-8">
+        <div className="flex-1 overflow-y-auto px-4 py-4">
           <div className="max-w-3xl mx-auto">
             {messages.length === 0 ? (
               // Welcome Screen
-              <div className="text-center space-y-12 py-20">
+              <div className="text-center space-y-12 py-12">
                 <div className="space-y-8">
                   <h1 className="text-4xl md:text-6xl font-light text-neutral-800 leading-tight">
                     认识更清楚的自己
@@ -253,11 +261,11 @@ export default function Home() {
               </div>
             ) : (
               // Chat Messages
-              <div className="space-y-8 py-8">
+              <div className="space-y-8 py-4">
                 {messages.map((message) => (
                   <ChatMessage key={message.id} message={message} />
                 ))}
-                {isLoading && (
+                {isLoading && !isStreamingStarted && (
                   <div className="flex justify-start">
                     <div className="bg-white/70 backdrop-blur-sm border border-neutral-200/40 rounded-3xl px-6 py-4 max-w-xs">
                       <div className="flex items-center gap-3">
@@ -284,7 +292,7 @@ export default function Home() {
         </div>
 
         {/* Input Area */}
-        <div className="p-10 bg-white/30 backdrop-blur-xl border-t border-neutral-200/30">
+        <div className="p-4 bg-white/30 backdrop-blur-xl border-t border-neutral-200/30">
           <div className="max-w-3xl mx-auto">
             <form id="chat-form" onSubmit={handleSubmit} className="relative">
               <div className="relative">
