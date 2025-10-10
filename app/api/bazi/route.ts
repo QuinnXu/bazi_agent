@@ -7,10 +7,19 @@ import { analyzeBazi } from '@/tool/tool/paipan';
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { year, month, day, hour, isSolar, isFemale, longitude, latitude } = body;
+    let { year, month, day, hour, isSolar, isFemale, longitude, latitude } = body;
 
-    // Validate required fields
-    if (!year || !month || !day || !hour) {
+    // 将可能的字符串数值转为数字
+    year = year !== undefined ? Number(year) : undefined;
+    month = month !== undefined ? Number(month) : undefined;
+    day = day !== undefined ? Number(day) : undefined;
+    hour = hour !== undefined ? Number(hour) : undefined; // 允许 0 点
+
+    // 更严格的字段验证（避免 0 被误判）
+    if (
+      year === undefined || month === undefined || day === undefined || hour === undefined ||
+      [year, month, day, hour].some(v => Number.isNaN(v))
+    ) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields: year, month, day, hour' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
