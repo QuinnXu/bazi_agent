@@ -1,11 +1,13 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { Send, Calendar } from "lucide-react"
 import { MinimalBackground } from "@/components/minimal-background"
 import { ChatMessage } from "@/components/chat-message"
 import { BaziDialog } from "@/components/bazi-dialog"
+import { SuggestedPromptButton } from "@/components/suggested-prompt-button"
+import { DonationButton } from "@/components/donation-button"
 
 interface Message {
   id: string;
@@ -19,6 +21,7 @@ interface BaziData {
   month: string;
   day: string;
   hour: string;
+  minute: string;
   isSolar: boolean;
   isFemale: boolean;
   longitude: string;
@@ -35,29 +38,27 @@ export default function Home() {
   const [baziData, setBaziData] = useState<BaziData | null>(null)
   const [baziAnalysisResult, setBaziAnalysisResult] = useState<string | null>(null)
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
+  }, [])
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, scrollToBottom])
 
   // Debug effect to track baziAnalysisResult changes
   useEffect(() => {
     console.log('baziAnalysisResult state changed:', baziAnalysisResult ? baziAnalysisResult.substring(0, 50) + '...' : 'null');
   }, [baziAnalysisResult])
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setInput(e.target.value);
-  }
+  }, [])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    console.log('Form submitted with input:', input);
     
     if (!input.trim() || isLoading) {
-      console.log('Input is empty or loading, not submitting');
       return;
     }
 
@@ -68,14 +69,13 @@ export default function Home() {
       createdAt: new Date()
     };
 
+    // Use functional updates to avoid stale closure issues
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    setIsStreamingStarted(false); // 重置流式状态
+    setIsStreamingStarted(false);
 
     try {
-      console.log('Making chat request...');
-      
       // Prepare request data with potential Bazi context
       const requestData: any = {
         messages: [...messages, userMessage].map(m => ({
@@ -87,9 +87,6 @@ export default function Home() {
       // Include Bazi analysis result if available
       if (baziAnalysisResult) {
         requestData.baziAnalysisResult = baziAnalysisResult;
-        console.log('Including Bazi analysis result in chat request:', baziAnalysisResult.substring(0, 50) + '...');
-      } else {
-        console.log('No Bazi analysis result available');
       }
       
       const response = await fetch('/api/chat', {
@@ -150,9 +147,9 @@ export default function Home() {
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
-      setIsStreamingStarted(false); // 重置状态
+      setIsStreamingStarted(false);
     }
-  }
+  }, [input, isLoading, messages, baziAnalysisResult, isStreamingStarted])
 
   const handleBaziSubmit = async (data: BaziData) => {
     try {
@@ -203,25 +200,28 @@ export default function Home() {
     }
   }
 
-  const suggestedPrompts = [
+  const suggestedPrompts = useMemo(() => [
     "我今年事业运如何？",
     "我该如何进行感情规划？", 
     "帮我分析一下我的命局",
     "我的感情状况如何",
     "我的性格呈现怎样的特点？",
     "我有哪些特殊的格局",
-  ]
+  ], [])
 
-  const startWithPrompt = (prompt: string) => {
-    setInput(prompt);
-    // Automatically submit after setting the input
-    setTimeout(() => {
-      const syntheticEvent = {
-        preventDefault: () => {},
-      } as React.FormEvent;
-      handleSubmit(syntheticEvent);
-    }, 100);
-  }
+  const startWithPrompt = useCallback((prompt: string) => {
+    // 避免在主线程中执行耗时操作
+    requestAnimationFrame(() => {
+      setInput(prompt);
+      // 使用更短的延迟来提高响应性
+      setTimeout(() => {
+        const syntheticEvent = {
+          preventDefault: () => {},
+        } as React.FormEvent;
+        handleSubmit(syntheticEvent);
+      }, 50);
+    });
+  }, [handleSubmit]);
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-neutral-50">
@@ -248,13 +248,11 @@ export default function Home() {
                   {/* Minimal Suggested Prompts */}
                   <div className="flex flex-wrap gap-3 justify-center max-w-2xl mx-auto">
                     {suggestedPrompts.map((prompt, i) => (
-                      <button
-                        key={i}
-                        onClick={() => startWithPrompt(prompt)}
-                        className="px-4 py-2 rounded-full bg-white/60 backdrop-blur-sm border border-neutral-200/50 text-neutral-700 text-sm font-light hover:bg-white/80 hover:border-neutral-300/60 transition-all duration-300"
-                      >
-                        {prompt}
-                      </button>
+                      <SuggestedPromptButton 
+                        key={i} 
+                        prompt={prompt} 
+                        onClick={startWithPrompt}
+                      />
                     ))}
                   </div>
                 </div>
@@ -332,6 +330,9 @@ export default function Home() {
           onClose={() => setShowBaziDialog(false)}
           onSubmit={handleBaziSubmit}
         />
+
+        {/* Donation Button */}
+        <DonationButton />
       </div>
     </div>
   )

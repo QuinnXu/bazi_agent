@@ -4,10 +4,7 @@ export const maxDuration = 300
 
 export async function POST(req: Request) {
   try {
-    console.log('Chat API called');
     const { messages, baziAnalysisResult } = await req.json();
-    console.log('Messages received:', messages);
-    console.log('Bazi analysis result received:', baziAnalysisResult);
 
     // Build system prompt with potential Bazi context
     let systemPrompt = "你是一个友好、专业的八字命理师，你可以亲切的与用户交流回答他们的问题。如果用户询问八字、命理、运势相关问题但未提供生辰信息，请引导用户点击下方按钮输入生辰信息提供。";
@@ -35,10 +32,7 @@ ${baziAnalysisResult}`;
       ...messages
     ];
 
-    console.log('Calling DeepSeek API with system prompt:', systemPrompt.substring(0, 100) + '...');
-    console.log('API Key exists:', !!process.env.DEEPSEEK_API_KEY);
-    console.log('API Key prefix:', process.env.DEEPSEEK_API_KEY?.substring(0, 10));
-    console.log('Base URL:', process.env.DEEPSEEK_BASE_URL);
+    console.log('Calling DeepSeek API...');
 
     // Call DeepSeek API directly
     const response = await fetch(`${process.env.DEEPSEEK_BASE_URL}/chat/completions`, {

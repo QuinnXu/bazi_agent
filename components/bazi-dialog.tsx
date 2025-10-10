@@ -1,7 +1,8 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
-import { Calendar, X, ChevronDown, MapPin, Clock } from "lucide-react"
+import React, { useState, useEffect, useCallback, useMemo } from "react"
+import { Calendar, X, ChevronDown, MapPin } from "lucide-react"
+import { OptimizedSelect } from "./optimized-select"
 
 interface BaziData {
   year: string;
@@ -50,9 +51,26 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [isCustomLocation, setIsCustomLocation] = useState(false);
 
-  // 加载地理位置数据
+  // 静态月份选项 - 避免重复计算
+  const monthOptions = useMemo(() => {
+    const months = [
+      '一月', '二月', '三月', '四月', '五月', '六月',
+      '七月', '八月', '九月', '十月', '十一月', '十二月'
+    ];
+    return months.map((month, index) => ({
+      value: (index + 1).toString(),
+      label: month
+    }));
+  }, []);
+
+  // 静态时间选项 - 避免重复计算
+  const hourOptions = useMemo(() => 
+    Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')), []
+  );
+
+  // 加载地理位置数据 - 只加载一次
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && locationData.length === 0) {
       fetch('/geodata/data.json')
         .then(response => response.json())
         .then((data: LocationData[]) => {
@@ -68,7 +86,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
           console.error('加载地理位置数据失败:', error);
         });
     }
-  }, [isOpen]);
+  }, [isOpen, locationData.length]);
 
   // 当选择省份时，更新城市列表
   useEffect(() => {
@@ -102,40 +120,47 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
     }
   }, [selectedProvince, selectedCity, locationData, isCustomLocation]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value;
     setBaziData(prev => ({ ...prev, [name]: val }));
-  };
+  }, []);
 
-  const handleGenderChange = (isFemale: boolean) => {
+  const handleGenderChange = useCallback((isFemale: boolean) => {
     setBaziData(prev => ({ ...prev, isFemale }));
-  };
+  }, []);
 
-  const handleProvinceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleProvinceChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const province = e.target.value;
-    setSelectedProvince(province);
-  };
+    // 使用 requestAnimationFrame 来延迟状态更新，提高响应性
+    requestAnimationFrame(() => {
+      setSelectedProvince(province);
+    });
+  }, []);
 
-  const handleCityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleCityChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const city = e.target.value;
-    setSelectedCity(city);
-  };
+    requestAnimationFrame(() => {
+      setSelectedCity(city);
+    });
+  }, []);
 
-  const handleLocationModeToggle = () => {
-    setIsCustomLocation(!isCustomLocation);
-    if (!isCustomLocation) {
-      // 切换到自定义模式时，清除省市选择
-      setSelectedProvince('');
-      setSelectedCity('');
-    }
-  };
+  const handleLocationModeToggle = useCallback(() => {
+    setIsCustomLocation(prev => {
+      if (!prev) {
+        // 切换到自定义模式时，清除省市选择
+        setSelectedProvince('');
+        setSelectedCity('');
+      }
+      return !prev;
+    });
+  }, []);
 
-  const handleTimeChange = (field: 'hour' | 'minute', value: string) => {
+  const handleTimeChange = useCallback((field: 'hour' | 'minute', value: string) => {
     setBaziData(prev => ({ ...prev, [field]: value }));
-  };
+  }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     
     // 验证必填字段
@@ -145,25 +170,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
     }
     
     onSubmit(baziData);
-  };
-
-  const generateTimeOptions = (max: number) => {
-    return Array.from({ length: max }, (_, i) => 
-      i.toString().padStart(2, '0')
-    );
-  };
-
-  // 生成月份选项
-  const generateMonthOptions = () => {
-    const months = [
-      '一月', '二月', '三月', '四月', '五月', '六月',
-      '七月', '八月', '九月', '十月', '十一月', '十二月'
-    ];
-    return months.map((month, index) => ({
-      value: (index + 1).toString(),
-      label: month
-    }));
-  };
+  }, [baziData, onSubmit]);
 
   if (!isOpen) return null;
 
@@ -226,7 +233,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
                   className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
                   required
                 >
-                  {generateMonthOptions().map(month => (
+                  {monthOptions.map(month => (
                     <option key={month.value} value={month.value}>
                       {month.label}
                     </option>
@@ -267,7 +274,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
                   required
                 >
                   <option value="">时</option>
-                  {generateTimeOptions(24).map(hour => (
+                  {hourOptions.map(hour => (
                     <option key={hour} value={hour}>
                       {hour}时
                     </option>
@@ -314,41 +321,19 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
             {!isCustomLocation ? (
               // 省市选择模式
               <div className="grid grid-cols-2 gap-4">
-                <div className="relative">
-                  <div className="relative">
-                    <select
-                      value={selectedProvince}
-                      onChange={handleProvinceChange}
-                      className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
-                    >
-                      <option value="">请选择省份</option>
-                      {provinces.map(province => (
-                        <option key={province} value={province}>
-                          {province}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
-                  </div>
-                </div>
-                <div className="relative">
-                  <div className="relative">
-                    <select
-                      value={selectedCity}
-                      onChange={handleCityChange}
-                      disabled={!selectedProvince}
-                      className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <option value="">请选择城市</option>
-                      {cities.map(city => (
-                        <option key={city} value={city}>
-                          {city}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
-                  </div>
-                </div>
+                <OptimizedSelect
+                  value={selectedProvince}
+                  onChange={handleProvinceChange}
+                  options={provinces}
+                  placeholder="请选择省份"
+                />
+                <OptimizedSelect
+                  value={selectedCity}
+                  onChange={handleCityChange}
+                  options={cities}
+                  placeholder="请选择城市"
+                  disabled={!selectedProvince}
+                />
               </div>
             ) : (
               // 自定义经纬度模式
