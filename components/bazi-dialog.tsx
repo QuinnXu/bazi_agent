@@ -20,6 +20,7 @@ interface BaziDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (data: BaziData) => void;
+  initialData?: BaziData;
 }
 
 interface LocationData {
@@ -31,8 +32,8 @@ interface LocationData {
   province: string;
 }
 
-export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
-  const [baziData, setBaziData] = useState<BaziData>({
+export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialogProps) {
+  const [baziData, setBaziData] = useState<BaziData>(initialData || {
     year: '1995',
     month: '1',
     day: '1',
@@ -50,6 +51,13 @@ export function BaziDialog({ isOpen, onClose, onSubmit }: BaziDialogProps) {
   const [selectedProvince, setSelectedProvince] = useState<string>('');
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [isCustomLocation, setIsCustomLocation] = useState(false);
+
+  // 当 initialData 变化时更新 baziData
+  useEffect(() => {
+    if (initialData) {
+      setBaziData(initialData);
+    }
+  }, [initialData]);
 
   // 静态月份选项 - 避免重复计算
   const monthOptions = useMemo(() => {
