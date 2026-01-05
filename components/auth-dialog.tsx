@@ -1,0 +1,147 @@
+"use client"
+
+import React, { useState } from 'react'
+import { X, Mail, Lock, User } from 'lucide-react'
+import { useAuth } from '@/contexts/auth-context'
+
+interface AuthDialogProps {
+  isOpen: boolean
+  onClose: () => void
+  mode?: 'signin' | 'signup'
+}
+
+export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: AuthDialogProps) {  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { signIn, signUp } = useAuth()
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    try {
+      if (mode === 'signin') {
+        const { error } = await signIn(email, password)
+        if (error) {
+          setError(error.message || '登录失败，请检查邮箱和密码')
+        } else {
+          onClose()
+        }
+      } else {
+        const { error } = await signUp(email, password)
+        if (error) {
+          setError(error.message || '注册失败，请稍后重试')
+        } else {
+          setError(null)
+          alert('注册成功！请查收邮箱验证邮件。')
+          setMode('signin')
+        }
+      }
+    } catch (err) {
+      setError('操作失败，请稍后重试')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggleMode = () => {
+    setMode(mode === 'signin' ? 'signup' : 'signin')
+    setError(null)
+  }
+
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/* 背景遮罩 */}
+      <div 
+        className="fixed inset-0 bg-black/20 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      
+      {/* 弹窗内容 */}
+      <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-md w-full shadow-xl glass-minimal">
+        {/* 关闭按钮 */}
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
+        >
+          <X className="w-4 h-4 text-muted-foreground" />
+        </button>
+
+        {/* 标题 */}
+        <div className="mb-6">
+          <h2 className="text-2xl font-light text-foreground mb-2">
+            {mode === 'signin' ? '登录' : '注册'}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {mode === 'signin' ? '欢迎回来' : '创建您的账户'}
+          </p>
+        </div>        {/* 表单 */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-light text-foreground mb-2">
+              邮箱
+            </label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
+                placeholder="your@email.com"
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-light text-foreground mb-2">
+              密码
+            </label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
+                placeholder="••••••••"
+                required
+                minLength={6}
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
+          >
+            {loading ? '处理中...' : mode === 'signin' ? '登录' : '注册'}
+          </button>
+        </form>
+
+        {/* 切换模式 */}
+        <div className="mt-4 text-center">
+          <button
+            onClick={toggleMode}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {mode === 'signin' ? '还没有账户？立即注册' : '已有账户？立即登录'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

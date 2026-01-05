@@ -21,7 +21,7 @@ const SuggestedPromptButton = memo(function SuggestedPromptButton({
   return (
     <button
       onClick={handleClick}
-      className="px-4 py-2 rounded-full bg-white/60 backdrop-blur-sm border border-neutral-200/50 text-neutral-700 text-sm font-light hover:bg-white/80 hover:border-neutral-300/60 transition-all duration-300"
+      className="px-4 py-2 rounded-full bg-secondary/60 backdrop-blur-sm border border-border text-secondary-foreground text-sm font-light hover:bg-secondary/80 hover:border-primary/40 transition-all duration-300"
     >
       {prompt}
     </button>

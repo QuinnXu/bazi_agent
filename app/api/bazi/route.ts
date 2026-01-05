@@ -2,7 +2,7 @@
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
-import { analyzeBazi } from '@/tool/tool/paipan';
+import { analyzeBazi } from '@/tool/paipan';
 
 export async function POST(req: Request) {
   try {
