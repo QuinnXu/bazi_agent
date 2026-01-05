@@ -191,28 +191,28 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
       />
       
       {/* 弹窗内容 */}
-      <div className="relative bg-white/90 backdrop-blur-sm border border-neutral-200/40 rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-xl">
+      <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-xl glass-minimal">
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 w-8 h-8 rounded-full bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition-colors"
+          className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
         >
-          <X className="w-4 h-4 text-neutral-600" />
+          <X className="w-4 h-4 text-muted-foreground" />
         </button>
 
         {/* 标题 */}
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center">
-            <Calendar className="w-4 h-4 text-white" />
+          <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+            <Calendar className="w-4 h-4 text-primary-foreground" />
           </div>
-          <h2 className="text-xl font-light text-neutral-800">八字排盘</h2>
+          <h2 className="text-xl font-light text-foreground">八字排盘</h2>
         </div>
 
         {/* 表单 */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* 日期选择 */}
           <div className="space-y-3">
-            <label className="block text-sm font-light text-neutral-700">
+            <label className="block text-sm font-light text-foreground">
               出生日期
             </label>
             <div className="grid grid-cols-3 gap-4">
@@ -223,11 +223,11 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                   name="year"
                   value={baziData.year}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 pr-8 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  className="w-full px-3 py-2 pr-8 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                   placeholder="1995"
                   required
                 />
-                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-500 text-sm font-light pointer-events-none">
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground text-sm font-light pointer-events-none">
                   年
                 </span>
               </div>
@@ -238,7 +238,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                   name="month"
                   value={baziData.month}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                  className="w-full px-3 py-2 rounded-lg bg-card/60 border border-border text-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 appearance-none cursor-pointer"
                   required
                 >
                   {monthOptions.map(month => (
@@ -247,7 +247,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               </div>
               
               {/* 日期输入 */}
@@ -257,11 +257,11 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                   name="day"
                   value={baziData.day}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 pr-8 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  className="w-full px-3 py-2 pr-8 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                   placeholder="1"
                   required
                 />
-                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-500 text-sm font-light pointer-events-none">
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground text-sm font-light pointer-events-none">
                   日
                 </span>
               </div>
@@ -270,7 +270,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
 
           {/* 时间选择 */}
           <div className="space-y-3">
-            <label className="block text-sm font-light text-neutral-700">
+            <label className="block text-sm font-light text-foreground">
               出生时间
             </label>
             <div className="grid grid-cols-2 gap-4">
@@ -278,7 +278,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                 <select
                   value={baziData.hour}
                   onChange={(e) => handleTimeChange('hour', e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 appearance-none cursor-pointer"
+                  className="w-full px-3 py-2 rounded-lg bg-card/60 border border-border text-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 appearance-none cursor-pointer"
                   required
                 >
                   <option value="">时</option>
@@ -288,18 +288,18 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                     </option>
                   ))}
                 </select>
-                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-neutral-500 pointer-events-none" />
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
               </div>
               <div className="relative">
                 <input
                   type="text"
                   value={baziData.minute}
                   onChange={(e) => handleTimeChange('minute', e.target.value)}
-                  className="w-full px-3 py-2 pr-8 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                  className="w-full px-3 py-2 pr-8 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                   placeholder="00"
                   required
                 />
-                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-neutral-500 text-sm font-light pointer-events-none">
+                <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground text-sm font-light pointer-events-none">
                   分
                 </span>
               </div>
@@ -309,7 +309,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
           {/* 地理位置设置 */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label className="block text-sm font-light text-neutral-700">
+              <label className="block text-sm font-light text-foreground">
                 出生地点
               </label>
               <button
@@ -317,8 +317,8 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                 onClick={handleLocationModeToggle}
                 className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-light transition-all duration-300 ${
                   isCustomLocation 
-                    ? 'bg-neutral-800 text-white' 
-                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}
               >
                 <MapPin className="w-3 h-3" />
@@ -347,7 +347,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
               // 自定义经纬度模式
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-light text-neutral-600 mb-1">
+                  <label className="block text-xs font-light text-muted-foreground mb-1">
                     经度
                   </label>
                   <input
@@ -356,12 +356,12 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                     value={baziData.longitude}
                     onChange={handleInputChange}
                     step="0.000001"
-                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                    className="w-full px-3 py-2 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                     placeholder="121.5"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-light text-neutral-600 mb-1">
+                  <label className="block text-xs font-light text-muted-foreground mb-1">
                     纬度
                   </label>
                   <input
@@ -370,7 +370,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                     value={baziData.latitude}
                     onChange={handleInputChange}
                     step="0.000001"
-                    className="w-full px-3 py-2 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                    className="w-full px-3 py-2 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                     placeholder="31.2"
                   />
                 </div>
@@ -385,20 +385,20 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                 name="isSolar"
                 checked={baziData.isSolar}
                 onChange={handleInputChange}
-                className="rounded text-neutral-800 focus:ring-neutral-500"
+                className="rounded text-foreground focus:ring-primary"
               />
-              <span className="text-sm font-light text-neutral-700">阳历</span>
+              <span className="text-sm font-light text-foreground">阳历</span>
             </label>
             
             <div className="flex items-center space-x-1">
-              <span className="text-sm font-light text-neutral-700 mr-3">性别:</span>
+              <span className="text-sm font-light text-foreground mr-3">性别:</span>
               <button
                 type="button"
                 onClick={() => handleGenderChange(false)}
                 className={`px-3 py-1 rounded-full text-xs font-light transition-all duration-300 ${
                   !baziData.isFemale 
-                    ? 'bg-neutral-800 text-white' 
-                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}
               >
                 男性
@@ -408,8 +408,8 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                 onClick={() => handleGenderChange(true)}
                 className={`px-3 py-1 rounded-full text-xs font-light transition-all duration-300 ${
                   baziData.isFemale 
-                    ? 'bg-neutral-800 text-white' 
-                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
                 }`}
               >
                 女性
@@ -436,20 +436,20 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                 setSelectedCity('市辖区');
                 setIsCustomLocation(false);
               }}
-              className="px-4 py-2 rounded-full bg-blue-100 text-blue-700 text-sm font-light hover:bg-blue-200 transition-all duration-300"
+              className="px-4 py-2 rounded-full bg-accent/20 text-accent text-sm font-light hover:bg-accent/30 transition-all duration-300"
             >
               示例
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-full bg-neutral-100 text-neutral-700 text-sm font-light hover:bg-neutral-200 transition-all duration-300"
+              className="px-4 py-2 rounded-full bg-muted text-muted-foreground text-sm font-light hover:bg-muted/80 transition-all duration-300"
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-full bg-neutral-800 text-white text-sm font-light hover:bg-neutral-700 transition-all duration-300"
+              className="px-4 py-2 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
             >
               确认
             </button>

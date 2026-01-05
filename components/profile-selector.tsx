@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react'
-import { User, ChevronDown } from 'lucide-react'
+import { User, ChevronDown, Plus } from 'lucide-react'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
 
@@ -14,9 +14,10 @@ interface BaziProfile {
 interface ProfileSelectorProps {
   selectedProfileId: string | null
   onSelectProfile: (profileId: string | null, baziResult: string | null) => void
+  onOpenProfilesDialog?: () => void
 }
 
-export function ProfileSelector({ selectedProfileId, onSelectProfile }: ProfileSelectorProps) {
+export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProfilesDialog }: ProfileSelectorProps) {
   const [profiles, setProfiles] = useState<BaziProfile[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
   const { user } = useAuth()
@@ -76,15 +77,20 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile }: ProfileS
     return null
   }
   return (
-    <div className="relative">      <button
-        onClick={() => setShowDropdown(!showDropdown)}
-        className="flex items-center gap-1.5 px-3 py-2 h-10 rounded-full bg-white/80 border border-neutral-200/40 hover:bg-white transition-all duration-300"
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setShowDropdown(!showDropdown)
+        }}
+        className="flex items-center gap-1.5 px-3 py-2 h-10 rounded-full bg-card/80 border border-border hover:bg-card transition-all duration-300"
       >
-        <User className="w-3.5 h-3.5 text-neutral-600" />
-        <span className="text-sm text-neutral-700 max-w-[80px] truncate">
+        <User className="w-3.5 h-3.5 text-muted-foreground" />
+        <span className="text-sm text-foreground max-w-[80px] truncate">
           {profiles.length === 0 ? '添加人物' : (selectedProfile ? selectedProfile.profile_name : '选择人物')}
         </span>
-        <ChevronDown className="w-3.5 h-3.5 text-neutral-500" />
+        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-300 ${showDropdown ? 'rotate-180' : ''}`} />
       </button>
 
       {showDropdown && (
@@ -92,33 +98,35 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile }: ProfileS
           <div 
             className="fixed inset-0 z-40" 
             onClick={() => setShowDropdown(false)}
-          />          <div className="absolute left-0 bottom-full mb-2 w-48 bg-white/95 backdrop-blur-sm border border-neutral-200/40 rounded-xl shadow-xl z-50 overflow-hidden">
+          />
+          <div className="absolute left-0 bottom-full mb-3 w-56 bg-card backdrop-blur-md border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
             <div className="py-2 max-h-64 overflow-y-auto">
               {profiles.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-neutral-500 text-center">
+                <div className="px-4 py-3 text-sm text-muted-foreground text-center">
                   <p>暂无人物档案</p>
-                  <p className="text-xs mt-1">点击右侧 + 添加</p>
                 </div>
               ) : (
                 <>
                   <button
+                    type="button"
                     onClick={() => handleSelect(null)}
                     className={`w-full px-4 py-2 text-left text-sm transition-colors ${
                       selectedProfileId === null
-                        ? 'bg-neutral-100 text-neutral-800'
-                        : 'text-neutral-700 hover:bg-neutral-50'
+                        ? 'bg-muted text-foreground'
+                        : 'text-foreground hover:bg-muted/50'
                     }`}
                   >
                     不选择人物
                   </button>
                   {profiles.map((profile) => (
                     <button
+                      type="button"
                       key={profile.id}
                       onClick={() => handleSelect(profile.id)}
                       className={`w-full px-4 py-2 text-left text-sm transition-colors ${
                         selectedProfileId === profile.id
-                          ? 'bg-neutral-100 text-neutral-800'
-                          : 'text-neutral-700 hover:bg-neutral-50'
+                          ? 'bg-muted text-foreground'
+                          : 'text-foreground hover:bg-muted/50'
                       }`}
                     >
                       {profile.profile_name}
@@ -126,6 +134,19 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile }: ProfileS
                   ))}
                 </>
               )}
+              <div className="border-t border-border mt-1 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDropdown(false)
+                    onOpenProfilesDialog?.()
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm text-primary hover:bg-muted/50 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  新建人物
+                </button>
+              </div>
             </div>
           </div>
         </>

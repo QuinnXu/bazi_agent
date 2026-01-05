@@ -2,74 +2,102 @@
 @import "tw-animate-css";
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  /* —— Base surfaces —— */
+  --background: oklch(0.986 0.037 24.56); /* #FFF7F8 */
+  --foreground: oklch(0.245 0.024 1.05); /* #2A1B22 */
+
+  --card: oklch(1.000 0.031 28.88); /* #FFFFFF (微暖) */
+  --card-foreground: var(--foreground);
+
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+
+  /* —— Brand —— */
+  --primary: oklch(0.696 0.137 3.34); /* #E76F9A 卜卜粉 */
+  --primary-foreground: oklch(0.986 0.035 22.65); /* #FFF7FA */
+
+  --secondary: oklch(0.943 0.038 19.14); /* #F4E7EC 腮红底 */
+  --secondary-foreground: oklch(0.295 0.033 357.53); /* #3B2430 */
+
+  --muted: oklch(0.961 0.037 21.93); /* #F8EEF1 */
+  --muted-foreground: oklch(0.496 0.050 2.30); /* #7A5565 */
+
+  /* —— Accent / Highlight —— */
+  --accent: oklch(0.844 0.115 40.07); /* #F6C177 星尘金 */
+  --accent-foreground: var(--foreground);
+
+  /* —— Semantic —— */
+  --destructive: oklch(0.644 0.175 16.10); /* #E45858 */
+  --destructive-foreground: oklch(0.981 0.039 24.79); /* #FFF5F5 */
+
+  /* —— Lines & focus —— */
+  --border: oklch(0.904 0.040 16.17); /* #EAD9E0 */
+  --input: var(--border);
+  --ring: var(--primary);
+
+  /* —— Charts —— */
+  --chart-1: oklch(0.696 0.137 3.34); /* rose */
+  --chart-2: oklch(0.844 0.115 40.07); /* gold */
+  --chart-3: oklch(0.660 0.116 243.69); /* violet */
+  --chart-4: oklch(0.762 0.060 171.34); /* teal */
+  --chart-5: oklch(0.661 0.166 221.78); /* blue */
+
   --radius: 0.625rem;
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  /* —— Sidebar —— */
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --background: oklch(0.171 0.013 353.64); /* #140D12 夜幕梅黑 */
+  --foreground: oklch(0.978 0.038 20.62); /* #FFF3F7 */
+
+  --card: oklch(0.197 0.015 354.79); /* #1B1218 */
+  --card-foreground: var(--foreground);
+
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+
+  --primary: oklch(0.782 0.128 3.79); /* #FF8FB6 更亮的卜卜粉 */
+  --primary-foreground: var(--background);
+
+  --secondary: oklch(0.245 0.024 1.05); /* #2A1B22 */
+  --secondary-foreground: var(--foreground);
+
+  --muted: oklch(0.226 0.023 2.39); /* #25171D */
+  --muted-foreground: oklch(0.752 0.048 8.25); /* #C3A4B1 */
+
+  --accent: oklch(0.877 0.103 43.09); /* #F7D08A 更柔的金 */
+  --accent-foreground: var(--background);
+
+  --destructive: oklch(0.691 0.198 16.21); /* #FF5C5C */
+  --destructive-foreground: var(--background);
+
+  --border: oklch(0.265 0.024 1.75); /* #2F2027 */
+  --input: var(--border);
+  --ring: var(--primary);
+
+  --chart-1: oklch(0.782 0.128 3.79);
+  --chart-2: oklch(0.877 0.103 43.09);
+  --chart-3: oklch(0.742 0.083 251.40);
+  --chart-4: oklch(0.815 0.061 170.95);
+  --chart-5: oklch(0.720 0.121 225.00);
+
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--background);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 }
 
 @theme inline {
@@ -134,11 +162,21 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-neutral-300/60 rounded-full;
+    background-color: oklch(0.696 0.137 3.34 / 0.4);
+    border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-neutral-400/70;
+    background-color: oklch(0.696 0.137 3.34 / 0.6);
+  }
+
+  /* Dark mode scrollbar */
+  .dark ::-webkit-scrollbar-thumb {
+    background-color: oklch(0.782 0.128 3.79 / 0.4);
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(0.782 0.128 3.79 / 0.6);
   }
 
   /* Smooth, subtle animations */
@@ -149,12 +187,18 @@
     transition-duration: 250ms;
   }
 
-  /* Subtle glass effect */
+  /* Subtle glass effect with pink crystal theme */
   .glass-minimal {
     backdrop-filter: blur(24px) saturate(120%);
     -webkit-backdrop-filter: blur(24px) saturate(120%);
-    background-color: rgba(255, 255, 255, 0.4);
-    border: 1px solid rgba(0, 0, 0, 0.05);
+    background-color: oklch(1.000 0.031 28.88 / 0.6);
+    border: 1px solid oklch(0.904 0.040 16.17 / 0.4);
+  }
+
+  /* Dark mode glass effect */
+  .dark .glass-minimal {
+    background-color: oklch(0.197 0.015 354.79 / 0.7);
+    border: 1px solid oklch(0.265 0.024 1.75 / 0.5);
   }
 
   /* Gentle floating animation */
@@ -189,20 +233,33 @@
   }
 }
 
-/* Minimal selection colors */
+/* Pink crystal selection colors */
 ::selection {
-  @apply bg-neutral-200 text-neutral-800;
+  background-color: oklch(0.696 0.137 3.34 / 0.3);
+  color: oklch(0.245 0.024 1.05);
 }
 
 ::-moz-selection {
-  @apply bg-neutral-200 text-neutral-800;
+  background-color: oklch(0.696 0.137 3.34 / 0.3);
+  color: oklch(0.245 0.024 1.05);
 }
 
-/* Clean focus styles */
+/* Dark mode selection colors */
+.dark ::selection {
+  background-color: oklch(0.782 0.128 3.79 / 0.4);
+  color: oklch(0.978 0.038 20.62);
+}
+
+.dark ::-moz-selection {
+  background-color: oklch(0.782 0.128 3.79 / 0.4);
+  color: oklch(0.978 0.038 20.62);
+}
+
+/* Clean focus styles with primary color */
 input:focus,
 button:focus,
 textarea:focus {
-  outline: 2px solid rgba(0, 0, 0, 0.1);
+  outline: 2px solid oklch(0.696 0.137 3.34 / 0.3);
   outline-offset: 2px;
 }
 
@@ -224,4 +281,29 @@ p,
 span,
 div {
   text-rendering: optimizeLegibility;
+}
+
+/* Semantic color utilities for fortune, warning, turning point */
+.text-fortune {
+  color: var(--accent);
+}
+
+.text-warning {
+  color: var(--destructive);
+}
+
+.text-turning-point {
+  color: var(--chart-3);
+}
+
+.bg-fortune {
+  background-color: var(--accent);
+}
+
+.bg-warning {
+  background-color: var(--destructive);
+}
+
+.bg-turning-point {
+  background-color: var(--chart-3);
 }

@@ -3,6 +3,7 @@
 import type React from "react"
 import { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { Send, Calendar } from "lucide-react"
+import Image from "next/image"
 import { MinimalBackground } from "@/components/minimal-background"
 import { ChatMessage } from "@/components/chat-message"
 import { BaziDialog } from "@/components/bazi-dialog"
@@ -51,6 +52,73 @@ export default function Home() {
   const [baziData, setBaziData] = useState<BaziData | null>(null)
   const [baziAnalysisResult, setBaziAnalysisResult] = useState<string | null>(null)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const [thinkingMessage, setThinkingMessage] = useState('')
+  const [isUltraMode, setIsUltraMode] = useState(false)
+
+  // 卜卜象等待词条列表
+  const thinkingMessages = useMemo(() => [
+    "正在偷吃苹果🍎",
+    "正在啃一口幸运零食🍪",
+    "正在晃着鼻子想事情🐘",
+    "正在抱着水晶球发呆一下😌",
+    "正在深呼吸一口好运气✨",
+    "正在整理一下小象的思路",
+    "正在慢慢理清头绪中～",
+    "正在转动水晶球🔮",
+    "正在给水晶球加点星尘✨",
+    "正在掐着鼻子算一算🐘",
+    "正在悄悄翻看命运小本本📜",
+    "正在对照天干地支",
+    "正在核对命盘里的关键信息",
+    "正在把线索一条条连起来",
+    "正在找那颗最关键的星星⭐",
+    "正在数一数你命里的亮点✨",
+    "正在把星星排成一条线🌟",
+    "正在追着流年的脚步跑",
+    "正在标记重要的时间节点📍",
+    "正在看看哪一年星象最亮",
+    "正在认真拆解你的人生节奏",
+    "正在分清顺势和逆风的阶段",
+    "正在多核对一遍，给你更稳的建议",
+    "正在想怎样说对你最有帮助",
+    "正在帮你把重点先圈出来",
+    "正在规划更顺的前进路线🧭",
+    "正在找适合你发力的年份💪",
+    "正在评估你现在的能量状态",
+    "正在帮你避开不必要的弯路",
+    "正在想怎么走会更轻松一点",
+    "正在检查有没有需要慢一点的地方⚠️",
+    "正在看看前方有没有暗礁",
+    "正在帮你把可能的坑先标出来",
+    "正在判断哪些事不必太着急",
+    "正在给你多加一层保护🛡️",
+    "快想明白啦，再等我一下～",
+    "正在用小象的智慧思考中🧠",
+    "正在翻阅古老的命理典籍📚",
+    "正在和星星们开个小会议⭐",
+    "正在为你调配专属的运势配方🧪",
+  ], [])
+
+  // 随机获取等待词条
+  const getRandomThinkingMessage = useCallback(() => {
+    const randomIndex = Math.floor(Math.random() * thinkingMessages.length)
+    return thinkingMessages[randomIndex]
+  }, [thinkingMessages])
+
+  // 等待词条自动更换
+  useEffect(() => {
+    if (isLoading && !isStreamingStarted) {
+      // 初始设置一个词条
+      setThinkingMessage(getRandomThinkingMessage())
+      
+      // 每3秒更换一次词条
+      const interval = setInterval(() => {
+        setThinkingMessage(getRandomThinkingMessage())
+      }, 3000)
+      
+      return () => clearInterval(interval)
+    }
+  }, [isLoading, isStreamingStarted, getRandomThinkingMessage])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -191,6 +259,9 @@ export default function Home() {
         requestData.baziAnalysisResult = baziAnalysisResult;
       }
       
+      // Include ULTRA mode flag
+      requestData.useUltraMode = isUltraMode;
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -257,7 +328,7 @@ export default function Home() {
     } finally {      setIsLoading(false);
       setIsStreamingStarted(false);
     }
-  }, [input, isLoading, messages, baziAnalysisResult, isStreamingStarted, user, ensureSession, saveMessage, supabase])
+  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, isStreamingStarted, user, ensureSession, saveMessage, supabase])
   const handleBaziSubmit = async (data: BaziData) => {
     try {
       // Get Bazi analysis result
@@ -312,11 +383,11 @@ export default function Home() {
 
   const suggestedPrompts = useMemo(() => [
     "我今年事业运如何？",
-    "我该如何进行感情规划？", 
-    "帮我分析一下我的命局",
-    "我的感情状况如何",
-    "我的性格呈现怎样的特点？",
-    "我有哪些特殊的格局",
+    "我的感情如何？", 
+    "帮我大致分析一下我的人生格局",
+    "我的何时才能爆富？",
+    "我的未来会怎么样？",
+    "我正缘什么时候？",
   ], [])
 
   const startWithPrompt = useCallback((prompt: string) => {
@@ -333,7 +404,7 @@ export default function Home() {
     });
   }, [handleSubmit]);
   return (
-    <div className="min-h-screen relative overflow-hidden bg-neutral-50">
+    <div className="min-h-screen relative overflow-hidden bg-background">
       <MinimalBackground />
 
       <div className="relative z-10 min-h-screen flex flex-col">        {/* Top Bar with User Menu only */}
@@ -352,12 +423,25 @@ export default function Home() {
               // Welcome Screen
               <div className="text-center space-y-12 py-12">
                 <div className="space-y-8">
-                  <h1 className="text-4xl md:text-6xl font-light text-neutral-800 leading-tight">
-                    认识更清楚的自己
+                  {/* Logo */}
+                  <div className="flex justify-center">
+                    <div className="relative w-32 h-32 md:w-40 md:h-40">
+                      <Image
+                        src="/logo.jpg"
+                        alt="卜卜象"
+                        fill
+                        className="object-contain rounded-full"
+                        priority
+                      />
+                    </div>
+                  </div>
+                  
+                  <h1 className="text-4xl md:text-6xl font-light text-foreground leading-tight">
+                    卜卜象陪你卜卜象
                   </h1>
 
-                  <p className="text-lg text-neutral-600 max-w-xl mx-auto leading-relaxed font-light">
-                    点击右下输入生辰，开始对话进行命理分析
+                  <p className="text-lg text-muted-foreground max-w-xl mx-auto leading-relaxed font-light">
+                    温柔可爱的命理分析小象，快来和我对话吧
                   </p>
                 </div>
 
@@ -382,20 +466,22 @@ export default function Home() {
                 ))}
                 {isLoading && !isStreamingStarted && (
                   <div className="flex justify-start">
-                    <div className="bg-white/70 backdrop-blur-sm border border-neutral-200/40 rounded-3xl px-6 py-4 max-w-xs">
+                    <div className="bg-card/70 backdrop-blur-sm border border-border rounded-3xl px-6 py-4 max-w-sm glass-minimal">
                       <div className="flex items-center gap-3">
                         <div className="flex gap-1">
-                          <div className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce"></div>
+                          <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
                           <div
-                            className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce"
+                            className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"
                             style={{ animationDelay: "0.1s" }}
                           ></div>
                           <div
-                            className="w-1.5 h-1.5 bg-neutral-400 rounded-full animate-bounce"
+                            className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"
                             style={{ animationDelay: "0.2s" }}
                           ></div>
                         </div>
-                        <span className="text-sm text-neutral-600 font-light">思考中</span>
+                        <span className="text-sm text-muted-foreground font-light transition-all duration-500">
+                          {thinkingMessage}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -405,7 +491,7 @@ export default function Home() {
             )}
           </div>
         </div>        {/* Input Area */}
-        <div className="p-4 bg-white/30 backdrop-blur-xl border-t border-neutral-200/30">
+        <div className="p-4 bg-card/30 backdrop-blur-xl border-t border-border">
           <div className="max-w-3xl mx-auto">
             <form id="chat-form" onSubmit={handleSubmit} className="relative">
               <div className="relative">
@@ -413,12 +499,12 @@ export default function Home() {
                   type="text"
                   value={input}
                   onChange={handleInputChange}
-                  placeholder={user ? "选择人物后，输入您想咨询的问题..." : "请先登录..."}
-                  className="w-full px-6 py-4 pl-44 pr-14 rounded-full bg-white/70 backdrop-blur-sm border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 font-light focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300 text-base"
+                  placeholder={user ? "输入您想咨询的问题..." : "请先登录..."}
+                  className="w-full px-6 py-4 pl-52 pr-14 rounded-full bg-card/70 backdrop-blur-sm border border-border text-foreground placeholder-muted-foreground font-light focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 text-base"
                   disabled={isLoading || !user}
                 />
-                {/* Left side: Profile selector and add button */}
-                <div className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                {/* Left side: Profile selector and ULTRA button */}
+                <div className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center gap-2 pr-3">
                   {user && (
                     <>
                       <ProfileSelector
@@ -432,14 +518,19 @@ export default function Home() {
                             setBaziData(null)
                           }
                         }}
+                        onOpenProfilesDialog={() => setShowProfilesDialog(true)}
                       />
                       <button
                         type="button"
-                        onClick={() => setShowProfilesDialog(true)}
-                        className="w-10 h-10 rounded-full bg-white/80 border border-neutral-200/40 text-neutral-600 hover:bg-white hover:text-neutral-800 transition-all duration-300 flex items-center justify-center font-light text-lg"
-                        title="管理人物"
+                        onClick={() => setIsUltraMode(!isUltraMode)}
+                        className={`flex items-center gap-1.5 px-3 py-2 h-10 rounded-full border transition-all duration-300 ${
+                          isUltraMode 
+                            ? 'bg-card text-foreground border-primary/60 shadow-sm' 
+                            : 'bg-transparent text-muted-foreground/50 border-border/50 hover:text-muted-foreground hover:border-border'
+                        }`}
+                        title={isUltraMode ? '关闭 ULTRA 模式' : '开启 ULTRA 模式'}
                       >
-                        +
+                        <span className={`text-sm font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>ULTRA</span>
                       </button>
                     </>
                   )}
@@ -449,7 +540,7 @@ export default function Home() {
                   <button
                     type="submit"
                     disabled={!input.trim() || isLoading || !user}
-                    className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-white hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
+                    className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
                   >
                     <Send className="w-4 h-4" />
                   </button>

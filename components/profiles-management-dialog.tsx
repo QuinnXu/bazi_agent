@@ -244,22 +244,22 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
             onClick={onClose}
           />
           
-          <div className="relative bg-white/90 backdrop-blur-sm border border-neutral-200/40 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-xl flex flex-col">
+          <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-xl flex flex-col glass-minimal">
             <button
               onClick={onClose}
-              className="absolute right-4 top-4 w-8 h-8 rounded-full bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition-colors"
+              className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
             >
-              <X className="w-4 h-4 text-neutral-600" />
+              <X className="w-4 h-4 text-muted-foreground" />
             </button>
 
             <div className="mb-6">
-              <h2 className="text-2xl font-light text-neutral-800 mb-2">人物管理</h2>
-              <p className="text-sm text-neutral-600">管理您的八字人物档案</p>
+              <h2 className="text-2xl font-light text-foreground mb-2">人物管理</h2>
+              <p className="text-sm text-muted-foreground">管理您的八字人物档案</p>
             </div>
 
             <button
               onClick={handleAddProfile}
-              className="mb-4 w-full py-3 rounded-lg bg-neutral-800 text-white text-sm font-light hover:bg-neutral-700 transition-all duration-300 flex items-center justify-center gap-2"
+              className="mb-4 w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />
               添加新人物
@@ -267,10 +267,10 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
 
             <div className="flex-1 overflow-y-auto space-y-2">
               {loading ? (
-                <div className="text-center py-8 text-neutral-500">加载中...</div>
+                <div className="text-center py-8 text-muted-foreground">加载中...</div>
               ) : profiles.length === 0 ? (
-                <div className="text-center py-8 text-neutral-500">
-                  <User className="w-12 h-12 mx-auto mb-3 text-neutral-300" />
+                <div className="text-center py-8 text-muted-foreground">
+                  <User className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
                   <p>暂无人物档案</p>
                   <p className="text-xs mt-1">点击上方按钮添加</p>
                 </div>
@@ -278,33 +278,33 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
                 profiles.map((profile) => (
                   <div
                     key={profile.id}
-                    className="p-4 rounded-lg bg-white/60 border border-neutral-200/40 hover:bg-white/80 transition-all duration-300"
+                    className="p-4 rounded-lg bg-card/60 border border-border hover:bg-card/80 transition-all duration-300"
                   >
                     <div className="flex items-start justify-between gap-3">                      <div className="flex-1 min-w-0">
-                        <h3 className="text-base font-medium text-neutral-800 mb-1">
+                        <h3 className="text-base font-medium text-foreground mb-1">
                           {profile.profile_name}
                         </h3>
-                        <p className="text-sm text-neutral-600">
+                        <p className="text-sm text-muted-foreground">
                           {profile.birth_year}年{profile.birth_month}月{profile.birth_day}日 {profile.birth_hour}:{profile.birth_minute.toString().padStart(2, '0')}
                         </p>
-                        <p className="text-xs text-neutral-500 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           {profile.is_solar_calendar ? '阳历' : '阴历'} · {profile.gender === 'female' ? '女' : '男'}
                         </p>
                       </div>
                       <div className="flex gap-2">
                         <button
                           onClick={() => handleEditProfile(profile)}
-                          className="w-8 h-8 rounded-lg hover:bg-blue-50 flex items-center justify-center transition-colors"
+                          className="w-8 h-8 rounded-lg hover:bg-primary/10 flex items-center justify-center transition-colors"
                           title="编辑"
                         >
-                          <Edit2 className="w-4 h-4 text-blue-500" />
+                          <Edit2 className="w-4 h-4 text-primary" />
                         </button>
                         <button
                           onClick={() => handleDeleteProfile(profile.id)}
-                          className="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center transition-colors"
+                          className="w-8 h-8 rounded-lg hover:bg-destructive/10 flex items-center justify-center transition-colors"
                           title="删除"
                         >
-                          <Trash2 className="w-4 h-4 text-red-500" />
+                          <Trash2 className="w-4 h-4 text-destructive" />
                         </button>
                       </div>
                     </div>
@@ -324,20 +324,20 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
             onClick={handleBackToList}
           />
           
-          <div className="relative bg-white/90 backdrop-blur-sm border border-neutral-200/40 rounded-2xl p-6 max-w-md w-full shadow-xl">
+          <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-md w-full shadow-xl glass-minimal">
             <button
               onClick={handleBackToList}
-              className="absolute right-4 top-4 w-8 h-8 rounded-full bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition-colors"
+              className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
             >
-              <X className="w-4 h-4 text-neutral-600" />
+              <X className="w-4 h-4 text-muted-foreground" />
             </button>
 
-            <h3 className="text-lg font-light text-neutral-800 mb-4">
+            <h3 className="text-lg font-light text-foreground mb-4">
               {editingProfile ? '编辑人物' : '添加新人物'}
             </h3>
             
             <div className="mb-4">
-              <label className="block text-sm font-light text-neutral-700 mb-2">
+              <label className="block text-sm font-light text-foreground mb-2">
                 人物名称
               </label>
               <input
@@ -349,7 +349,7 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
                     handleNextToBazi()
                   }
                 }}
-                className="w-full px-4 py-3 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                className="w-full px-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                 placeholder="例如：张三、李四、本人等"
                 autoFocus
               />
@@ -358,13 +358,13 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
             <div className="flex gap-3">
               <button
                 onClick={handleBackToList}
-                className="flex-1 px-4 py-2 rounded-lg bg-neutral-100 text-neutral-700 text-sm font-light hover:bg-neutral-200 transition-all duration-300"
+                className="flex-1 px-4 py-2 rounded-lg bg-muted text-muted-foreground text-sm font-light hover:bg-muted/80 transition-all duration-300"
               >
                 取消
               </button>
               <button
                 onClick={handleNextToBazi}
-                className="flex-1 px-4 py-2 rounded-lg bg-neutral-800 text-white text-sm font-light hover:bg-neutral-700 transition-all duration-300"
+                className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
               >
                 下一步
               </button>

@@ -63,36 +63,36 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
       />
       
       {/* 弹窗内容 */}
-      <div className="relative bg-white/90 backdrop-blur-sm border border-neutral-200/40 rounded-2xl p-6 max-w-md w-full shadow-xl">
+      <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-md w-full shadow-xl glass-minimal">
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 w-8 h-8 rounded-full bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition-colors"
+          className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
         >
-          <X className="w-4 h-4 text-neutral-600" />
+          <X className="w-4 h-4 text-muted-foreground" />
         </button>
 
         {/* 标题 */}
         <div className="mb-6">
-          <h2 className="text-2xl font-light text-neutral-800 mb-2">
+          <h2 className="text-2xl font-light text-foreground mb-2">
             {mode === 'signin' ? '登录' : '注册'}
           </h2>
-          <p className="text-sm text-neutral-600">
+          <p className="text-sm text-muted-foreground">
             {mode === 'signin' ? '欢迎回来' : '创建您的账户'}
           </p>
         </div>        {/* 表单 */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-light text-neutral-700 mb-2">
+            <label className="block text-sm font-light text-foreground mb-2">
               邮箱
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                 placeholder="your@email.com"
                 required
               />
@@ -100,16 +100,16 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
           </div>
 
           <div>
-            <label className="block text-sm font-light text-neutral-700 mb-2">
+            <label className="block text-sm font-light text-foreground mb-2">
               密码
             </label>
             <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/60 border border-neutral-200/40 text-neutral-800 placeholder-neutral-500 focus:outline-none focus:border-neutral-300/60 focus:bg-white/80 transition-all duration-300"
+                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
                 placeholder="••••••••"
                 required
                 minLength={6}
@@ -118,15 +118,15 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
           </div>
 
           {error && (
-            <div className="p-3 rounded-lg bg-red-50 border border-red-200">
-              <p className="text-sm text-red-600">{error}</p>
+            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20">
+              <p className="text-sm text-destructive">{error}</p>
             </div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-lg bg-neutral-800 text-white font-light hover:bg-neutral-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
+            className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
           >
             {loading ? '处理中...' : mode === 'signin' ? '登录' : '注册'}
           </button>
@@ -136,7 +136,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
         <div className="mt-4 text-center">
           <button
             onClick={toggleMode}
-            className="text-sm text-neutral-600 hover:text-neutral-800 transition-colors"
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             {mode === 'signin' ? '还没有账户？立即注册' : '已有账户？立即登录'}
           </button>

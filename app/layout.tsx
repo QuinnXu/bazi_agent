@@ -7,8 +7,8 @@ import { AuthProvider } from '@/contexts/auth-context'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'AI命理助手',
-  description: '智能八字分析与命理咨询',
+  title: '卜卜象 - AI命理助手',
+  description: '温柔可爱的八字命理分析小象，陪你认识更清楚的自己',
 }
 
 export default function RootLayout({
