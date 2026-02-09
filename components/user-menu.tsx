@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react'
-import { User, LogOut, MessageSquare, Users, Sun, Moon } from 'lucide-react'
+import { User, LogOut, MessageSquare, Users, Sun, Moon, KeyRound } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { useTheme } from 'next-themes'
 
@@ -9,9 +9,10 @@ interface UserMenuProps {
   onOpenAuth: () => void
   onOpenSessions?: () => void
   onOpenProfiles?: () => void
+  onOpenChangePassword?: () => void
 }
 
-export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles }: UserMenuProps) {
+export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenChangePassword }: UserMenuProps) {
   const { user, signOut } = useAuth()
   const [showMenu, setShowMenu] = useState(false)
   const { theme, setTheme, resolvedTheme } = useTheme()
@@ -116,6 +117,19 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles }: UserMen
                   >
                     <MessageSquare className="w-4 h-4" />
                     聊天记录
+                  </button>
+                )}
+
+                {onOpenChangePassword && (
+                  <button
+                    onClick={() => {
+                      onOpenChangePassword()
+                      setShowMenu(false)
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-foreground hover:bg-muted transition-colors flex items-center gap-2"
+                  >
+                    <KeyRound className="w-4 h-4" />
+                    修改密码
                   </button>
                 )}
                 

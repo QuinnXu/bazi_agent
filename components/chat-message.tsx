@@ -13,9 +13,10 @@ interface Message {
 
 interface ChatMessageProps {
   message: Message;
+  isStreaming?: boolean;
 }
 
-const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
+const ChatMessage = memo(function ChatMessage({ message, isStreaming = false }: ChatMessageProps) {
   const isUser = message.role === 'user';
   
   return (
@@ -29,6 +30,8 @@ const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
       >
         {isUser ? (
           <div className="whitespace-pre-wrap">{message.content}</div>
+        ) : isStreaming ? (
+          <div className="markdown-content max-w-none text-foreground whitespace-pre-wrap">{message.content}</div>
         ) : (
           <div className="markdown-content max-w-none text-foreground">
             <ReactMarkdown

@@ -45,15 +45,28 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 ### 4. 部署数据库
 
-在 Supabase Dashboard 的 SQL Editor 中执行 `supabase/schema_v2_english.sql`
+在 Supabase Dashboard 的 SQL Editor 中执行 `supabase/schema_v2_english.sql`，确保存在 `profiles` 等表（不要使用 `users` 表名）。
 
-### 5. 启动开发服务器
+### 5. 配置 Supabase 认证回调（必做）
+
+在 **Supabase Dashboard → Authentication → URL Configuration** 中配置：
+
+- **Site URL**：开发环境填 `http://localhost:3000`，生产环境填你的域名（如 `https://your-app.vercel.app`）
+- **Redirect URLs**：添加以下地址（开发与生产各一条）  
+  - `http://localhost:3000/auth/callback`  
+  - `https://你的生产域名/auth/callback`
+
+否则邮箱确认链接无法正确跳回应用，登录/注册会异常。
+
+### 6. 启动开发服务器
 
 ```bash
 pnpm dev
 ```
 
 访问 http://localhost:3000
+
+**提醒**：若开启邮箱验证，注册后需在邮件中点击确认链接，跳转到 `/auth/callback` 完成验证后才能登录。
 
 ---
 
@@ -212,6 +225,9 @@ pnpm lint
 
 ### Q: Vercel 构建失败
 **A**: 确保在 Vercel Dashboard 中配置了所有环境变量。
+
+### Q: 注册或登录失败 / 点击邮件确认链接后仍无法登录
+**A**: 1) 在 Supabase Dashboard → Authentication → URL Configuration 中添加 Redirect URL：`http://localhost:3000/auth/callback`（生产环境改为你的域名 + `/auth/callback`）。2) 确认数据库中存在 `profiles` 表（执行 `schema_v2_english.sql`），且没有使用名为 `users` 的表。
 
 ### Q: 登录后无法加载数据
 **A**: 检查 Supabase RLS 策略是否正确部署。在 Supabase SQL Editor 中执行 `schema_v2_english.sql`。
