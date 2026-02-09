@@ -115,8 +115,8 @@ async function callOpenRouterAPI(messagesWithSystem: any[]) {
       'X-Title': 'BuBuXiang AI Fortune Teller',
     },
     body: JSON.stringify({
-      //model: 'google/gemini-3-pro-preview', //prod
-      model: 'google/gemini-3-flash-preview', //dev
+      model: 'google/gemini-3-pro-preview', //prod
+      //model: 'google/gemini-3-flash-preview', //dev
       messages: messagesWithSystem,
       temperature: 1,
       max_tokens: 16000,
