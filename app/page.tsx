@@ -50,6 +50,8 @@ export default function Home() {
 
 function HomeContent() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesStartRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const streamContentRef = useRef('')
   const rafIdRef = useRef<number | null>(null)
   const streamingMessageIdRef = useRef<string | null>(null)
@@ -77,6 +79,9 @@ function HomeContent() {
   // Apple quota state
   const [appleQuota, setAppleQuota] = useState<{ remaining: number; dailyLimit: number; isPaid: boolean } | null>(null)
   const [showQuotaExhausted, setShowQuotaExhausted] = useState(false)
+  
+  // Scroll to top button visibility
+  const [showScrollTop, setShowScrollTop] = useState(false)
 
   // Fetch apple quota when user changes
   const fetchQuota = useCallback(async () => {
@@ -98,6 +103,24 @@ function HomeContent() {
   useEffect(() => {
     fetchQuota()
   }, [fetchQuota])
+
+  // Handle scroll to show/hide "scroll to top" button
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      // Show button when scrolled down more than 300px
+      setShowScrollTop(container.scrollTop > 300)
+    }
+
+    container.addEventListener('scroll', handleScroll)
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  const scrollToTop = useCallback(() => {
+    messagesStartRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
 
   // 卜卜象等待词条列表
   const thinkingMessages = useMemo(() => [
@@ -440,8 +463,9 @@ function HomeContent() {
   const renderChatArea = () => (
     <>
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 relative">
         <div className="max-w-3xl mx-auto">
+          <div ref={messagesStartRef} />
           {messages.length === 0 ? (
             // Welcome Screen
             <div className="text-center space-y-12 py-12">
@@ -520,6 +544,19 @@ function HomeContent() {
             </div>
           )}
         </div>
+
+        {/* Scroll to top button - appears when scrolled down */}
+        {showScrollTop && messages.length > 0 && (
+          <button
+            onClick={scrollToTop}
+            className="fixed bottom-36 right-4 w-10 h-10 md:w-11 md:h-11 rounded-full bg-card/90 backdrop-blur-sm border border-border shadow-lg hover:shadow-xl hover:bg-card transition-all duration-300 flex items-center justify-center group z-20"
+            title="回到顶部"
+          >
+            <svg className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Input Area */}
