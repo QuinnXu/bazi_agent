@@ -479,7 +479,8 @@ FROM information_schema.tables
 WHERE table_schema = 'public'
     AND table_name IN (
         'profiles', 'bazi_profiles', 'chat_sessions', 
-        'chat_messages', 'user_preferences', 'message_feedback'
+        'chat_messages', 'user_preferences', 'message_feedback',
+        'user_quotas'
     );
 
 -- Check RLS status
@@ -490,7 +491,8 @@ FROM pg_tables
 WHERE schemaname = 'public'
     AND tablename IN (
         'profiles', 'bazi_profiles', 'chat_sessions', 
-        'chat_messages', 'user_preferences', 'message_feedback'
+        'chat_messages', 'user_preferences', 'message_feedback',
+        'user_quotas'
     )
 ORDER BY tablename;
 
@@ -502,6 +504,62 @@ FROM pg_policies
 WHERE schemaname = 'public'
 GROUP BY tablename
 ORDER BY tablename;
+
+-- ============================================
+-- 7. User Quotas Table (Apple Quota System)
+-- ============================================
+-- Purpose: Track daily ULTRA mode usage quotas per user
+-- "Apples" represent the daily allowance for ULTRA (Gemini) mode
+-- Free users: 5 apples/day, Paid users: 999 apples/day
+
+CREATE TABLE IF NOT EXISTS public.user_quotas (
+    user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+
+    -- Subscription status
+    is_paid BOOLEAN DEFAULT FALSE,
+    daily_apple_limit INTEGER DEFAULT 5,
+
+    -- Daily usage tracking
+    apples_used_today INTEGER DEFAULT 0,
+    last_reset_date DATE DEFAULT CURRENT_DATE,
+
+    -- Timestamps
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_user_quotas_is_paid ON public.user_quotas(is_paid);
+
+-- Enable RLS
+ALTER TABLE public.user_quotas ENABLE ROW LEVEL SECURITY;
+
+-- Users can only view their own quota
+CREATE POLICY "Users can view own quota"
+    ON public.user_quotas FOR SELECT
+    USING (auth.uid() = user_id);
+
+-- Auto-update updated_at trigger
+CREATE TRIGGER update_user_quotas_updated_at
+    BEFORE UPDATE ON public.user_quotas
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Auto-create quota row when a new profile is inserted
+CREATE OR REPLACE FUNCTION create_user_quota()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.user_quotas (user_id, is_paid, daily_apple_limit, apples_used_today)
+    VALUES (NEW.id, FALSE, 5, 0)
+    ON CONFLICT (user_id) DO NOTHING;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_profile_created_create_quota
+    AFTER INSERT ON public.profiles
+    FOR EACH ROW
+    EXECUTE FUNCTION create_user_quota();
 
 -- ============================================
 -- End of Schema

@@ -10,9 +10,10 @@ interface UserMenuProps {
   onOpenSessions?: () => void
   onOpenProfiles?: () => void
   onOpenChangePassword?: () => void
+  appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null
 }
 
-export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenChangePassword }: UserMenuProps) {
+export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenChangePassword, appleQuota }: UserMenuProps) {
   const { user, signOut } = useAuth()
   const [showMenu, setShowMenu] = useState(false)
   const { theme, setTheme, resolvedTheme } = useTheme()
@@ -92,6 +93,18 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenCha
                 <p className="text-sm font-medium text-foreground truncate">
                   {user.email}
                 </p>
+                {appleQuota && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs font-light text-muted-foreground">
+                      🍎 今日剩余 {appleQuota.remaining}/{appleQuota.dailyLimit}
+                    </span>
+                    {appleQuota.isPaid ? (
+                      <span className="bg-accent/20 text-accent rounded-full px-1.5 py-0.5 text-[10px] font-light">VIP</span>
+                    ) : (
+                      <span className="bg-secondary text-muted-foreground rounded-full px-1.5 py-0.5 text-[10px] font-light">免费</span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="py-2">
                 {onOpenProfiles && (

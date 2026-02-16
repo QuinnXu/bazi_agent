@@ -2,13 +2,13 @@
 
 import type React from "react"
 import { useEffect, useRef, useState, useCallback, useMemo } from "react"
-import { Send, PanelLeftClose, PanelLeft } from "lucide-react"
+import { Send, PanelLeftClose, PanelLeft, X } from "lucide-react"
 import Image from "next/image"
 import { MinimalBackground } from "@/components/minimal-background"
 import { ChatMessage } from "@/components/chat-message"
 import { BaziDialog } from "@/components/bazi-dialog"
 import { SuggestedPromptButton } from "@/components/suggested-prompt-button"
-import { DonationButton } from "@/components/donation-button"
+import { DonationDialog } from "@/components/donation-button"
 import { AuthDialog } from "@/components/auth-dialog"
 import { UserMenu } from "@/components/user-menu"
 import { useAuth } from "@/contexts/auth-context"
@@ -72,6 +72,32 @@ function HomeContent() {
   const [thinkingMessage, setThinkingMessage] = useState('')
   const [isUltraMode, setIsUltraMode] = useState(false)
   const [activeFeature, setActiveFeature] = useState<FeatureType>('chat')
+  const [showDonationDialog, setShowDonationDialog] = useState(false)
+
+  // Apple quota state
+  const [appleQuota, setAppleQuota] = useState<{ remaining: number; dailyLimit: number; isPaid: boolean } | null>(null)
+  const [showQuotaExhausted, setShowQuotaExhausted] = useState(false)
+
+  // Fetch apple quota when user changes
+  const fetchQuota = useCallback(async () => {
+    if (!user) {
+      setAppleQuota(null)
+      return
+    }
+    try {
+      const res = await fetch('/api/quota')
+      if (res.ok) {
+        const data = await res.json()
+        setAppleQuota({ remaining: data.remaining, dailyLimit: data.dailyLimit, isPaid: data.isPaid })
+      }
+    } catch (error) {
+      console.error('获取配额失败:', error)
+    }
+  }, [user])
+
+  useEffect(() => {
+    fetchQuota()
+  }, [fetchQuota])
 
   // 卜卜象等待词条列表
   const thinkingMessages = useMemo(() => [
@@ -213,6 +239,13 @@ function HomeContent() {
     e.preventDefault()
     if (!input.trim() || isLoading) return;
 
+    // 投喂模式前端预检查：苹果不够直接拦截，不发请求不添加消息
+    if (isUltraMode && appleQuota && appleQuota.remaining <= 0) {
+      setShowQuotaExhausted(true)
+      setTimeout(() => setShowQuotaExhausted(false), 8000)
+      return
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -252,7 +285,30 @@ function HomeContent() {
         body: JSON.stringify(requestData)
       });
 
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      if (!response.ok) {
+        // Handle quota exceeded
+        if (response.status === 403) {
+          const errorData = await response.json()
+          if (errorData.error === 'quota_exceeded') {
+            setShowQuotaExhausted(true)
+            setAppleQuota(prev => prev ? { ...prev, remaining: 0 } : null)
+            // Auto-dismiss after 8 seconds
+            setTimeout(() => setShowQuotaExhausted(false), 8000)
+            // Remove the user message we just added since the request failed
+            setMessages(prev => prev.filter(m => m.id !== userMessage.id))
+            setIsLoading(false)
+            setIsStreamingStarted(false)
+            return
+          }
+        }
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      // 投喂模式：立即本地扣减苹果，再异步刷新真实值
+      if (isUltraMode) {
+        setAppleQuota(prev => prev ? { ...prev, remaining: Math.max(0, prev.remaining - 1), } : null)
+        fetchQuota()
+      }
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -321,7 +377,7 @@ function HomeContent() {
       streamContentRef.current = '';
       if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
     }
-  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, isStreamingStarted, user, ensureSession, saveMessage, supabase])
+  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, isStreamingStarted, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota])
 
   const handleBaziSubmit = async (data: BaziData) => {
     try {
@@ -362,12 +418,12 @@ function HomeContent() {
   }
 
   const suggestedPrompts = useMemo(() => [
-    "我今年事业运如何？",
-    "我的感情如何？",
-    "帮我大致分析一下我的人生格局",
-    "我的何时才能爆富？",
-    "我的未来会怎么样？",
-    "我正缘什么时候？",
+    "今年的事业会迎来转机吗？",
+    "近期适合做重大决策吗？",
+    "命中注定，我的人生高光时刻在几岁？",
+    "开启财运宝库的钥匙在哪？",
+    "向未来投一瞥，我会看到什么？",
+    "未来的另一半大概是什么样的人？",
   ], [])
 
   const startWithPrompt = useCallback((prompt: string) => {
@@ -418,6 +474,20 @@ function HomeContent() {
                     />
                   ))}
                 </div>
+                {/* Login prompt for unauthenticated users */}
+                {!user && (
+                  <div className="mt-8 bg-secondary/60 backdrop-blur-sm border border-border rounded-2xl px-6 py-4 max-w-md mx-auto text-center">
+                    <p className="text-sm text-muted-foreground font-light mb-3">
+                      登录后就可以和卜卜象聊天啦~ 还能获得每日 5 个苹果🍎用于投喂模式哦
+                    </p>
+                    <button
+                      onClick={() => setShowAuthDialog(true)}
+                      className="px-6 py-2 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
+                    >
+                      登录 / 注册
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -453,8 +523,67 @@ function HomeContent() {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-card/30 backdrop-blur-xl border-t border-border">
+      <div className="p-3 md:p-4 bg-card/30 backdrop-blur-xl border-t border-border">
         <div className="max-w-3xl mx-auto">
+          {/* Quota exhausted toast */}
+          {showQuotaExhausted && (
+            <div className="mb-3 bg-card/70 backdrop-blur-sm border border-primary/30 rounded-2xl px-4 py-3 glass-minimal animate-fade-in relative">
+              <button
+                onClick={() => setShowQuotaExhausted(false)}
+                className="absolute right-2 top-2 w-6 h-6 rounded-full bg-muted/50 hover:bg-muted flex items-center justify-center transition-colors"
+              >
+                <X className="w-3 h-3 text-muted-foreground" />
+              </button>
+              <p className="text-sm text-foreground font-light pr-6">
+                今天的苹果已经吃完啦🍎 明天卜卜象会带来新的苹果~ 也可以给卜卜象投喂获得更多哦
+              </p>
+              <button
+                onClick={() => { setShowDonationDialog(true); setShowQuotaExhausted(false) }}
+                className="mt-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-primary to-accent text-primary-foreground text-xs font-light hover:opacity-90 transition-all duration-300"
+              >
+                给卜卜象买苹果🍎
+              </button>
+            </div>
+          )}
+
+          {/* Mobile: toolbar row above input */}
+          {user && (
+            <div className="flex items-center gap-2 mb-2 md:hidden">
+              <ProfileSelector
+                selectedProfileId={selectedProfileId}
+                onSelectProfile={(profileId, baziResult) => {
+                  setSelectedProfileId(profileId)
+                  setBaziAnalysisResult(baziResult)
+                  if (baziResult) {
+                    console.log('已选择人物，八字结果已设置')
+                  } else {
+                    setBaziData(null)
+                  }
+                }}
+                onOpenProfilesDialog={() => setShowProfilesDialog(true)}
+              />
+              <button
+                type="button"
+                onClick={() => setIsUltraMode(!isUltraMode)}
+                className={`flex items-center justify-center gap-1.5 h-9 rounded-full border transition-all duration-300 ${
+                  isUltraMode
+                    ? 'bg-card text-foreground border-primary/60 shadow-sm px-3'
+                    : 'bg-transparent text-muted-foreground/50 border-border/50 hover:text-muted-foreground hover:border-border px-3'
+                }`}
+                title={isUltraMode ? '关闭投喂模式' : '开启投喂模式'}
+              >
+                <span className={`text-sm font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>投喂</span>
+                {appleQuota && (
+                  <span className={`text-[11px] font-light transition-all duration-300 ${
+                    isUltraMode ? 'text-primary/70' : 'text-muted-foreground/40'
+                  }`}>
+                    🍎{appleQuota.remaining}/{appleQuota.dailyLimit}
+                  </span>
+                )}
+              </button>
+            </div>
+          )}
+
           <form id="chat-form" onSubmit={handleSubmit} className="relative">
             <div className="relative">
               <input
@@ -462,11 +591,11 @@ function HomeContent() {
                 value={input}
                 onChange={handleInputChange}
                 placeholder={user ? "输入您想咨询的问题..." : "请先登录..."}
-                className="w-full px-6 py-4 pl-56 pr-14 rounded-full bg-card/70 backdrop-blur-sm border border-border text-foreground placeholder-muted-foreground font-light focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 text-base"
+                className="w-full px-4 py-3 pr-12 md:px-6 md:py-4 md:pl-56 md:pr-14 rounded-full bg-card/70 backdrop-blur-sm border border-border text-foreground placeholder-muted-foreground font-light focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 text-base"
                 disabled={isLoading || !user}
               />
-              {/* Left side: Profile selector and ULTRA button */}
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              {/* Desktop: Profile selector and 投喂 button inside input */}
+              <div className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 items-center gap-2">
                 {user && (
                   <>
                     <ProfileSelector
@@ -485,14 +614,21 @@ function HomeContent() {
                     <button
                       type="button"
                       onClick={() => setIsUltraMode(!isUltraMode)}
-                      className={`flex items-center justify-center w-16 h-10 rounded-full border transition-all duration-300 ${
+                      className={`flex items-center justify-center gap-1.5 h-10 rounded-full border transition-all duration-300 ${
                         isUltraMode
-                          ? 'bg-card text-foreground border-primary/60 shadow-sm'
-                          : 'bg-transparent text-muted-foreground/50 border-border/50 hover:text-muted-foreground hover:border-border'
+                          ? 'bg-card text-foreground border-primary/60 shadow-sm px-3'
+                          : 'bg-transparent text-muted-foreground/50 border-border/50 hover:text-muted-foreground hover:border-border px-3'
                       }`}
-                      title={isUltraMode ? '关闭 ULTRA 模式' : '开启 ULTRA 模式'}
+                      title={isUltraMode ? '关闭投喂模式' : '开启投喂模式'}
                     >
-                      <span className={`text-sm font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>ULTRA</span>
+                      <span className={`text-sm font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>投喂</span>
+                      {appleQuota && (
+                        <span className={`text-[11px] font-light transition-all duration-300 ${
+                          isUltraMode ? 'text-primary/70' : 'text-muted-foreground/40'
+                        }`}>
+                          🍎{appleQuota.remaining}/{appleQuota.dailyLimit}
+                        </span>
+                      )}
                     </button>
                   </>
                 )}
@@ -502,7 +638,7 @@ function HomeContent() {
                 <button
                   type="submit"
                   disabled={!input.trim() || isLoading || !user}
-                  className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
+                  className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
                 >
                   <Send className="w-4 h-4" />
                 </button>
@@ -534,6 +670,8 @@ function HomeContent() {
         onOpenAuth={() => setShowAuthDialog(true)}
         onOpenProfiles={() => setShowProfilesDialog(true)}
         onOpenChangePassword={() => setShowChangePasswordDialog(true)}
+        appleQuota={appleQuota}
+        onOpenDonation={() => setShowDonationDialog(true)}
       />
 
       <SidebarInset className="relative overflow-hidden bg-background">
@@ -555,6 +693,7 @@ function HomeContent() {
               onOpenAuth={() => setShowAuthDialog(true)}
               onOpenProfiles={() => setShowProfilesDialog(true)}
               onOpenChangePassword={() => setShowChangePasswordDialog(true)}
+              appleQuota={appleQuota}
             />
           </div>
 
@@ -580,7 +719,19 @@ function HomeContent() {
           isOpen={showChangePasswordDialog}
           onClose={() => setShowChangePasswordDialog(false)}
         />
-        <DonationButton />
+        {/* Donation floating button */}
+        <button
+          onClick={() => setShowDonationDialog(true)}
+          className="fixed bottom-20 right-4 w-12 h-12 rounded-full bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-300 flex items-center justify-center group z-30"
+          title="给卜卜象买苹果"
+        >
+          <span className="text-lg group-hover:animate-pulse">🍎</span>
+        </button>
+        <DonationDialog
+          isOpen={showDonationDialog}
+          onClose={() => setShowDonationDialog(false)}
+          appleQuota={appleQuota}
+        />
       </SidebarInset>
     </>
   )

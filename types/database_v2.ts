@@ -221,6 +221,37 @@ export interface Database {
       }
 
       // ============================================
+      // User Quotas Table (Apple Quota System)
+      // ============================================
+      user_quotas: {
+        Row: {
+          user_id: string
+          is_paid: boolean
+          daily_apple_limit: number
+          apples_used_today: number
+          last_reset_date: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          is_paid?: boolean
+          daily_apple_limit?: number
+          apples_used_today?: number
+          last_reset_date?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          is_paid?: boolean
+          daily_apple_limit?: number
+          apples_used_today?: number
+          last_reset_date?: string
+          updated_at?: string
+        }
+      }
+
+      // ============================================
       // Message Feedback Table
       // ============================================
       message_feedback: {
@@ -298,6 +329,7 @@ export type ChatSession = Database['public']['Tables']['chat_sessions']['Row']
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row']
 export type UserPreferences = Database['public']['Tables']['user_preferences']['Row']
 export type MessageFeedback = Database['public']['Tables']['message_feedback']['Row']
+export type UserQuota = Database['public']['Tables']['user_quotas']['Row']
 
 export type ProfileInsert = Database['public']['Tables']['profiles']['Insert']
 export type BaziProfileInsert = Database['public']['Tables']['bazi_profiles']['Insert']
@@ -305,6 +337,7 @@ export type ChatSessionInsert = Database['public']['Tables']['chat_sessions']['I
 export type ChatMessageInsert = Database['public']['Tables']['chat_messages']['Insert']
 export type UserPreferencesInsert = Database['public']['Tables']['user_preferences']['Insert']
 export type MessageFeedbackInsert = Database['public']['Tables']['message_feedback']['Insert']
+export type UserQuotaInsert = Database['public']['Tables']['user_quotas']['Insert']
 
 export type ProfileUpdate = Database['public']['Tables']['profiles']['Update']
 export type BaziProfileUpdate = Database['public']['Tables']['bazi_profiles']['Update']
@@ -312,6 +345,7 @@ export type ChatSessionUpdate = Database['public']['Tables']['chat_sessions']['U
 export type ChatMessageUpdate = Database['public']['Tables']['chat_messages']['Update']
 export type UserPreferencesUpdate = Database['public']['Tables']['user_preferences']['Update']
 export type MessageFeedbackUpdate = Database['public']['Tables']['message_feedback']['Update']
+export type UserQuotaUpdate = Database['public']['Tables']['user_quotas']['Update']
 
 // ============================================
 // Enum Types

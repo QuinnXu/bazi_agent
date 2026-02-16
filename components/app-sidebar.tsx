@@ -41,6 +41,8 @@ interface AppSidebarProps {
   onOpenAuth: () => void
   onOpenProfiles: () => void
   onOpenChangePassword: () => void
+  appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null
+  onOpenDonation?: () => void
 }
 
 const featureItems: { id: FeatureType; label: string; icon: React.ElementType }[] = [
@@ -81,6 +83,8 @@ export function AppSidebar({
   onOpenAuth,
   onOpenProfiles,
   onOpenChangePassword,
+  appleQuota,
+  onOpenDonation,
 }: AppSidebarProps) {
   const { user, signOut } = useAuth()
   const supabase = createBrowserClient()
@@ -229,6 +233,25 @@ export function AppSidebar({
 
       {/* ---- Footer: 用户区域 ---- */}
       <SidebarFooter className="p-2 border-t border-sidebar-border">
+        {/* Apple quota display */}
+        {user && appleQuota && (
+          <button
+            onClick={onOpenDonation}
+            className="w-full bg-secondary/40 rounded-xl px-3 py-2 mb-2 flex items-center justify-between hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm">🍎</span>
+              <span className="text-xs font-light text-sidebar-foreground">
+                今日苹果 {appleQuota.remaining}/{appleQuota.dailyLimit}
+              </span>
+            </div>
+            {appleQuota.isPaid && (
+              <span className="bg-accent/20 text-accent rounded-full px-2 py-0.5 text-[10px] font-light">
+                VIP
+              </span>
+            )}
+          </button>
+        )}
         {!user ? (
           <button
             onClick={onOpenAuth}

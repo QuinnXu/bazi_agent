@@ -5,6 +5,9 @@ export const maxDuration = 300
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { paipan: PaipanClass } = require('@/tool/paipan')
 
+import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { consumeApple } from '@/lib/quota'
+
 // Helper function to get current date string with Chinese calendar GanZhi
 function getCurrentDateString(): string {
   const now = new Date()
@@ -42,9 +45,9 @@ const DEEPSEEK_BAZI_INSTRUCTIONS = `请根据用户的诉求，先着重分析�
 - 请着重围绕用户的提问和关心的领域，根据以上方法展开相应话题的分析。
 - 请在使用专业术语同时，用通俗易懂的语言结合具体情况展开解释。
 - 用积极乐观的态度给予回复
-- 在和多轮对话不要过分重复已经提到的内容，对话过程自然流畅，符合人设`
+- 在多轮对话不要过分重复已经提到的内容，对话过程自然流畅，符合人设`
 
-// Gemini (ULTRA) System Prompt - 可以独立修改
+// Gemini (投喂) System Prompt - 可以独立修改
 const GEMINI_BASE_PROMPT = "你是'卜卜象'，一个精通八字命理又善解人意积极乐观的温柔可爱小象。请主要用盲派八字的理论，结合旺衰、子平等分析并答复用户的咨询。"
 
 const GEMINI_BAZI_INSTRUCTIONS = `请根据用户的诉求，先着重分析命主的性格，人生际遇或人生格局并针对成长，职业发展，人生规划，风险规避等方面做出分析和给出建议。
@@ -52,9 +55,10 @@ const GEMINI_BAZI_INSTRUCTIONS = `请根据用户的诉求，先着重分析命�
 - 结合天干（外显或外在的表现等）与地支（内在、内心的想法、世纪情况等）分析命主在不同阶段的性格变化与矛盾冲突等，取得用户的信任但是顺从用户自身的判断。
 - 请结合专列用户人生重大转折的时间节点做出提示和建议等。
 - 请着重围绕用户的提问和关心的领域，根据以上方法展开相应话题的分析。
+- 在用户询问的问题与当前的时间有关，则针对时间进行分析，若无关则不要过分提及。
 - 请在使用专业术语同时，用通俗易懂的语言结合具体情况展开解释。
 - 用积极乐观的态度给予回复
-- 在和多轮对话不要过分重复已经提到的内容，对话过程自然流畅，符合人设`
+- 在多轮对话不要过分重复已经提到的内容和过分强调重复已有的命理分析，更注重推论，对话过程自然流畅，符合人设`
 
 // ==================== Build System Prompt ====================
 function buildDeepSeekPrompt(baziAnalysisResult: string | null): string {
@@ -233,27 +237,72 @@ function createDeepSeekStreamProcessor(response: Response) {
   })
 }
 
-// Gemini stream processor - optimized for smoother output
+// Gemini stream processor - character-level drip for smooth output
 function createGeminiStreamProcessor(response: Response) {
   return new ReadableStream({
     async start(controller) {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      // Queue of text chunks to drip out character by character
+      let charQueue = ''
+      let dripping = false
 
       if (!reader) {
         controller.close()
         return
       }
 
+      const encoder = new TextEncoder()
+
+      // Drip characters out at a steady pace for smooth rendering
+      async function dripChars() {
+        if (dripping) return
+        dripping = true
+        while (charQueue.length > 0) {
+          // Send 1-3 characters at a time for a natural typing feel
+          const chunkSize = Math.min(charQueue.length, charQueue.charCodeAt(0) > 127 ? 1 : 3)
+          const chars = charQueue.slice(0, chunkSize)
+          charQueue = charQueue.slice(chunkSize)
+          try {
+            controller.enqueue(encoder.encode(chars))
+          } catch {
+            break
+          }
+          // Micro-delay: ~12ms per drip ≈ ~80 chars/sec for Chinese text
+          await new Promise(r => setTimeout(r, 12))
+        }
+        dripping = false
+      }
+
       try {
         while (true) {
           const { done, value } = await reader.read()
-          
+
           if (done) {
             // Process any remaining buffer
             if (buffer.trim()) {
-              processBufferedLines(buffer, controller)
+              const lines = buffer.split('\n')
+              for (const line of lines) {
+                if (line.trim() === '' || !line.startsWith('data: ')) continue
+                const data = line.slice(6)
+                if (data === '[DONE]') break
+                try {
+                  const parsed = JSON.parse(data)
+                  const content = parsed.choices?.[0]?.delta?.content || ''
+                  if (content) charQueue += content
+                } catch { /* ignore */ }
+              }
+            }
+            // Drain remaining chars
+            while (charQueue.length > 0) {
+              const chunkSize = Math.min(charQueue.length, charQueue.charCodeAt(0) > 127 ? 1 : 3)
+              const chars = charQueue.slice(0, chunkSize)
+              charQueue = charQueue.slice(chunkSize)
+              try {
+                controller.enqueue(encoder.encode(chars))
+              } catch { break }
+              await new Promise(r => setTimeout(r, 12))
             }
             controller.close()
             break
@@ -261,19 +310,27 @@ function createGeminiStreamProcessor(response: Response) {
 
           const chunk = decoder.decode(value, { stream: true })
           buffer += chunk
-          
-          // Process complete lines immediately for smoother streaming
+
+          // Parse complete SSE lines and feed content into charQueue
           let newlineIndex: number
           while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
             const line = buffer.slice(0, newlineIndex)
             buffer = buffer.slice(newlineIndex + 1)
-            
+
             if (line.trim() === '') continue
-            
+
             if (line.startsWith('data: ')) {
               const data = line.slice(6)
-              
+
               if (data === '[DONE]') {
+                // Drain remaining
+                while (charQueue.length > 0) {
+                  const cs = Math.min(charQueue.length, charQueue.charCodeAt(0) > 127 ? 1 : 3)
+                  const chars = charQueue.slice(0, cs)
+                  charQueue = charQueue.slice(cs)
+                  try { controller.enqueue(encoder.encode(chars)) } catch { break }
+                  await new Promise(r => setTimeout(r, 12))
+                }
                 controller.close()
                 return
               }
@@ -281,12 +338,12 @@ function createGeminiStreamProcessor(response: Response) {
               try {
                 const parsed = JSON.parse(data)
                 const content = parsed.choices?.[0]?.delta?.content || ''
-                
                 if (content) {
-                  // Send content immediately without buffering
-                  controller.enqueue(new TextEncoder().encode(content))
+                  charQueue += content
+                  // Kick off dripping if not already running
+                  dripChars()
                 }
-              } catch (e) {
+              } catch {
                 // Ignore parse errors for incomplete JSON
               }
             }
@@ -324,7 +381,34 @@ function processBufferedLines(buffer: string, controller: ReadableStreamDefaultC
 // ==================== Main Handler ====================
 export async function POST(req: Request) {
   try {
+    // --- Auth check ---
+    const supabase = await createServerSupabaseClient()
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'unauthorized', message: '请先登录后再使用聊天功能' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
     const { messages, baziAnalysisResult, useUltraMode = false } = await req.json()
+
+    // --- 投喂 mode quota check ---
+    if (useUltraMode) {
+      const { success, quota } = await consumeApple(user.id)
+      if (!success) {
+        return new Response(
+          JSON.stringify({
+            error: 'quota_exceeded',
+            message: '今天的苹果已经吃完啦🍎 明天卜卜象会带来新的苹果~',
+            remaining: quota.remaining,
+            dailyLimit: quota.dailyLimit,
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+    }
 
     let response: Response
     let messagesWithSystem: any[]

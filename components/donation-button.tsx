@@ -1,27 +1,44 @@
 "use client"
 
-import React, { useState } from "react"
-import { Heart, X } from "lucide-react"
+import React, { useMemo } from "react"
+import { X } from "lucide-react"
 import Image from "next/image"
 
 interface DonationDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null;
 }
 
-function DonationDialog({ isOpen, onClose }: DonationDialogProps) {
+// 卜卜象口吻的投喂文案
+const donationMessages = [
+  "卜卜象最喜欢苹果啦~ 吃了苹果才能帮你看得更准呢",
+  "每个苹果都是星星做的，卜卜象会认真帮你分析命盘的",
+  "投喂一个苹果，卜卜象开心一整天~",
+  "有苹果吃的卜卜象，算命特别灵✨",
+  "谢谢你的苹果！卜卜象会努力帮你看运势的~",
+  "苹果是卜卜象的能量来源🍎 吃饱了才能转动水晶球",
+]
+
+export function DonationDialog({ isOpen, onClose, appleQuota }: DonationDialogProps) {
+  // Pick a stable random message per dialog open
+  const randomMessage = useMemo(() => {
+    return donationMessages[Math.floor(Math.random() * donationMessages.length)]
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* 背景遮罩 */}
-      <div 
+      <div
         className="fixed inset-0 bg-black/20 backdrop-blur-sm"
         onClick={onClose}
       />
-      
+
       {/* 弹窗内容 */}
-      <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-sm w-full shadow-xl glass-minimal">
+      <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-sm w-full shadow-xl glass-minimal animate-fade-in">
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
@@ -31,22 +48,37 @@ function DonationDialog({ isOpen, onClose }: DonationDialogProps) {
         </button>
 
         {/* 标题 */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-            <Heart className="w-4 h-4 text-primary" />
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center text-lg">
+            🍎
           </div>
-          <h2 className="text-xl font-light text-foreground">感谢投喂</h2>
+          <h2 className="text-xl font-light text-foreground">给卜卜象投喂苹果</h2>
         </div>
 
         {/* 内容 */}
         <div className="text-center space-y-4">
-          <p className="text-sm text-muted-foreground font-light">
-            给卜卜象买个苹果🍎
+          {/* 卜卜象口吻的随机文案 */}
+          <p className="text-sm text-muted-foreground font-light leading-relaxed">
+            {randomMessage}
           </p>
-          
+
+          {/* 苹果余额提示 */}
+          {appleQuota && (
+            <div className="inline-flex items-center gap-1.5 bg-secondary/50 rounded-full px-3 py-1.5">
+              <span className="text-xs font-light text-foreground">
+                你今天还有 {appleQuota.remaining} 个苹果🍎
+              </span>
+              {appleQuota.isPaid && (
+                <span className="bg-accent/20 text-accent rounded-full px-1.5 py-0.5 text-[10px] font-light">
+                  VIP
+                </span>
+              )}
+            </div>
+          )}
+
           {/* 二维码 */}
           <div className="flex justify-center">
-            <div className="bg-card p-4 rounded-lg border border-border shadow-sm">
+            <div className="bg-card p-4 rounded-xl border border-border shadow-sm">
               <Image
                 src="/qr_code.png"
                 alt="打赏二维码"
@@ -57,9 +89,10 @@ function DonationDialog({ isOpen, onClose }: DonationDialogProps) {
               />
             </div>
           </div>
-          
-          <p className="text-xs text-muted-foreground font-light">
-            谢谢！谢谢！
+
+          {/* 升级提示 */}
+          <p className="text-[11px] text-muted-foreground/70 font-light leading-relaxed">
+            打赏后私信告知，即可升级为 VIP 获得每日 999 个苹果🍎
           </p>
         </div>
       </div>
@@ -67,23 +100,8 @@ function DonationDialog({ isOpen, onClose }: DonationDialogProps) {
   );
 }
 
+// Keep the old DonationButton export for backward compatibility,
+// but it's now unused since page.tsx manages the dialog state directly.
 export function DonationButton() {
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-
-  return (
-    <>
-      <button
-        onClick={() => setIsDialogOpen(true)}
-        className="fixed bottom-20 right-4 w-12 h-12 rounded-full bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-300 flex items-center justify-center group"
-        title="打赏支持"
-      >
-        <Heart className="w-5 h-5 group-hover:animate-pulse" />
-      </button>
-      
-      <DonationDialog
-        isOpen={isDialogOpen}
-        onClose={() => setIsDialogOpen(false)}
-      />
-    </>
-  );
+  return null;
 }
