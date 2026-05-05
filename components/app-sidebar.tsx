@@ -5,7 +5,9 @@ import Image from 'next/image'
 import {
   MessageSquare,
   Users,
-  Sparkles,
+  CalendarRange,
+  ImageIcon,
+  Compass,
   Plus,
   Trash2,
   LogOut,
@@ -31,7 +33,7 @@ import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
 import type { ChatSession } from '@/types/database_v2'
 
-export type FeatureType = 'chat' | 'hepan' | 'yaogua'
+export type FeatureType = 'chat' | 'hepan' | 'fortune' | 'avatar' | 'lifepath'
 
 interface AppSidebarProps {
   activeFeature: FeatureType
@@ -47,8 +49,10 @@ interface AppSidebarProps {
 
 const featureItems: { id: FeatureType; label: string; icon: React.ElementType }[] = [
   { id: 'chat', label: '八字问答', icon: MessageSquare },
-  { id: 'hepan', label: '多人合盘', icon: Users },
-  { id: 'yaogua', label: '卜卜象爻卦', icon: Sparkles },
+  { id: 'hepan', label: '合盘 / 应事', icon: Users },
+  { id: 'fortune', label: '近期运势', icon: CalendarRange },
+  { id: 'avatar', label: '头像分析推荐', icon: ImageIcon },
+  { id: 'lifepath', label: '人生脉络', icon: Compass },
 ]
 
 function groupSessionsByDate(sessions: ChatSession[]) {

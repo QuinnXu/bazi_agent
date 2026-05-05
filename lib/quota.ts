@@ -90,20 +90,26 @@ export async function getOrResetQuota(userId: string): Promise<QuotaInfo> {
 }
 
 /**
- * Try to consume one apple. Returns true if successful, false if quota exhausted.
- * One question = one apple consumed.
+ * Try to consume N apples atomically. Returns success=false if quota insufficient.
+ * - 1 question (chat投喂) = 1 apple
+ * - 近期运势 = 1 apple
+ * - 合盘 / 人生脉络 = 2 apples
+ * - 头像分析 = 3 apples
  */
-export async function consumeApple(userId: string): Promise<{ success: boolean; quota: QuotaInfo }> {
+export async function consumeApples(
+  userId: string,
+  count = 1,
+): Promise<{ success: boolean; quota: QuotaInfo }> {
+  const safeCount = Math.max(1, Math.floor(count))
   const quota = await getOrResetQuota(userId)
 
-  // If DB wasn't accessible, don't block the user — allow the request
   if (!quota.dbConnected) {
     console.warn('[Quota] DB not connected, allowing request as fallback')
     return { success: true, quota }
   }
 
-  if (quota.remaining <= 0) {
-    console.log('[Quota] No apples remaining for user', userId)
+  if (quota.remaining < safeCount) {
+    console.log(`[Quota] Insufficient apples for user ${userId}: need ${safeCount}, have ${quota.remaining}`)
     return { success: false, quota }
   }
 
@@ -111,22 +117,21 @@ export async function consumeApple(userId: string): Promise<{ success: boolean; 
   const { data: updated, error } = await supabase
     .from('user_quotas')
     .update({
-      apples_used_today: quota.usedToday + 1,
+      apples_used_today: quota.usedToday + safeCount,
     })
     .eq('user_id', userId)
     .select()
     .single()
 
   if (error || !updated) {
-    console.error('[Quota] Failed to consume apple:', error?.message)
-    // Update failed but DB was reachable earlier — try upsert as last resort
+    console.error('[Quota] Failed to consume apples:', error?.message)
     const { data: upserted, error: upsertError } = await supabase
       .from('user_quotas')
       .upsert({
         user_id: userId,
         is_paid: false,
         daily_apple_limit: DEFAULT_DAILY_LIMIT,
-        apples_used_today: 1,
+        apples_used_today: safeCount,
         last_reset_date: new Date().toISOString().split('T')[0],
       })
       .select()
@@ -134,15 +139,56 @@ export async function consumeApple(userId: string): Promise<{ success: boolean; 
 
     if (upsertError || !upserted) {
       console.error('[Quota] Upsert fallback also failed:', upsertError?.message)
-      // If everything fails, allow the request rather than blocking
       return { success: true, quota }
     }
 
     return { success: true, quota: toQuotaInfo(upserted) }
   }
 
-  const updatedQuota = toQuotaInfo(updated)
-  return { success: true, quota: updatedQuota }
+  return { success: true, quota: toQuotaInfo(updated) }
+}
+
+/**
+ * Backward-compatible single-apple consumer. Forwards to consumeApples(userId, 1).
+ */
+export async function consumeApple(userId: string) {
+  return consumeApples(userId, 1)
+}
+
+/**
+ * Refund apples on analysis failure. Will not push usage below 0.
+ */
+export async function refundApples(
+  userId: string,
+  count = 1,
+): Promise<QuotaInfo> {
+  const safeCount = Math.max(1, Math.floor(count))
+  const quota = await getOrResetQuota(userId)
+
+  if (!quota.dbConnected) {
+    console.warn('[Quota] DB not connected, refund skipped')
+    return quota
+  }
+
+  const newUsed = Math.max(0, quota.usedToday - safeCount)
+  if (newUsed === quota.usedToday) {
+    return quota
+  }
+
+  const supabase = createServiceClient()
+  const { data: updated, error } = await supabase
+    .from('user_quotas')
+    .update({ apples_used_today: newUsed })
+    .eq('user_id', userId)
+    .select()
+    .single()
+
+  if (error || !updated) {
+    console.error('[Quota] Failed to refund apples:', error?.message)
+    return quota
+  }
+
+  return toQuotaInfo(updated)
 }
 
 function toQuotaInfo(row: UserQuota): QuotaInfo {

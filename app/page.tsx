@@ -7,25 +7,46 @@ import Image from "next/image"
 import { MinimalBackground } from "@/components/minimal-background"
 import { ChatMessage } from "@/components/chat-message"
 import { BaziDialog } from "@/components/bazi-dialog"
-import { SuggestedPromptButton } from "@/components/suggested-prompt-button"
 import { DonationDialog } from "@/components/donation-button"
 import { AuthDialog } from "@/components/auth-dialog"
 import { UserMenu } from "@/components/user-menu"
 import { useAuth } from "@/contexts/auth-context"
 import { createBrowserClient } from "@/lib/supabase/client"
 import { ProfilesManagementDialog } from "@/components/profiles-management-dialog"
-import { ProfileSelector } from "@/components/profile-selector"
 import { ChangePasswordDialog } from "@/components/change-password-dialog"
 import { SidebarProvider, SidebarInset, SidebarTrigger, useSidebar } from "@/components/ui/sidebar"
 import { AppSidebar, type FeatureType } from "@/components/app-sidebar"
-import { FeatureHePan } from "@/components/feature-hepan"
-import { FeatureYaoGua } from "@/components/feature-yaogua"
+import { FeatureCards } from "@/components/feature-cards"
+import { FeatureLauncherButton } from "@/components/feature-launcher-button"
+import { HepanPage } from "@/components/features/hepan-page"
+import { FortunePage } from "@/components/features/fortune-page"
+import { AvatarPage } from "@/components/features/avatar-page"
+import { LifePathPage } from "@/components/features/lifepath-page"
+import { detectFeatureKindFromContent } from "@/components/chat-message"
+import type {
+  FeatureKind,
+  FeaturePayload,
+  HepanParams,
+  FortuneParams,
+  AvatarParams,
+  LifePathParams,
+} from "@/lib/feature-types"
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   createdAt: Date;
+}
+
+// Track structured feature context for follow-up Q&A.
+// Keeps participants & params so /api/chat can re-inject after a feature analysis.
+interface FeatureContext {
+  kind: FeatureKind
+  // light summary of the original request (for the follow-up system prompt)
+  summary: string
+  // participants info for hepan/fortune/lifepath; empty for avatar
+  participants: { name: string; baziText?: string | null; pillars?: string | null }[]
 }
 
 interface BaziData {
@@ -75,6 +96,8 @@ function HomeContent() {
   const [isUltraMode, setIsUltraMode] = useState(false)
   const [activeFeature, setActiveFeature] = useState<FeatureType>('chat')
   const [showDonationDialog, setShowDonationDialog] = useState(false)
+  const [featureContext, setFeatureContext] = useState<FeatureContext | null>(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   // Apple quota state
   const [appleQuota, setAppleQuota] = useState<{ remaining: number; dailyLimit: number; isPaid: boolean } | null>(null)
@@ -232,6 +255,7 @@ function HomeContent() {
     if (sessionId === 'new') {
       setMessages([])
       setCurrentSessionId(null)
+      setFeatureContext(null)
       return
     }
     try {
@@ -249,6 +273,8 @@ function HomeContent() {
       }))
       setMessages(loadedMessages)
       setCurrentSessionId(sessionId)
+      // Reset feature context when switching sessions; will be re-derived if needed
+      setFeatureContext(null)
     } catch (error) {
       console.error('加载会话失败:', error)
     }
@@ -301,6 +327,14 @@ function HomeContent() {
       };
       if (baziAnalysisResult) requestData.baziAnalysisResult = baziAnalysisResult;
       requestData.useUltraMode = isUltraMode;
+      // Inject feature follow-up context so the AI keeps participants & summary
+      if (featureContext) {
+        requestData.participants = featureContext.participants
+        requestData.featureContext = {
+          kind: featureContext.kind,
+          summary: featureContext.summary,
+        }
+      }
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -400,7 +434,183 @@ function HomeContent() {
       streamContentRef.current = '';
       if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
     }
-  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, isStreamingStarted, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota])
+  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, isStreamingStarted, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext])
+
+  // ==================== Feature analysis ====================
+  const submitFeatureAnalyze = useCallback(async (payload: FeaturePayload) => {
+    if (!user) {
+      setShowAuthDialog(true)
+      return
+    }
+    if (isLoading || isAnalyzing) return
+
+    // Build display content (sentinel-prefixed plaintext for the user bubble)
+    let userDisplay = ''
+    let participants: { name: string; baziText?: string | null; pillars?: string | null }[] = []
+    let summary = ''
+
+    if (payload.kind === 'hepan') {
+      const p = payload.params as HepanParams
+      const subLabel = p.subtype === 'pair' ? '双人合盘' : p.subtype === 'multi' ? '多人合盘' : '应事分析'
+      const names = p.participants.map(x => x.name).join('、')
+      summary = `${subLabel}：${names}${p.relationLabel ? ` · ${p.relationLabel}` : ''}${p.eventDesc ? ` · 应事：${p.eventDesc.slice(0, 30)}` : ''}`
+      participants = p.participants.map(x => ({ name: x.name, baziText: x.baziText, pillars: x.pillars }))
+      userDisplay = `[卜卜象·合盘]（${subLabel}）\n人物：${names}${p.relationLabel ? `\n关系：${p.relationLabel}` : ''}${p.eventDesc ? `\n应事：${p.eventDesc}` : ''}`
+    } else if (payload.kind === 'fortune') {
+      const p = payload.params as FortuneParams
+      summary = `近期运势 · ${p.profile.name}：${p.start} ~ ${p.end}（${p.granularity === 'day' ? '逐日' : '逐月'}）· 关注：${p.focus.join('、')}`
+      participants = [{ name: p.profile.name, baziText: p.profile.baziText, pillars: p.profile.pillars }]
+      userDisplay = `[卜卜象·近期运势]（${p.granularity === 'day' ? '逐日' : '逐月'}）\n命主：${p.profile.name}\n时间：${p.start} ~ ${p.end}\n关注：${p.focus.join('、')}`
+    } else if (payload.kind === 'avatar') {
+      const p = payload.params as AvatarParams
+      summary = `头像分析推荐${p.combineBazi && p.profile ? ` · 结合 ${p.profile.name} 的八字` : '（仅气质分析）'}`
+      participants = p.profile ? [{ name: p.profile.name, baziText: p.profile.baziText, pillars: p.profile.pillars }] : []
+      userDisplay = `[卜卜象·头像]\n上传了头像${p.combineBazi ? `，结合${p.profile ? ` ${p.profile.name} 的` : ''}八字` : ''}`
+    } else if (payload.kind === 'lifepath') {
+      const p = payload.params as LifePathParams
+      summary = `人生脉络与总体分析 · ${p.profile.name}`
+      participants = [{ name: p.profile.name, baziText: p.profile.baziText, pillars: p.profile.pillars }]
+      userDisplay = `[卜卜象·人生脉络]\n命主：${p.profile.name}`
+    }
+
+    // Switch back to chat view
+    setActiveFeature('chat')
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: userDisplay,
+      createdAt: new Date(),
+    }
+
+    setMessages(prev => [...prev, userMessage])
+    setIsAnalyzing(true)
+    setIsLoading(true)
+    setIsStreamingStarted(false)
+
+    let sessionId: string | null = null
+    const isNewSession = !currentSessionId
+    if (user) {
+      sessionId = await ensureSession()
+      if (sessionId) {
+        await saveMessage(sessionId, 'user', userMessage.content)
+        if (isNewSession) {
+          const titleText = summary.slice(0, 30) + (summary.length > 30 ? '...' : '')
+          await supabase.from('chat_sessions').update({ title: titleText }).eq('id', sessionId)
+        }
+      }
+    }
+
+    try {
+      const res = await fetch('/api/feature-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: payload.kind,
+          params: payload.params,
+          useUltraMode: isUltraMode,
+        }),
+      })
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          const err = await res.json().catch(() => ({}))
+          if (err?.error === 'quota_exceeded') {
+            setShowQuotaExhausted(true)
+            setAppleQuota(prev => prev ? { ...prev, remaining: err.remaining ?? 0 } : null)
+            setTimeout(() => setShowQuotaExhausted(false), 8000)
+            // Roll back the user bubble
+            setMessages(prev => prev.filter(m => m.id !== userMessage.id))
+            return
+          }
+        }
+        throw new Error(`HTTP ${res.status}`)
+      }
+
+      // Refresh quota optimistically (server will have consumed N apples)
+      fetchQuota()
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: '',
+        createdAt: new Date(),
+      }
+      streamingMessageIdRef.current = assistantMessage.id
+      streamContentRef.current = ''
+      setMessages(prev => [...prev, assistantMessage])
+
+      const reader = res.body?.getReader()
+      if (reader) {
+        const decoder = new TextDecoder()
+        let fullContent = ''
+        let streamingStarted = false
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value, { stream: true })
+          fullContent += chunk
+          streamContentRef.current = fullContent
+          if (!streamingStarted && chunk.trim()) {
+            streamingStarted = true
+            setIsStreamingStarted(true)
+          }
+          if (!rafIdRef.current) {
+            rafIdRef.current = requestAnimationFrame(() => {
+              const latest = streamContentRef.current
+              setMessages(prev => prev.map(m => m.id === assistantMessage.id ? { ...m, content: latest } : m))
+              rafIdRef.current = null
+            })
+          }
+        }
+        if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
+        streamingMessageIdRef.current = null
+        setMessages(prev => prev.map(m => m.id === assistantMessage.id ? { ...m, content: fullContent } : m))
+        if (user && sessionId && fullContent) {
+          await saveMessage(sessionId, 'assistant', fullContent)
+        }
+        // After successful analysis: refresh quota again (server may have refunded if empty stream)
+        fetchQuota()
+        // Save feature context for follow-up
+        setFeatureContext({ kind: payload.kind, summary, participants })
+      }
+    } catch (error) {
+      console.error('Feature analyze error:', error)
+      const errorMessage: Message = {
+        id: (Date.now() + 2).toString(),
+        role: 'assistant',
+        content: '抱歉，分析时遇到了一点小问题，已为你退还苹果🍎，请稍后再试。',
+        createdAt: new Date(),
+      }
+      setMessages(prev => [...prev, errorMessage])
+      // Server-side refund already happened; refresh quota to reflect
+      fetchQuota()
+    } finally {
+      setIsLoading(false)
+      setIsStreamingStarted(false)
+      setIsAnalyzing(false)
+      streamingMessageIdRef.current = null
+      streamContentRef.current = ''
+      if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
+    }
+  }, [user, isLoading, isAnalyzing, currentSessionId, ensureSession, saveMessage, supabase, isUltraMode, fetchQuota])
+
+  // Helper used by chat-message follow-up buttons & launcher button.
+  const fillAndSubmit = useCallback((text: string) => {
+    if (!user) {
+      setShowAuthDialog(true)
+      return
+    }
+    setInput(text)
+    setTimeout(() => {
+      const ev = { preventDefault: () => {} } as React.FormEvent
+      handleSubmit(ev)
+    }, 30)
+  }, [user, handleSubmit])
+
+  const openFeaturePage = useCallback((kind: FeatureKind) => {
+    setActiveFeature(kind as FeatureType)
+  }, [])
 
   const handleBaziSubmit = async (data: BaziData) => {
     try {
@@ -440,25 +650,6 @@ function HomeContent() {
     }
   }
 
-  const suggestedPrompts = useMemo(() => [
-    "今年的事业会迎来转机吗？",
-    "近期适合做重大决策吗？",
-    "命中注定，我的人生高光时刻在几岁？",
-    "开启财运宝库的钥匙在哪？",
-    "向未来投一瞥，我会看到什么？",
-    "未来的另一半大概是什么样的人？",
-  ], [])
-
-  const startWithPrompt = useCallback((prompt: string) => {
-    requestAnimationFrame(() => {
-      setInput(prompt);
-      setTimeout(() => {
-        const syntheticEvent = { preventDefault: () => {} } as React.FormEvent;
-        handleSubmit(syntheticEvent);
-      }, 50);
-    });
-  }, [handleSubmit]);
-
   // ---- 渲染主聊天区域 ----
   const renderChatArea = () => (
     <>
@@ -467,11 +658,11 @@ function HomeContent() {
         <div className="max-w-3xl mx-auto">
           <div ref={messagesStartRef} />
           {messages.length === 0 ? (
-            // Welcome Screen
-            <div className="text-center space-y-12 py-12">
-              <div className="space-y-8">
+            // Welcome Screen — mobile-first proportions
+            <div className="text-center space-y-6 sm:space-y-8 md:space-y-12 py-4 sm:py-8 md:py-12">
+              <div className="space-y-3 sm:space-y-5 md:space-y-8">
                 <div className="flex justify-center">
-                  <div className="relative w-32 h-32 md:w-40 md:h-40">
+                  <div className="relative w-20 h-20 sm:w-28 sm:h-28 md:w-40 md:h-40">
                     <Image
                       src="/logo.jpg"
                       alt="卜卜象"
@@ -481,32 +672,35 @@ function HomeContent() {
                     />
                   </div>
                 </div>
-                <h1 className="text-4xl md:text-6xl font-light text-foreground leading-tight">
+                <h1 className="text-2xl sm:text-3xl md:text-6xl font-light text-foreground leading-tight">
                   卜卜象陪你卜卜象
                 </h1>
-                <p className="text-lg text-muted-foreground max-w-xl mx-auto leading-relaxed font-light">
+                <p className="text-sm sm:text-base md:text-lg text-muted-foreground max-w-xl mx-auto leading-relaxed font-light px-4">
                   温柔可爱的命理分析小象，快来和我对话吧
                 </p>
               </div>
-              <div className="flex flex-col items-center">
-                <div className="flex flex-wrap gap-3 justify-center max-w-2xl mx-auto">
-                  {suggestedPrompts.map((prompt, i) => (
-                    <SuggestedPromptButton
-                      key={i}
-                      prompt={prompt}
-                      onClick={startWithPrompt}
-                    />
-                  ))}
-                </div>
+              <div className="flex flex-col items-center space-y-5 sm:space-y-6 md:space-y-8">
+                {/* Feature cards: structured entry points */}
+                <FeatureCards
+                  onPick={(kind) => {
+                    if (!user) {
+                      // Allow browsing the sub-page form, login required only on submit
+                      setActiveFeature(kind as FeatureType)
+                      return
+                    }
+                    setActiveFeature(kind as FeatureType)
+                  }}
+                />
+
                 {/* Login prompt for unauthenticated users */}
                 {!user && (
-                  <div className="mt-8 bg-secondary/60 backdrop-blur-sm border border-border rounded-2xl px-6 py-4 max-w-md mx-auto text-center">
-                    <p className="text-sm text-muted-foreground font-light mb-3">
+                  <div className="bg-secondary/60 backdrop-blur-sm border border-border rounded-2xl px-5 py-3.5 sm:px-6 sm:py-4 max-w-md mx-auto text-center">
+                    <p className="text-xs sm:text-sm text-muted-foreground font-light mb-3">
                       登录后就可以和卜卜象聊天啦~ 还能获得每日 5 个苹果🍎用于投喂模式哦
                     </p>
                     <button
                       onClick={() => setShowAuthDialog(true)}
-                      className="px-6 py-2 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
+                      className="px-5 py-2 sm:px-6 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
                     >
                       登录 / 注册
                     </button>
@@ -517,13 +711,30 @@ function HomeContent() {
           ) : (
             // Chat Messages
             <div className="space-y-8 py-4">
-              {messages.map((message) => (
-                <ChatMessage
-                  key={message.id}
-                  message={message}
-                  isStreaming={message.id === streamingMessageIdRef.current}
-                />
-              ))}
+              {messages.map((message, idx) => {
+                // For assistant messages, detect if previous user message had a feature sentinel
+                let reportType: FeatureKind | undefined
+                if (message.role === 'assistant') {
+                  for (let i = idx - 1; i >= 0; i--) {
+                    if (messages[i].role === 'user') {
+                      const k = detectFeatureKindFromContent(messages[i].content)
+                      if (k) reportType = k
+                      break
+                    }
+                  }
+                }
+                const isLastAssistant =
+                  message.role === 'assistant' && idx === messages.length - 1
+                return (
+                  <ChatMessage
+                    key={message.id}
+                    message={message}
+                    isStreaming={message.id === streamingMessageIdRef.current}
+                    reportType={reportType}
+                    onFollowUp={isLastAssistant ? fillAndSubmit : undefined}
+                  />
+                )
+              })}
               {isLoading && !isStreamingStarted && (
                 <div className="flex justify-start">
                   <div className="bg-card/70 backdrop-blur-sm border border-border rounded-3xl px-6 py-4 max-w-sm glass-minimal">
@@ -583,44 +794,6 @@ function HomeContent() {
             </div>
           )}
 
-          {/* Mobile: toolbar row above input */}
-          {user && (
-            <div className="flex items-center gap-2 mb-2 md:hidden">
-              <ProfileSelector
-                selectedProfileId={selectedProfileId}
-                onSelectProfile={(profileId, baziResult) => {
-                  setSelectedProfileId(profileId)
-                  setBaziAnalysisResult(baziResult)
-                  if (baziResult) {
-                    console.log('已选择人物，八字结果已设置')
-                  } else {
-                    setBaziData(null)
-                  }
-                }}
-                onOpenProfilesDialog={() => setShowProfilesDialog(true)}
-              />
-              <button
-                type="button"
-                onClick={() => setIsUltraMode(!isUltraMode)}
-                className={`flex items-center justify-center gap-1.5 h-9 rounded-full border transition-all duration-300 ${
-                  isUltraMode
-                    ? 'bg-card text-foreground border-primary/60 shadow-sm px-3'
-                    : 'bg-transparent text-muted-foreground/50 border-border/50 hover:text-muted-foreground hover:border-border px-3'
-                }`}
-                title={isUltraMode ? '关闭投喂模式' : '开启投喂模式'}
-              >
-                <span className={`text-sm font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>投喂</span>
-                {appleQuota && (
-                  <span className={`text-[11px] font-light transition-all duration-300 ${
-                    isUltraMode ? 'text-primary/70' : 'text-muted-foreground/40'
-                  }`}>
-                    🍎{appleQuota.remaining}/{appleQuota.dailyLimit}
-                  </span>
-                )}
-              </button>
-            </div>
-          )}
-
           <form id="chat-form" onSubmit={handleSubmit} className="relative">
             <div className="relative">
               <input
@@ -628,46 +801,49 @@ function HomeContent() {
                 value={input}
                 onChange={handleInputChange}
                 placeholder={user ? "输入您想咨询的问题..." : "请先登录..."}
-                className="w-full px-4 py-3 pr-12 md:px-6 md:py-4 md:pl-56 md:pr-14 rounded-full bg-card/70 backdrop-blur-sm border border-border text-foreground placeholder-muted-foreground font-light focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 text-base"
+                className="w-full pl-14 pr-12 py-3 md:pl-[9.5rem] md:pr-14 md:py-4 rounded-full bg-card/70 backdrop-blur-sm border border-border text-foreground placeholder-muted-foreground font-light focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 text-base"
                 disabled={isLoading || !user}
               />
-              {/* Desktop: Profile selector and 投喂 button inside input */}
-              <div className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 items-center gap-2">
+              {/* Left side: launcher (+) + 投喂 toggle (desktop only) */}
+              <div className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                <FeatureLauncherButton
+                  variant="sm"
+                  disabled={isLoading || isAnalyzing}
+                  onPick={(kind) => {
+                    if (!user) {
+                      setShowAuthDialog(true)
+                      return
+                    }
+                    openFeaturePage(kind)
+                  }}
+                  selectedProfileId={selectedProfileId}
+                  onSelectProfile={(profileId, baziResult) => {
+                    setSelectedProfileId(profileId)
+                    setBaziAnalysisResult(baziResult)
+                    if (!baziResult) setBaziData(null)
+                  }}
+                  onOpenProfilesDialog={() => setShowProfilesDialog(true)}
+                />
                 {user && (
-                  <>
-                    <ProfileSelector
-                      selectedProfileId={selectedProfileId}
-                      onSelectProfile={(profileId, baziResult) => {
-                        setSelectedProfileId(profileId)
-                        setBaziAnalysisResult(baziResult)
-                        if (baziResult) {
-                          console.log('已选择人物，八字结果已设置')
-                        } else {
-                          setBaziData(null)
-                        }
-                      }}
-                      onOpenProfilesDialog={() => setShowProfilesDialog(true)}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setIsUltraMode(!isUltraMode)}
-                      className={`flex items-center justify-center gap-1.5 h-10 rounded-full border transition-all duration-300 ${
-                        isUltraMode
-                          ? 'bg-card text-foreground border-primary/60 shadow-sm px-3'
-                          : 'bg-transparent text-muted-foreground/50 border-border/50 hover:text-muted-foreground hover:border-border px-3'
-                      }`}
-                      title={isUltraMode ? '关闭投喂模式' : '开启投喂模式'}
-                    >
-                      <span className={`text-sm font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>投喂</span>
-                      {appleQuota && (
-                        <span className={`text-[11px] font-light transition-all duration-300 ${
-                          isUltraMode ? 'text-primary/70' : 'text-muted-foreground/40'
-                        }`}>
-                          🍎{appleQuota.remaining}/{appleQuota.dailyLimit}
-                        </span>
-                      )}
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    onClick={() => setIsUltraMode(!isUltraMode)}
+                    className={`hidden md:flex items-center justify-center gap-1.5 h-10 rounded-full border transition-all duration-300 ${
+                      isUltraMode
+                        ? 'bg-card text-foreground border-primary/60 shadow-sm px-3'
+                        : 'bg-transparent text-muted-foreground/50 border-border/50 hover:text-muted-foreground hover:border-border px-3'
+                    }`}
+                    title={isUltraMode ? '关闭投喂模式' : '开启投喂模式'}
+                  >
+                    <span className={`text-sm font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>投喂</span>
+                    {appleQuota && (
+                      <span className={`text-[11px] font-light transition-all duration-300 ${
+                        isUltraMode ? 'text-primary/70' : 'text-muted-foreground/40'
+                      }`}>
+                        🍎{appleQuota.remaining}/{appleQuota.dailyLimit}
+                      </span>
+                    )}
+                  </button>
                 )}
               </div>
               {/* Right side: Send button */}
@@ -681,6 +857,30 @@ function HomeContent() {
                 </button>
               </div>
             </div>
+            {/* Mobile: 投喂 toggle below input (compact row) */}
+            {user && (
+              <div className="md:hidden mt-2 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setIsUltraMode(!isUltraMode)}
+                  className={`flex items-center justify-center gap-1.5 h-8 rounded-full border transition-all duration-300 px-3 ${
+                    isUltraMode
+                      ? 'bg-card text-foreground border-primary/60 shadow-sm'
+                      : 'bg-transparent text-muted-foreground/60 border-border/50 hover:text-muted-foreground hover:border-border'
+                  }`}
+                  title={isUltraMode ? '关闭投喂模式' : '开启投喂模式'}
+                >
+                  <span className={`text-xs font-light transition-all duration-300 ${isUltraMode ? 'text-primary' : ''}`}>投喂模式</span>
+                  {appleQuota && (
+                    <span className={`text-[10px] font-light transition-all duration-300 ${
+                      isUltraMode ? 'text-primary/70' : 'text-muted-foreground/40'
+                    }`}>
+                      🍎{appleQuota.remaining}/{appleQuota.dailyLimit}
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
           </form>
         </div>
       </div>
@@ -688,12 +888,55 @@ function HomeContent() {
   )
 
   // ---- 渲染功能区域 ----
+  const goBackToChat = () => setActiveFeature('chat')
+  const requireAuth = () => setShowAuthDialog(true)
+
   const renderFeatureContent = () => {
     switch (activeFeature) {
-      case 'chat': return renderChatArea()
-      case 'hepan': return <FeatureHePan />
-      case 'yaogua': return <FeatureYaoGua />
-      default: return renderChatArea()
+      case 'chat':
+        return renderChatArea()
+      case 'hepan':
+        return (
+          <HepanPage
+            onBack={goBackToChat}
+            onSubmit={(params) => submitFeatureAnalyze({ kind: 'hepan', params })}
+            onOpenProfilesManager={() => setShowProfilesDialog(true)}
+            onRequireAuth={requireAuth}
+            loading={isAnalyzing}
+          />
+        )
+      case 'fortune':
+        return (
+          <FortunePage
+            onBack={goBackToChat}
+            onSubmit={(params) => submitFeatureAnalyze({ kind: 'fortune', params })}
+            onOpenProfilesManager={() => setShowProfilesDialog(true)}
+            onRequireAuth={requireAuth}
+            loading={isAnalyzing}
+          />
+        )
+      case 'avatar':
+        return (
+          <AvatarPage
+            onBack={goBackToChat}
+            onSubmit={(params) => submitFeatureAnalyze({ kind: 'avatar', params })}
+            onOpenProfilesManager={() => setShowProfilesDialog(true)}
+            onRequireAuth={requireAuth}
+            loading={isAnalyzing}
+          />
+        )
+      case 'lifepath':
+        return (
+          <LifePathPage
+            onBack={goBackToChat}
+            onSubmit={(params) => submitFeatureAnalyze({ kind: 'lifepath', params })}
+            onOpenProfilesManager={() => setShowProfilesDialog(true)}
+            onRequireAuth={requireAuth}
+            loading={isAnalyzing}
+          />
+        )
+      default:
+        return renderChatArea()
     }
   }
 

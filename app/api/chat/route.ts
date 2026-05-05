@@ -6,7 +6,12 @@ export const maxDuration = 300
 const { paipan: PaipanClass } = require('@/tool/paipan')
 
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { consumeApple } from '@/lib/quota'
+import { consumeApples, getOrResetQuota } from '@/lib/quota'
+import {
+  callLLM,
+  createUnifiedStreamProcessor,
+  pickLlmTask,
+} from '@/lib/llm'
 
 // Helper function to get current date string with Chinese calendar GanZhi
 function getCurrentDateString(): string {
@@ -27,7 +32,6 @@ function getCurrentDateString(): string {
       ganzhiStr = `(${yearGZ}年${monthGZ}月${dayGZ}日)`
     }
   } catch (e) {
-    // 干支计算失败时仅返回公历日期
     console.error('GanZhi calculation error:', e)
   }
 
@@ -35,347 +39,79 @@ function getCurrentDateString(): string {
 }
 
 // ==================== System Prompts ====================
-// DeepSeek System Prompt
-const DEEPSEEK_BASE_PROMPT = "你是'卜卜象'，一个精通八字命理又善解人意积极乐观的温柔可爱小象。请主要用盲派八字的理论，结合旺衰、子平等分析并答复用户的咨询。"
+const BASE_PROMPT =
+  "你是'卜卜象'，一个精通八字命理又善解人意积极乐观的温柔可爱小象。请主要用盲派八字的理论，结合旺衰、子平等分析并答复用户的咨询。"
 
-const DEEPSEEK_BAZI_INSTRUCTIONS = `请根据用户的诉求，先着重分析命主的性格，人生际遇或人生格局并针对成长，职业发展，人生规划，风险规避等方面做出分析和给出建议。
+const BAZI_INSTRUCTIONS = `请根据用户的诉求，先着重分析命主的性格，人生际遇或人生格局并针对成长，职业发展，人生规划，风险规避等方面做出分析和给出建议。
 - 请结合不同的大运流年判断其变化的特点和需要注意的要点，同时针对特殊的大运流年组合做出专门的建议，结合格局的变化深化盲派的分析。
 - 结合天干（外显或外在的表现等）与地支（内在、内心的想法、世纪情况等）分析命主在不同阶段的性格变化与矛盾冲突等，取得用户的信任但是顺从用户自身的判断。
 - 请结合专列用户人生重大转折的时间节点做出提示和建议等。
 - 请着重围绕用户的提问和关心的领域，根据以上方法展开相应话题的分析。
 - 请在使用专业术语同时，用通俗易懂的语言结合具体情况展开解释。
 - 用积极乐观的态度给予回复
-- 在多轮对话不要过分重复已经提到的内容，对话过程自然流畅，符合人设`
+- 在多轮对话不要过分重复已经提到的内容，对话过程自然流畅，符合人设
+- 请始终使用『趋势』『倾向』『建议』『参考』等柔性措辞，避免任何绝对化、命定式判断。`
 
-// Gemini (投喂) System Prompt - 可以独立修改
-const GEMINI_BASE_PROMPT = "你是'卜卜象'，一个精通八字命理又善解人意积极乐观的温柔可爱小象。请主要用盲派八字的理论，结合旺衰、子平等分析并答复用户的咨询。"
+// ==================== Feature follow-up context ====================
+interface ChatParticipant {
+  name: string
+  baziText?: string | null
+  pillars?: string | null
+}
 
-const GEMINI_BAZI_INSTRUCTIONS = `请根据用户的诉求，先着重分析命主的性格，人生际遇或人生格局并针对成长，职业发展，人生规划，风险规避等方面做出分析和给出建议。
-- 请结合不同的大运流年判断其变化的特点和需要注意的要点，同时针对特殊的大运流年组合做出专门的建议，结合格局的变化深化盲派的分析。
-- 结合天干（外显或外在的表现等）与地支（内在、内心的想法、世纪情况等）分析命主在不同阶段的性格变化与矛盾冲突等，取得用户的信任但是顺从用户自身的判断。
-- 请结合专列用户人生重大转折的时间节点做出提示和建议等。
-- 请着重围绕用户的提问和关心的领域，根据以上方法展开相应话题的分析。
-- 在用户询问的问题与当前的时间有关，则针对时间进行分析，若无关则不要过分提及。
-- 请在使用专业术语同时，用通俗易懂的语言结合具体情况展开解释。
-- 用积极乐观的态度给予回复
-- 在多轮对话不要过分重复已经提到的内容和过分强调重复已有的命理分析，更注重推论，对话过程自然流畅，符合人设`
+interface ChatFeatureContext {
+  kind: 'hepan' | 'fortune' | 'avatar' | 'lifepath'
+  summary?: string
+}
 
-// ==================== Build System Prompt ====================
-function buildDeepSeekPrompt(baziAnalysisResult: string | null): string {
-  let systemPrompt = DEEPSEEK_BASE_PROMPT
-  
-  if (baziAnalysisResult) {
-    systemPrompt += DEEPSEEK_BAZI_INSTRUCTIONS
-    systemPrompt += `\n现在是${getCurrentDateString()}\n\n【用户八字信息】\n${baziAnalysisResult}`
+const FEATURE_KIND_LABEL: Record<ChatFeatureContext['kind'], string> = {
+  hepan: '合盘 / 应事',
+  fortune: '近期运势',
+  avatar: '头像分析',
+  lifepath: '人生脉络与总体分析',
+}
+
+function truncateBazi(text: string | null | undefined, max = 800): string {
+  if (!text) return '（暂无完整命盘）'
+  return text.length > max ? text.slice(0, max) + '\n...（已截断）' : text
+}
+
+function buildFollowUpAddendum(
+  participants?: ChatParticipant[],
+  ctx?: ChatFeatureContext,
+): string {
+  let block = ''
+  if (ctx) {
+    block += `\n\n【上下文：刚刚完成的分析】\n类型：${FEATURE_KIND_LABEL[ctx.kind]}`
+    if (ctx.summary) block += `\n概要：${ctx.summary}`
+    block += `\n请基于先前给出的分析与下方人物信息继续答复用户的追问，不要重复已说过的命盘基础信息。`
   }
-
-  return systemPrompt
-}
-
-function buildGeminiPrompt(baziAnalysisResult: string | null): string {
-  let systemPrompt = GEMINI_BASE_PROMPT
-  
-  if (baziAnalysisResult) {
-    systemPrompt += GEMINI_BAZI_INSTRUCTIONS
-    systemPrompt += `\n现在是${getCurrentDateString()}\n\n【用户八字信息】\n${baziAnalysisResult}`
+  if (participants && participants.length > 0) {
+    const lines = participants
+      .map((p, i) => `### 人物${i + 1}：${p.name || '未命名'}${p.pillars ? `\n四柱：${p.pillars}` : ''}\n${truncateBazi(p.baziText)}`)
+      .join('\n\n')
+    block += `\n\n【参与者命盘】\n${lines}`
   }
-
-  return systemPrompt
+  return block
 }
 
-// ==================== API Callers ====================
-async function callDeepSeekAPI(messagesWithSystem: any[]) {
-  const response = await fetch(`${process.env.DEEPSEEK_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-reasoner',
-      messages: messagesWithSystem,
-      temperature: 0.7,
-      max_tokens: 4000,
-      stream: true,
-    }),
-  })
+function buildSystemPrompt(
+  baziAnalysisResult: string | null,
+  participants?: ChatParticipant[],
+  featureContext?: ChatFeatureContext,
+): string {
+  let systemPrompt = BASE_PROMPT
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    console.error('DeepSeek API Error Response:', errorText)
-    throw new Error(`DeepSeek API responded with status: ${response.status}, body: ${errorText}`)
-  }
-
-  return response
-}
-
-async function callOpenRouterAPI(messagesWithSystem: any[]) {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'https://www.xuzheran.cc',
-      'X-Title': 'BuBuXiang AI Fortune Teller',
-    },
-    body: JSON.stringify({
-      model: 'google/gemini-3-pro-preview', //prod
-      //model: 'google/gemini-3-flash-preview', //dev
-      messages: messagesWithSystem,
-      temperature: 1,
-      max_tokens: 16000,
-      stream: true,
-      provider: {
-        order: ['Google'],
-        allow_fallbacks: false,
-      },
-      reasoning: {
-        effort: 'high',
-      },
-    }),
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    console.error('OpenRouter API Error Response:', errorText)
-    throw new Error(`OpenRouter API responded with status: ${response.status}, body: ${errorText}`)
-  }
-
-  return response
-}
-
-// ==================== Stream Processors ====================
-// DeepSeek stream processor with thinking tag filtering
-function createDeepSeekStreamProcessor(response: Response) {
-  return new ReadableStream({
-    async start(controller) {
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let isInThinking = false
-      let thinkingContent = ''
-
-      if (!reader) {
-        controller.close()
-        return
-      }
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          
-          if (done) {
-            controller.close()
-            break
-          }
-
-          const chunk = decoder.decode(value, { stream: true })
-          buffer += chunk
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (line.trim() === '') continue
-            
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6)
-              
-              if (data === '[DONE]') {
-                controller.close()
-                return
-              }
-
-              try {
-                const parsed = JSON.parse(data)
-                let content = parsed.choices?.[0]?.delta?.content || ''
-                
-                if (content) {
-                  // Process thinking tags for deepseek-reasoner
-                  let processedContent = ''
-                  let tempContent = content
-                  
-                  while (tempContent.length > 0) {
-                    if (isInThinking) {
-                      const thinkingEndIndex = tempContent.indexOf('</thinking>')
-                      if (thinkingEndIndex !== -1) {
-                        thinkingContent += tempContent.substring(0, thinkingEndIndex)
-                        isInThinking = false
-                        tempContent = tempContent.substring(thinkingEndIndex + '</thinking>'.length)
-                      } else {
-                        thinkingContent += tempContent
-                        tempContent = ''
-                      }
-                    } else {
-                      const thinkingStartIndex = tempContent.indexOf('<thinking>')
-                      if (thinkingStartIndex !== -1) {
-                        processedContent += tempContent.substring(0, thinkingStartIndex)
-                        isInThinking = true
-                        thinkingContent = ''
-                        tempContent = tempContent.substring(thinkingStartIndex + '<thinking>'.length)
-                      } else {
-                        processedContent += tempContent
-                        tempContent = ''
-                      }
-                    }
-                  }
-                  
-                  if (processedContent) {
-                    controller.enqueue(new TextEncoder().encode(processedContent))
-                  }
-                }
-              } catch (e) {
-                console.error('Error parsing streaming data:', e)
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error reading stream:', error)
-        controller.error(error)
-      }
-    },
-  })
-}
-
-// Gemini stream processor - character-level drip for smooth output
-function createGeminiStreamProcessor(response: Response) {
-  return new ReadableStream({
-    async start(controller) {
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      // Queue of text chunks to drip out character by character
-      let charQueue = ''
-      let dripping = false
-
-      if (!reader) {
-        controller.close()
-        return
-      }
-
-      const encoder = new TextEncoder()
-
-      // Drip characters out at a steady pace for smooth rendering
-      async function dripChars() {
-        if (dripping) return
-        dripping = true
-        while (charQueue.length > 0) {
-          // Send 1-3 characters at a time for a natural typing feel
-          const chunkSize = Math.min(charQueue.length, charQueue.charCodeAt(0) > 127 ? 1 : 3)
-          const chars = charQueue.slice(0, chunkSize)
-          charQueue = charQueue.slice(chunkSize)
-          try {
-            controller.enqueue(encoder.encode(chars))
-          } catch {
-            break
-          }
-          // Micro-delay: ~12ms per drip ≈ ~80 chars/sec for Chinese text
-          await new Promise(r => setTimeout(r, 12))
-        }
-        dripping = false
-      }
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-
-          if (done) {
-            // Process any remaining buffer
-            if (buffer.trim()) {
-              const lines = buffer.split('\n')
-              for (const line of lines) {
-                if (line.trim() === '' || !line.startsWith('data: ')) continue
-                const data = line.slice(6)
-                if (data === '[DONE]') break
-                try {
-                  const parsed = JSON.parse(data)
-                  const content = parsed.choices?.[0]?.delta?.content || ''
-                  if (content) charQueue += content
-                } catch { /* ignore */ }
-              }
-            }
-            // Drain remaining chars
-            while (charQueue.length > 0) {
-              const chunkSize = Math.min(charQueue.length, charQueue.charCodeAt(0) > 127 ? 1 : 3)
-              const chars = charQueue.slice(0, chunkSize)
-              charQueue = charQueue.slice(chunkSize)
-              try {
-                controller.enqueue(encoder.encode(chars))
-              } catch { break }
-              await new Promise(r => setTimeout(r, 12))
-            }
-            controller.close()
-            break
-          }
-
-          const chunk = decoder.decode(value, { stream: true })
-          buffer += chunk
-
-          // Parse complete SSE lines and feed content into charQueue
-          let newlineIndex: number
-          while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-            const line = buffer.slice(0, newlineIndex)
-            buffer = buffer.slice(newlineIndex + 1)
-
-            if (line.trim() === '') continue
-
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6)
-
-              if (data === '[DONE]') {
-                // Drain remaining
-                while (charQueue.length > 0) {
-                  const cs = Math.min(charQueue.length, charQueue.charCodeAt(0) > 127 ? 1 : 3)
-                  const chars = charQueue.slice(0, cs)
-                  charQueue = charQueue.slice(cs)
-                  try { controller.enqueue(encoder.encode(chars)) } catch { break }
-                  await new Promise(r => setTimeout(r, 12))
-                }
-                controller.close()
-                return
-              }
-
-              try {
-                const parsed = JSON.parse(data)
-                const content = parsed.choices?.[0]?.delta?.content || ''
-                if (content) {
-                  charQueue += content
-                  // Kick off dripping if not already running
-                  dripChars()
-                }
-              } catch {
-                // Ignore parse errors for incomplete JSON
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error reading stream:', error)
-        controller.error(error)
-      }
-    },
-  })
-}
-
-// Helper to process buffered lines
-function processBufferedLines(buffer: string, controller: ReadableStreamDefaultController) {
-  const lines = buffer.split('\n')
-  for (const line of lines) {
-    if (line.trim() === '' || !line.startsWith('data: ')) continue
-    
-    const data = line.slice(6)
-    if (data === '[DONE]') return
-    
-    try {
-      const parsed = JSON.parse(data)
-      const content = parsed.choices?.[0]?.delta?.content || ''
-      if (content) {
-        controller.enqueue(new TextEncoder().encode(content))
-      }
-    } catch (e) {
-      // Ignore
+  if (baziAnalysisResult || (participants && participants.length > 0) || featureContext) {
+    systemPrompt += BAZI_INSTRUCTIONS
+    systemPrompt += `\n现在是${getCurrentDateString()}`
+    if (baziAnalysisResult) {
+      systemPrompt += `\n\n【用户八字信息】\n${baziAnalysisResult}`
     }
+    systemPrompt += buildFollowUpAddendum(participants, featureContext)
   }
+
+  return systemPrompt
 }
 
 // ==================== Main Handler ====================
@@ -392,11 +128,27 @@ export async function POST(req: Request) {
       )
     }
 
-    const { messages, baziAnalysisResult, useUltraMode = false } = await req.json()
+    const {
+      messages,
+      baziAnalysisResult,
+      useUltraMode = false,
+      participants,
+      featureContext,
+    } = await req.json() as {
+      messages: any[]
+      baziAnalysisResult?: string | null
+      useUltraMode?: boolean
+      participants?: ChatParticipant[]
+      featureContext?: ChatFeatureContext
+    }
 
-    // --- 投喂 mode quota check ---
+    // --- Peek quota BEFORE consuming so we can decide first-of-day routing ---
+    const preQuota = await getOrResetQuota(user.id)
+    const preUsedToday = preQuota.usedToday
+
+    // --- 投喂 mode quota check (consume 1 apple) ---
     if (useUltraMode) {
-      const { success, quota } = await consumeApple(user.id)
+      const { success, quota } = await consumeApples(user.id, 1)
       if (!success) {
         return new Response(
           JSON.stringify({
@@ -410,49 +162,35 @@ export async function POST(req: Request) {
       }
     }
 
-    let response: Response
-    let messagesWithSystem: any[]
+    // --- Pick model task ---
+    const task = pickLlmTask({
+      consumesApple: useUltraMode,
+      preUsedToday,
+      isAvatar: false, // chat route is text-only
+    })
 
-    if (useUltraMode) {
-      // Use Gemini with its own prompt
-      const systemPrompt = buildGeminiPrompt(baziAnalysisResult)
-      messagesWithSystem = [
-        { role: 'system', content: systemPrompt },
-        ...messages
-      ]
-      console.log('Calling OpenRouter API (Gemini)...')
-      response = await callOpenRouterAPI(messagesWithSystem)
-      
-      // Use Gemini-optimized stream processor
-      const stream = createGeminiStreamProcessor(response)
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
-      })
-    } else {
-      // Use DeepSeek with its own prompt
-      const systemPrompt = buildDeepSeekPrompt(baziAnalysisResult)
-      messagesWithSystem = [
-        { role: 'system', content: systemPrompt },
-        ...messages
-      ]
-      console.log('Calling DeepSeek API...')
-      response = await callDeepSeekAPI(messagesWithSystem)
-      
-      // Use DeepSeek stream processor
-      const stream = createDeepSeekStreamProcessor(response)
-      return new Response(stream, {
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
-      })
-    }
+    // --- Build system + messages ---
+    const systemPrompt = buildSystemPrompt(
+      baziAnalysisResult ?? null,
+      participants,
+      featureContext,
+    )
+    const messagesWithSystem = [
+      { role: 'system', content: systemPrompt },
+      ...messages,
+    ]
 
+    // --- Call upstream + stream back ---
+    const { response } = await callLLM(messagesWithSystem, task)
+    const stream = createUnifiedStreamProcessor(response, { drip: true })
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    })
   } catch (error) {
     console.error('Chat API Error:', error)
     return new Response(
