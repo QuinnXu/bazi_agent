@@ -197,7 +197,9 @@ export async function runClassicChatStream(
   })
   const baseStream = createUnifiedStreamProcessor(response, {
     chunking: 'semantic',
-    semanticDelayMs: 60,
+    semanticDelayMs: 30,
+    semanticMinChars: 8,
+    semanticMaxChars: 90,
   })
   const stream = createUsageTrackedStream(baseStream, {
     userId: input.userId,

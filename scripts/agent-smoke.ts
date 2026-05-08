@@ -58,6 +58,47 @@ async function main() {
   }
 
   let toolCalls = 0
+  const reportPreferenceEvents: any[] = []
+  for await (const event of runAgentChatEvents(
+    {
+      userId: 'smoke-user',
+      messages: [
+        { role: 'user', content: '帮小明看 2026-05-01 到 2026-05-07 的事业运' },
+      ],
+      selectedProfile: { name: '小明', pillars: '甲子 乙丑 丙寅 丁卯', baziText: '测试命盘' },
+      maxSteps: 2,
+      timeoutMs: 10_000,
+    },
+    {
+      planner: async () => JSON.stringify({
+        action: 'tool_call',
+        tool: 'feature_analyze',
+        kind: 'fortune',
+        params: {
+          profile: { name: '小明', pillars: '甲子 乙丑 丙寅 丁卯', baziText: '测试命盘' },
+          start: '2026-05-01',
+          end: '2026-05-07',
+          granularity: 'day',
+          focus: ['事业'],
+        },
+        reason: '用户参数完整，需要调用近期运势工具',
+      }),
+      runFeature: async () => {
+        throw new Error('feature tool should wait for report preference')
+      },
+    },
+  )) {
+    reportPreferenceEvents.push(event)
+  }
+  const reportPreferenceUi = reportPreferenceEvents.find(event => event.type === 'ui')?.ui
+  if (
+    reportPreferenceUi?.type !== 'human_input_request' ||
+    reportPreferenceUi?.kind !== 'feature_params' ||
+    !reportPreferenceUi.fields?.some((field: any) => field.name === 'reportStyle')
+  ) {
+    throw new Error(`report preference request failed: ${JSON.stringify(reportPreferenceEvents)}`)
+  }
+
   const plans = [
     JSON.stringify({
       action: 'tool_call',
@@ -87,6 +128,7 @@ async function main() {
         { role: 'user', content: '小明，2026-05-01 到 2026-05-07，看事业' },
       ],
       selectedProfile: { name: '小明', pillars: '甲子 乙丑 丙寅 丁卯', baziText: '测试命盘' },
+      reportPreference: { mode: 'balanced' },
       maxSteps: 3,
       timeoutMs: 10_000,
     },
@@ -127,9 +169,10 @@ async function main() {
     {
       userId: 'smoke-user',
       messages: [
-        { role: 'user', content: '帮小明看接下来几个月' },
+        { role: 'user', content: '帮小明看 2026-05-01 到 2026-07-31 的整体运势' },
       ],
       selectedProfile: { name: '小明', pillars: '甲子 乙丑 丙寅 丁卯', baziText: '测试命盘' },
+      reportPreference: { mode: 'balanced' },
       maxSteps: 2,
       timeoutMs: 10_000,
     },
@@ -160,6 +203,7 @@ async function main() {
         { role: 'user', content: '我的未来几年财运如何？' },
       ],
       selectedProfile: { name: '我', pillars: '甲戌 癸酉 壬子 戊申', baziText: '测试命盘' },
+      reportPreference: { mode: 'detailed' },
       maxSteps: 2,
       timeoutMs: 10_000,
     },
@@ -211,12 +255,43 @@ async function main() {
     if (event.type === 'delta') formText += event.content
   }
   const formUi = formEvents.find(event => event.type === 'ui')?.ui
+  const profileNameField = formUi?.fields?.find((field: any) => field.name === 'profileName')
   if (
     !formText.includes('Bazi Analysis Results') ||
     formUi?.type !== 'human_input_request' ||
-    formUi?.kind !== 'bazi_profile'
+    formUi?.kind !== 'bazi_profile' ||
+    profileNameField?.value === '我'
   ) {
     throw new Error(`bazi inline form path failed: text=${formText}, ui=${JSON.stringify(formUi)}`)
+  }
+
+  const scopeEvents: any[] = []
+  for await (const event of runAgentChatEvents(
+    {
+      userId: 'smoke-user',
+      messages: [
+        { role: 'user', content: '我这段时间会怎么样？' },
+      ],
+      selectedProfile: { name: '我', pillars: '甲戌 癸酉 壬子 戊申', baziText: '测试命盘' },
+      maxSteps: 2,
+      timeoutMs: 10_000,
+    },
+    {
+      planner: async () => {
+        throw new Error('planner should not run before broad fortune clarification')
+      },
+    },
+  )) {
+    scopeEvents.push(event)
+  }
+  const scopeUi = scopeEvents.find(event => event.type === 'ui')?.ui
+  if (
+    scopeUi?.type !== 'human_input_request' ||
+    scopeUi?.kind !== 'feature_params' ||
+    !scopeUi.fields?.some((field: any) => field.name === 'timeRangePreset') ||
+    !scopeUi.fields?.some((field: any) => field.name === 'focus')
+  ) {
+    throw new Error(`broad fortune clarification failed: ${JSON.stringify(scopeEvents)}`)
   }
 
   const noProfileEvents: any[] = []
@@ -261,9 +336,10 @@ async function main() {
     {
       userId: 'smoke-user',
       messages: [
-        { role: 'user', content: '帮小明写一个很长的未来几个月报告' },
+        { role: 'user', content: '帮小明写一个很长的 2026-05-01 到 2026-08-31 整体报告' },
       ],
       selectedProfile: { name: '小明', pillars: '甲子 乙丑 丙寅 丁卯', baziText: '测试命盘' },
+      reportPreference: { mode: 'detailed' },
       maxSteps: 2,
       timeoutMs: 10_000,
     },
@@ -341,6 +417,8 @@ async function main() {
     toolTrace: toolResult.trace.map(t => t.action),
     formUi: formUi?.type,
     noProfileUi: noProfileUi?.type,
+    reportPreferenceUi: reportPreferenceUi?.type,
+    scopeUi: scopeUi?.type,
     futureYears: {
       start: futureYearsParams.start,
       end: futureYearsParams.end,

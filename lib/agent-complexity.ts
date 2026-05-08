@@ -26,19 +26,20 @@ export interface AgentComplexityProfile {
 export const DEFAULT_AGENT_COMPLEXITY: AgentComplexityMode = 'instant'
 
 const REPORT_PREFERENCE_MAX_TOKENS: Partial<Record<AgentReportPreferenceMode, number>> = {
-  concise: 6_000,
-  balanced: 18_000,
+  concise: 2_000,
+  balanced: 8_000,
+  detailed: 16_000,
 }
 
 const REPORT_PREFERENCE_INSTRUCTIONS: Record<AgentReportPreferenceMode, string> = {
   concise:
-    '【报告风格：简洁结论型】优先给结论、关键依据和行动建议，压缩背景铺垫，避免长篇逐项展开。',
+    '【报告风格：简洁结论型】此要求优先于 Agent 复杂度。输出约 300-800 中文字；最多 4 个主段：先给结论，再给关键依据、关键时间/风险、行动建议。压缩背景铺垫，不写完整逐月/逐项长章。',
   balanced:
-    '【报告风格：均衡报告型】保持清晰层级，兼顾命理依据、关键阶段和行动建议，篇幅适中。',
+    '【报告风格：均衡报告型】此要求优先于 Agent 复杂度。输出约 8000-2000 中文字；保留清晰层级，兼顾命理依据、关键阶段/窗口、重点方向和行动建议。不要短成摘要，也不要铺成研究长文。',
   detailed:
-    '【报告风格：深度展开型】在当前 Agent 深度允许的范围内充分展开结构、阶段差异、风险点和执行建议。',
+    '【报告风格：深度展开型】此要求优先于 Agent 复杂度。输出深度长报告：近期运势按月份/阶段充分拆解，合盘强化互动模式与关键时间窗，人生脉络强化大运连续性；展开依据、阶段差异、风险点和执行清单。',
   custom:
-    '【报告风格：自定义】按用户补充的风格要求调整表达、篇幅和重点。',
+    '【报告风格：自定义】此要求优先于 Agent 复杂度。按用户补充的风格要求调整表达、篇幅和重点。',
 }
 
 export const AGENT_COMPLEXITY_PROFILES: Record<

@@ -24,6 +24,10 @@ import {
   takeSemanticStreamChunk,
 } from '@/lib/text-sanitize'
 
+const AGENT_STREAM_DELAY_MS = 30
+const AGENT_STREAM_MIN_CHARS = 8
+const AGENT_STREAM_MAX_CHARS = 90
+
 export interface AgentMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
@@ -407,7 +411,7 @@ function newRequestId(kind: AgentHumanInputKind): string {
 
 function baziDataToFields(data: AgentBaziFormData): AgentHumanInputField[] {
   return [
-    { name: 'profileName', label: '人物名称', inputType: 'text', required: true, value: '我', placeholder: '例如：我、张三、伴侣' },
+    { name: 'profileName', label: '人物名称', inputType: 'text', required: true, value: '', placeholder: '例如：小明、伴侣，或你的昵称' },
     { name: 'year', label: '出生年份', inputType: 'number', required: true, value: data.year, placeholder: '1994' },
     { name: 'month', label: '出生月份', inputType: 'number', required: true, value: data.month, placeholder: '9' },
     { name: 'day', label: '出生日期', inputType: 'number', required: true, value: data.day, placeholder: '23' },
@@ -537,6 +541,78 @@ function buildFeatureParamsInputRequest(
   }
 }
 
+function buildFortuneScopeInputRequest(missing: string[]): AgentHumanInputRequestUiEvent {
+  const fields: AgentHumanInputField[] = []
+
+  if (missing.includes('timeRangePreset')) {
+    fields.push(
+      {
+        name: 'timeRangePreset',
+        label: '时间范围',
+        inputType: 'choice',
+        required: true,
+        value: 'future_30d',
+        options: [
+          { label: '未来 30 天', value: 'future_30d' },
+          { label: '未来 3 个月', value: 'future_3m' },
+          { label: '今年剩余时间', value: 'rest_of_year' },
+          { label: '自定义日期', value: 'custom' },
+        ],
+      },
+      {
+        name: 'customStart',
+        label: '自定义开始日期',
+        inputType: 'date',
+        required: false,
+      },
+      {
+        name: 'customEnd',
+        label: '自定义结束日期',
+        inputType: 'date',
+        required: false,
+      },
+    )
+  }
+
+  if (missing.includes('focus')) {
+    fields.push({
+      name: 'focus',
+      label: '关注方向',
+      inputType: 'choice',
+      required: true,
+      multiple: true,
+      allowCustom: true,
+      customPlaceholder: '回车添加其他关注方向',
+      options: [
+        { label: '事业', value: '事业' },
+        { label: '财富', value: '财富' },
+        { label: '感情', value: '感情' },
+        { label: '健康', value: '健康' },
+        { label: '整体', value: '整体' },
+      ],
+    })
+  }
+
+  fields.push({
+    name: 'specificQuestion',
+    label: '具体想问',
+    inputType: 'text',
+    required: false,
+    placeholder: '比如：适不适合跳槽、感情推进、财务节奏',
+  })
+
+  return {
+    type: 'human_input_request',
+    requestId: newRequestId('feature_params'),
+    kind: 'feature_params',
+    title: '先框定问题范围',
+    message: '这个问题有点宽，我先帮你把时间和关注方向框定一下，再继续调用结构化分析。',
+    fields,
+    submitLabel: '继续分析',
+    resumeIntent: '继续生成近期运势报告',
+  }
+}
+
 function buildReportPreferenceInputRequest(kind: FeatureKind): AgentHumanInputRequestUiEvent {
   return {
     type: 'human_input_request',
@@ -612,6 +688,45 @@ function shouldOpenBaziForm(input: AgentChatInput): { content: string; initialDa
     : '我先帮你打开八字人物表单。创建人物需要通过 Bazi Analysis Results 生成命盘，不能只靠对话里猜四柱。'
 
   return { content, initialData }
+}
+
+function hasExplicitFortuneTime(text: string, input: AgentChatInput): boolean {
+  if (input.timeRanges?.some(range => range.start && range.end)) return true
+  if (/(?:19|20)\d{2}\s*(?:年|[./-])\s*\d{1,2}(?:\s*(?:月|[./-])\s*\d{1,2}\s*日?)?/.test(text)) return true
+  if (/本月|这个月|下个月|今年|本年|流年|未来一年|接下来一年|未来几年|接下来几年|未来数年|往后几年/.test(text)) return true
+  if (/(未来|接下来|往后)\s*([0-9一二两三四五六七八九十]{1,3})\s*(天|日|周|个月|月|年)/.test(text)) return true
+  if (/半年|一季度|一个季度|本季度|下季度/.test(text)) return true
+  return false
+}
+
+function hasSpecificFocus(text: string): boolean {
+  if (inferFocus(text).some(item => item !== '整体')) return true
+  return /整体|总体|综合|全部|全方位|大概|主线|趋势/.test(text)
+}
+
+function shouldAskFortuneScope(input: AgentChatInput): { content: string; request: AgentHumanInputRequestUiEvent } | null {
+  if (!resolveCurrentProfile(input)) return null
+
+  const latest = latestUserText(input)
+  const recent = recentUserText(input)
+  const combined = `${recent}\n${latest}`
+  const asksFortune =
+    /(运势|流年|财运|事业运|感情运|桃花|工作运|健康运|这段时间|最近|近期|接下来|未来|会.*(怎么样|如何)|怎么样|如何|适合做什么|有什么变化)/.test(latest)
+  const wantsStructured =
+    /(报告|分析|推演|看看|看一下|看下|测|算|预测|建议)/.test(latest) ||
+    /这段时间|最近|近期|接下来|未来|会.*(怎么样|如何)|怎么样|如何|适合做什么/.test(latest)
+
+  if (!asksFortune || !wantsStructured) return null
+
+  const missing: string[] = []
+  if (!hasExplicitFortuneTime(combined, input)) missing.push('timeRangePreset')
+  if (!hasSpecificFocus(combined)) missing.push('focus')
+  if (missing.length === 0) return null
+
+  return {
+    content: '可以看，但这个问题范围比较大。先选一下时间范围和关注方向，我再继续给你做结构化分析。',
+    request: buildFortuneScopeInputRequest(missing),
+  }
 }
 
 function addDays(date: Date, days: number): Date {
@@ -876,6 +991,7 @@ function buildAgentSystemPrompt(input: AgentChatInput): string {
 - 所有创建/录入/新增八字人物、命主档案、排盘信息的对话，必须 request_human_input，让前端在 chat message 中 step-by-step 收集信息，并通过 /api/bazi 生成 Bazi Analysis Results 后再继续。
 - tool_call 的 profile/participants 必须来自当前命主、已选人物、参与者上下文或用户明确粘贴的 Bazi Analysis Results/四柱文本；不得根据出生日期自行推算或编造 pillars/baziText。
 - 如果缺少命主、Bazi Analysis Results、合盘对象、时间范围、关注方向、头像图片等关键参数，必须 request_human_input；一次只收集最关键的一组信息，可以使用 choice 字段让用户选择，也可以 allowCustom。
+- 用户问“这段时间/最近/未来会怎么样”等泛问题时，先让用户框定时间范围和关注方向；不要直接把“最近”默认为固定范围后调用工具。
 - 用户可能已在输入框添加多个人物和多个时间段。人物必须优先从【已选人物上下文】匹配；时间范围必须优先从【已选时间段】匹配。若用户选择了多个时间段但工具只能接受一个 start/end，请选择最符合当前问题的时间段；如果用户明确要求多时间段比较，先说明将围绕这些时间段做比较，并在参数、问题描述或追问中保留这些范围。
 - 若准备调用结构化工具，且【当前报告风格】为“未选择”，服务会先询问用户报告风格；planner 不需要自行生成该问题，除非还需要同时收集别的关键参数。
 - “我/本人/当前命主/用户/命主”只是代词，不是有效人物。只有下方【当前已验证命主】存在 baziText 或 pillars 时，才可把“我”解析为该命主；否则必须 request_human_input。
@@ -1003,12 +1119,15 @@ function extractPlainTextAnswer(text: string): AgentAction | null {
 
 function textToStream(text: string, opts: { dripDelayMs?: number } = {}): ReadableStream {
   const encoder = new TextEncoder()
-  const delay = opts.dripDelayMs ?? 60
+  const delay = opts.dripDelayMs ?? AGENT_STREAM_DELAY_MS
   return new ReadableStream({
     async start(controller) {
       let rest = sanitizeReplacementChars(text)
       while (rest.length > 0) {
-        const chunk = takeSemanticStreamChunk(rest, { minChars: 24, maxChars: 220 }) || rest
+        const chunk = takeSemanticStreamChunk(rest, {
+          minChars: AGENT_STREAM_MIN_CHARS,
+          maxChars: AGENT_STREAM_MAX_CHARS,
+        }) || rest
         rest = rest.slice(chunk.length)
         controller.enqueue(encoder.encode(chunk))
         await new Promise(resolve => setTimeout(resolve, delay))
@@ -1102,10 +1221,13 @@ function debugLog(
 async function* streamTextEvents(text: string): AsyncGenerator<AgentStreamEvent> {
   let rest = sanitizeReplacementChars(text)
   while (rest.length > 0) {
-    const chunk = takeSemanticStreamChunk(rest, { minChars: 24, maxChars: 220 }) || rest
+    const chunk = takeSemanticStreamChunk(rest, {
+      minChars: AGENT_STREAM_MIN_CHARS,
+      maxChars: AGENT_STREAM_MAX_CHARS,
+    }) || rest
     rest = rest.slice(chunk.length)
     yield { type: 'delta', content: chunk }
-    await new Promise(resolve => setTimeout(resolve, 60))
+    await new Promise(resolve => setTimeout(resolve, AGENT_STREAM_DELAY_MS))
   }
 }
 
@@ -1230,6 +1352,40 @@ export async function* runAgentChatEvents(
       phase: 'final',
       status: 'completed',
       title: '已请求补全八字人物',
+    })
+    yield { type: 'done', trace }
+    return
+  }
+
+  const fortuneScope = shouldAskFortuneScope(input)
+  if (fortuneScope) {
+    debugLog(input.userId, 'fortune_scope.request', {
+      reason: 'preflight',
+      fields: fortuneScope.request.fields.map(field => field.name),
+    })
+    yield traceEvent(trace, {
+      step: 1,
+      action: 'request_human_input:fortune_scope',
+      ok: true,
+      detail: fortuneScope.request.fields.map(field => field.name).join(','),
+      elapsedMs: Date.now() - startedAt,
+    })
+    yield progressEvent(startedAt, {
+      step: 1,
+      phase: 'final',
+      status: 'running',
+      title: '请求框定问题范围',
+    })
+    yield* streamTextEvents(fortuneScope.content)
+    yield {
+      type: 'ui',
+      ui: fortuneScope.request,
+    }
+    yield progressEvent(startedAt, {
+      step: 1,
+      phase: 'final',
+      status: 'completed',
+      title: '已请求框定问题范围',
     })
     yield { type: 'done', trace }
     return

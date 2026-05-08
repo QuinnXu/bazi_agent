@@ -479,9 +479,6 @@ function resolveFeatureMaxTokens(
   reportPreference?: AgentReportPreference | null,
 ): number | undefined {
   const preferenceMaxTokens = getAgentReportPreferenceMaxTokens(reportPreference)
-  if (preferenceMaxTokens && complexityMaxTokens) {
-    return Math.min(preferenceMaxTokens, complexityMaxTokens)
-  }
   return preferenceMaxTokens ?? complexityMaxTokens
 }
 
@@ -539,7 +536,9 @@ export async function runFeatureAnalysisStream(
   const baseStream = createUnifiedStreamProcessor(upstreamResponse, {
     chunking: opts.drip ? 'character' : 'semantic',
     dripDelayMs: opts.dripDelayMs,
-    semanticDelayMs: opts.dripDelayMs ?? 60,
+    semanticDelayMs: opts.dripDelayMs ?? 36,
+    semanticMinChars: 14,
+    semanticMaxChars: 140,
   })
   const refundableStream = createRefundableStream(
     baseStream,

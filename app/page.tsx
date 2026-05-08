@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useRef, useState, useCallback, useMemo } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react"
 import {
   Send,
   PanelLeftClose,
@@ -28,7 +28,7 @@ import {
 import Image from "next/image"
 import { MinimalBackground } from "@/components/minimal-background"
 import { ChatMessage, type MessageRunKind, type MessageStreamState } from "@/components/chat-message"
-import type { AgentInlineInputRequest, AgentInputValues } from "@/components/agent-input-request"
+import type { AgentInlineInputRequest, AgentInputField, AgentInputValues } from "@/components/agent-input-request"
 import { BaziDialog } from "@/components/bazi-dialog"
 import { DonationDialog } from "@/components/donation-button"
 import { AuthDialog } from "@/components/auth-dialog"
@@ -140,6 +140,9 @@ type AgentStreamEvent =
   | { type: 'delta'; content: string }
   | { type: 'done'; trace: unknown[] }
   | { type: 'error'; message: string }
+
+const COMPOSER_MIN_HEIGHT = 32
+const COMPOSER_MAX_HEIGHT = 128
 
 const AGENT_FEATURE_MENTIONS: Array<{
   kind: FeatureKind
@@ -277,9 +280,59 @@ function addMonthsForInput(date: Date, months: number): Date {
   return next
 }
 
+function resolveInlineTimeRange(values: AgentInputValues): AgentTimeRange | null {
+  const preset = agentInputValueToText(values.timeRangePreset)
+  if (!preset) return null
+
+  const today = new Date()
+  const start = preset === 'custom'
+    ? agentInputValueToText(values.customStart)
+    : formatDateInput(today)
+  const end =
+    preset === 'future_30d'
+      ? formatDateInput(addDaysForInput(today, 30))
+      : preset === 'future_3m'
+      ? formatDateInput(addMonthsForInput(today, 3))
+      : preset === 'rest_of_year'
+      ? `${today.getFullYear()}-12-31`
+      : agentInputValueToText(values.customEnd)
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+    return null
+  }
+
+  const normalizedStart = start <= end ? start : end
+  const normalizedEnd = start <= end ? end : start
+  const label =
+    preset === 'future_30d'
+      ? '未来 30 天'
+      : preset === 'future_3m'
+      ? '未来 3 个月'
+      : preset === 'rest_of_year'
+      ? '今年剩余时间'
+      : `${normalizedStart} ~ ${normalizedEnd}`
+
+  return {
+    id: `inline-${normalizedStart}-${normalizedEnd}-${label}`,
+    label,
+    start: normalizedStart,
+    end: normalizedEnd,
+  }
+}
+
 function agentInputValueToText(value: AgentInputValues[string]): string {
   if (Array.isArray(value)) return value.map(String).filter(Boolean).join('、')
   return String(value ?? '').trim()
+}
+
+function agentInputValueToDisplay(field: AgentInputField, value: AgentInputValues[string]): string {
+  const optionLabel = (item: string) =>
+    field.options?.find(option => String(option.value) === item)?.label || item
+  if (Array.isArray(value)) {
+    return value.map(item => optionLabel(String(item))).filter(Boolean).join('、')
+  }
+  const text = agentInputValueToText(value)
+  return text ? optionLabel(text) : ''
 }
 
 function reportPreferenceFromAgentValue(value: AgentInputValues[string]): AgentReportPreference | null {
@@ -725,12 +778,30 @@ function HomeContent() {
     }
   }, [activeChatMode, supabase])
 
-  useEffect(() => {
+  const resizeComposerTextarea = useCallback(() => {
     const textarea = composerTextareaRef.current
     if (!textarea) return
-    textarea.style.height = '0px'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`
-  }, [input])
+    textarea.style.height = `${COMPOSER_MIN_HEIGHT}px`
+    const nextHeight = Math.min(
+      Math.max(textarea.scrollHeight, COMPOSER_MIN_HEIGHT),
+      COMPOSER_MAX_HEIGHT,
+    )
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > COMPOSER_MAX_HEIGHT ? 'auto' : 'hidden'
+  }, [])
+
+  useLayoutEffect(() => {
+    resizeComposerTextarea()
+  }, [
+    activeChatMode,
+    agentParticipants.length,
+    agentReportPreference,
+    agentTimeRanges.length,
+    input,
+    resizeComposerTextarea,
+    selectedProfileId,
+    selectedProfile?.name,
+  ])
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const nextInput = e.target.value
@@ -928,11 +999,15 @@ function HomeContent() {
       __selectedProfileOverride?: SelectedProfileContext | null
       __selectedParticipantsOverride?: SelectedProfileContext[]
       __agentReportPreferenceOverride?: AgentReportPreference | null
+      __preserveCurrentProfile?: boolean
+      __timeRangesOverride?: AgentTimeRange[]
     }
     const submittedText = (submitEvent.__contentOverride ?? input).trim()
     const selectedProfileOverride = submitEvent.__selectedProfileOverride
     const selectedParticipantsOverride = submitEvent.__selectedParticipantsOverride
     const reportPreferenceOverride = submitEvent.__agentReportPreferenceOverride
+    const preserveCurrentProfile = submitEvent.__preserveCurrentProfile === true
+    const requestTimeRanges = submitEvent.__timeRangesOverride ?? agentTimeRanges
     if (!submittedText || isLoading) return;
     setComposerModeOpen(false)
     const requestConsumesApple =
@@ -961,10 +1036,10 @@ function HomeContent() {
         ...(requestSelectedProfile ? [requestSelectedProfile] : []),
       ])
       requestSelectedProfile = requestSelectedProfile || requestParticipants[0] || null
-      if (requestParticipants.length > 0) {
+      if (!preserveCurrentProfile && requestParticipants.length > 0) {
         setAgentParticipants(requestParticipants)
       }
-      if (requestSelectedProfile && requestSelectedProfile.id !== selectedProfile?.id) {
+      if (!preserveCurrentProfile && requestSelectedProfile && requestSelectedProfile.id !== selectedProfile?.id) {
         setSelectedProfile(requestSelectedProfile)
         setSelectedProfileId(requestSelectedProfile.id || null)
         setBaziAnalysisResult(requestSelectedProfile.baziText || null)
@@ -1042,8 +1117,8 @@ function HomeContent() {
         if (requestParticipants.length > 0) {
           requestData.participants = requestParticipants
         }
-        if (agentTimeRanges.length > 0) {
-          requestData.timeRanges = agentTimeRanges
+        if (requestTimeRanges.length > 0) {
+          requestData.timeRanges = requestTimeRanges
         }
       }
       // Inject feature follow-up context so the AI keeps participants & summary
@@ -1663,7 +1738,10 @@ function HomeContent() {
     data: BaziData,
     profileName: string,
     profileId?: string | null,
+    options: { updateCurrent?: boolean; addToAgentContext?: boolean } = {},
   ): Promise<SelectedProfileContext> => {
+    const updateCurrent = options.updateCurrent ?? true
+    const addToAgentContext = options.addToAgentContext ?? updateCurrent
     const response = await fetch('/api/bazi', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1683,7 +1761,6 @@ function HomeContent() {
       throw new Error(result.error || '八字信息验证失败')
     }
 
-    setBaziAnalysisResult(result.baziResult)
     let savedProfileContext: SelectedProfileContext = {
       name: profileName || '当前命主',
       baziText: result.baziResult,
@@ -1721,28 +1798,34 @@ function HomeContent() {
           bazi_result: saved.profile.bazi_result,
         }
         savedProfileContext = profileOptionToContext(option)
-        setSelectedProfileId(option.id)
         setAgentProfiles(prev => [option, ...prev.filter(item => item.id !== option.id)])
       }
     }
 
-    setSelectedProfile(savedProfileContext)
-    if (activeChatMode === 'agent') {
+    if (updateCurrent) {
+      setSelectedProfile(savedProfileContext)
+      setSelectedProfileId(savedProfileContext.id || null)
+      setBaziAnalysisResult(savedProfileContext.baziText || null)
+      setBaziData(data)
+    }
+    if (activeChatMode === 'agent' && addToAgentContext) {
       setAgentParticipants(prev => mergeProfileContexts([...prev, savedProfileContext]))
     }
-    setBaziData(data)
     return savedProfileContext
   }, [activeChatMode, user])
 
   const handleBaziSubmit = async (data: BaziData) => {
     try {
-      await createAndSaveBaziProfile(data, selectedProfile?.name || '当前命主', selectedProfileId)
+      await createAndSaveBaziProfile(data, '新人物', null, {
+        updateCurrent: false,
+        addToAgentContext: false,
+      })
       setAgentBaziInitialData(undefined);
       setShowBaziDialog(false);
       const infoMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: '您的八字信息已成功录入！现在您可以询问关于运势、性格、事业、感情等方面的问题，我会结合您的八字进行专业分析。',
+        content: '八字人物已新增。需要分析时，请在人物管理或 Agent 上下文里选择这个人物，我再结合对应命盘继续看。',
         createdAt: new Date(),
         mode: activeChatMode,
       };
@@ -1788,41 +1871,56 @@ function HomeContent() {
           longitude: valueText('longitude', '121.5'),
           latitude: valueText('latitude', '31.2'),
         }
-        const profileName = valueText('profileName', '当前命主') || '当前命主'
-        const savedProfile = await createAndSaveBaziProfile(data, profileName)
+        const profileName = valueText('profileName', '新人物') || '新人物'
+        const savedProfile = await createAndSaveBaziProfile(data, profileName, null, {
+          updateCurrent: false,
+          addToAgentContext: false,
+        })
         const resumeText = `${request.resumeIntent || '请继续刚才的问题'}\n已创建八字人物：${savedProfile.name}。`
         const event = {
           preventDefault: () => {},
           __contentOverride: resumeText,
           __selectedProfileOverride: savedProfile,
           __selectedParticipantsOverride: mergeProfileContexts([...agentParticipants, savedProfile]),
+          __preserveCurrentProfile: true,
         } as React.FormEvent & {
           __contentOverride: string
           __selectedProfileOverride: SelectedProfileContext
           __selectedParticipantsOverride: SelectedProfileContext[]
+          __preserveCurrentProfile: boolean
         }
         handleSubmit(event)
         return
       }
 
-      const nextReportPreference = request.fields.some(field => field.name === 'reportStyle')
+      const hasReportStyleField = request.fields.some(field => field.name === 'reportStyle')
+      const nextReportPreference = hasReportStyleField
         ? reportPreferenceFromAgentValue(values.reportStyle)
         : null
       if (nextReportPreference) {
         setAgentReportPreference(nextReportPreference)
       }
+      const inlineTimeRange = request.fields.some(field =>
+        field.name === 'timeRangePreset' ||
+        field.name === 'customStart' ||
+        field.name === 'customEnd',
+      )
+        ? resolveInlineTimeRange(values)
+        : null
 
       const filled = request.fields
-        .map(field => `${field.label}：${agentInputValueToText(values[field.name])}`)
+        .map(field => `${field.label}：${agentInputValueToDisplay(field, values[field.name])}`)
         .filter(line => !line.endsWith('：'))
         .join('\n')
       const event = {
         preventDefault: () => {},
-        __contentOverride: `${request.resumeIntent || '请继续刚才的问题'}\n${filled}`,
-        __agentReportPreferenceOverride: nextReportPreference,
+        __contentOverride: `${request.resumeIntent || '请继续刚才的问题'}\n${filled}${inlineTimeRange ? `\n开始日期：${inlineTimeRange.start}\n结束日期：${inlineTimeRange.end}` : ''}`,
+        ...(hasReportStyleField ? { __agentReportPreferenceOverride: nextReportPreference } : {}),
+        ...(inlineTimeRange ? { __timeRangesOverride: [inlineTimeRange] } : {}),
       } as React.FormEvent & {
         __contentOverride: string
-        __agentReportPreferenceOverride: AgentReportPreference | null
+        __agentReportPreferenceOverride?: AgentReportPreference | null
+        __timeRangesOverride?: AgentTimeRange[]
       }
       handleSubmit(event)
     } catch (error) {
@@ -2061,9 +2159,11 @@ function HomeContent() {
             <div className="space-y-4 py-3 md:space-y-6 md:py-4">
               {messages.map((message, idx) => {
                 let reportType: FeatureKind | undefined
+                let previousUserContent: string | undefined
                 if (message.role === 'assistant') {
                   for (let i = idx - 1; i >= 0; i--) {
                     if (messages[i].role === 'user') {
+                      previousUserContent = messages[i].content
                       const k = detectFeatureKindFromContent(messages[i].content)
                       if (k) reportType = k
                       break
@@ -2082,6 +2182,7 @@ function HomeContent() {
                       message={message}
                       isStreaming={message.id === activeStreamingMessageId}
                       reportType={reportType}
+                      previousUserContent={previousUserContent}
                       onFollowUp={isLastAssistant ? fillAndSubmit : undefined}
                       onAgentUiSubmit={handleAgentUiSubmit}
                     />
@@ -2414,7 +2515,7 @@ function HomeContent() {
                   onChange={handleInputChange}
                   onKeyDown={handleComposerKeyDown}
                   placeholder={user ? (activeChatMode === 'agent' ? '想聊什么？随便问吧' : '想聊什么？随便问吧') : '登录后可以开始和卜卜象聊天 🐘'}
-                  className="composer-textarea min-h-8 max-h-32 min-w-0 flex-1 resize-none bg-transparent px-1 py-1.5 text-sm font-light leading-5 text-foreground placeholder-muted-foreground focus:outline-none"
+                  className="composer-textarea h-8 min-h-8 max-h-32 min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1 py-1.5 text-sm font-light leading-5 text-foreground placeholder-muted-foreground focus:outline-none"
                   disabled={isLoading || !user}
                 />
                 {renderComposerModeMenu()}

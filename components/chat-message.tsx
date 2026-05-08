@@ -1,6 +1,6 @@
 "use client"
 
-import React, { memo, useMemo, useState } from "react"
+import React, { memo, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
@@ -48,6 +48,7 @@ interface ChatMessageProps {
   message: Message
   isStreaming?: boolean
   reportType?: FeatureKind
+  previousUserContent?: string
   onFollowUp?: (text: string) => void
   onAgentUiSubmit?: (request: AgentInlineInputRequest, values: AgentInputValues) => void | Promise<void>
 }
@@ -85,7 +86,11 @@ const FEATURE_META: Record<
   },
 }
 
-const DEFAULT_FOLLOW_UPS = ["继续展开", "提炼三个重点", "下一步怎么做？"]
+const DEFAULT_FOLLOW_UPS = ["继续展开上面的重点", "整理成行动清单", "下一步怎么做？"]
+const FOLLOW_UP_LIMIT = 3
+const SMOOTH_REVEAL_MS = 24
+const SMOOTH_REVEAL_FAST_MS = 12
+const SMOOTH_REVEAL_CATCHUP_CHARS = 48
 
 const markdownComponents = {
   h1: ({ children }: { children?: React.ReactNode }) => (
@@ -167,6 +172,9 @@ const markdownComponents = {
   ),
 }
 
+const markdownRemarkPlugins = [remarkGfm]
+const markdownRehypePlugins = [rehypeHighlight]
+
 export function detectFeatureKindFromContent(content: string): FeatureKind | null {
   if (!content) return null
   const match = content.match(/^\[卜卜象·([^\]]+)\]/)
@@ -176,6 +184,276 @@ export function detectFeatureKindFromContent(content: string): FeatureKind | nul
 
 function getRestAfterSentinel(content: string): string {
   return content.replace(/^\[卜卜象·[^\]]+\][^\n]*\n*/, "").trim()
+}
+
+function takeSmoothRevealChunk(text: string): string {
+  if (!text) return ""
+  const chars = Array.from(text)
+  const preview = chars.slice(0, 32).join("")
+  const hasWideChars = /[^\x00-\x7F]/.test(preview)
+  const min = hasWideChars ? 6 : 18
+  const max = hasWideChars ? 12 : 28
+  const hardLimit = Math.min(chars.length, max)
+
+  for (let index = hardLimit; index >= min; index -= 1) {
+    const char = chars[index - 1]
+    if (/[\s，,、：:；;。！？!?]/.test(char)) {
+      return chars.slice(0, index).join("")
+    }
+  }
+
+  return chars.slice(0, hardLimit).join("")
+}
+
+function takeSmoothRevealStep(text: string, backlogLength: number): string {
+  if (backlogLength > SMOOTH_REVEAL_CATCHUP_CHARS * 3) {
+    return Array.from(text).slice(0, SMOOTH_REVEAL_CATCHUP_CHARS).join("")
+  }
+
+  return takeSmoothRevealChunk(text)
+}
+
+function useSmoothStreamingText(targetContent: string, isStreaming: boolean): string {
+  const [visibleContent, setVisibleContent] = useState(targetContent)
+  const visibleRef = useRef(targetContent)
+  const targetRef = useRef(targetContent)
+  const frameRef = useRef<number | null>(null)
+  const lastRevealAtRef = useRef(0)
+
+  useEffect(() => {
+    visibleRef.current = visibleContent
+  }, [visibleContent])
+
+  useEffect(() => {
+    targetRef.current = targetContent
+
+    if (!isStreaming) {
+      if (visibleRef.current !== targetContent) {
+        visibleRef.current = targetContent
+        setVisibleContent(targetContent)
+      }
+      return
+    }
+
+    if (!targetContent.startsWith(visibleRef.current)) {
+      visibleRef.current = targetContent
+      setVisibleContent(targetContent)
+    }
+  }, [isStreaming, targetContent])
+
+  useEffect(() => {
+    if (!isStreaming) {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+      return
+    }
+
+    let cancelled = false
+
+    const reveal = (timestamp: number) => {
+      if (cancelled) return
+      const target = targetRef.current
+      const current = visibleRef.current
+
+      if (!target.startsWith(current)) {
+        visibleRef.current = target
+        setVisibleContent(target)
+        lastRevealAtRef.current = timestamp
+      } else if (target.length > current.length) {
+        const backlogLength = target.length - current.length
+        const revealDelay = backlogLength > SMOOTH_REVEAL_CATCHUP_CHARS
+          ? SMOOTH_REVEAL_FAST_MS
+          : SMOOTH_REVEAL_MS
+
+        if (timestamp - lastRevealAtRef.current >= revealDelay) {
+          const pending = target.slice(current.length)
+          const next = current + takeSmoothRevealStep(pending, backlogLength)
+          visibleRef.current = next
+          setVisibleContent(next)
+          lastRevealAtRef.current = timestamp
+        }
+      }
+
+      frameRef.current = window.requestAnimationFrame(reveal)
+    }
+
+    frameRef.current = window.requestAnimationFrame(reveal)
+    return () => {
+      cancelled = true
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current)
+        frameRef.current = null
+      }
+    }
+  }, [isStreaming])
+
+  return isStreaming ? visibleContent : targetContent
+}
+
+function limitText(text: string, maxChars = 12): string {
+  const chars = Array.from(text)
+  if (chars.length <= maxChars) return text
+  return chars.slice(0, maxChars).join("")
+}
+
+function cleanFollowUpTopic(raw: string): string {
+  return raw
+    .replace(/^\[卜卜象·[^\]]+\]/, "")
+    .replace(/^[#>\s*+\-·•\d.、)）]+/, "")
+    .replace(/[*_`~\[\]（）()]/g, "")
+    .split(/[：:，,。；;！!？?\n]/)[0]
+    .replace(/\s+/g, "")
+    .trim()
+}
+
+function pushUnique(target: string[], value: string, maxChars = 12) {
+  const cleaned = limitText(cleanFollowUpTopic(value), maxChars)
+  if (!cleaned || cleaned.length < 2) return
+  if (["卜卜象", "报告", "总结", "分析", "建议"].includes(cleaned)) return
+  if (!target.includes(cleaned)) target.push(cleaned)
+}
+
+function collectMatches(text: string, regex: RegExp): string[] {
+  const matches: string[] = []
+  let match: RegExpExecArray | null
+  regex.lastIndex = 0
+  while ((match = regex.exec(text)) !== null) {
+    matches.push(match[1] || match[0])
+  }
+  return matches
+}
+
+const PRIORITY_FOLLOW_UP_TOPICS = [
+  "事业",
+  "工作",
+  "财运",
+  "财富",
+  "感情",
+  "关系",
+  "婚恋",
+  "沟通",
+  "磨合",
+  "健康",
+  "行动建议",
+  "关键时间",
+  "风险",
+  "机会",
+  "头像风格",
+  "配色",
+  "气质",
+  "大运",
+  "流年",
+  "人生阶段",
+  "学习",
+  "家庭",
+]
+
+interface FollowUpContext {
+  headings: string[]
+  timeWindows: string[]
+  topics: string[]
+  userTopics: string[]
+}
+
+function extractFollowUpContext(content: string, previousUserContent = ""): FollowUpContext {
+  const source = getRestAfterSentinel(sanitizeReplacementChars(content))
+  const userSource = getRestAfterSentinel(sanitizeReplacementChars(previousUserContent))
+  const headings: string[] = []
+  const timeWindows: string[] = []
+  const topics: string[] = []
+  const userTopics: string[] = []
+
+  collectMatches(source, /^#{1,4}\s+(.+)$/gm).forEach(value => pushUnique(headings, value))
+  collectMatches(source, /\*\*([^*\n]{2,24})\*\*/g).forEach(value => pushUnique(headings, value))
+  collectMatches(source, /^\s*(?:[-*+]|\d+[.、)）])\s+(?:\*\*)?([^：:\n，,。]{2,18})/gm)
+    .forEach(value => pushUnique(headings, value))
+
+  const timePatterns = [
+    /20\d{2}\s*[—\-~～到至]\s*20\d{2}/g,
+    /20\d{2}年(?:上半年|下半年)?/g,
+    /\d{1,2}月(?:上旬|中旬|下旬|初|底)?/g,
+    /未来[一二两三四五六七八九十\d]+(?:天|周|个月|年)/g,
+    /[一二两三四五六七八九十\d]+岁(?:前|后|左右|到[一二三四五六七八九十\d]+岁)?/g,
+  ]
+  timePatterns.forEach(pattern => {
+    collectMatches(source, pattern).forEach(value => pushUnique(timeWindows, value, 14))
+  })
+
+  const combined = `${source}\n${userSource}`
+  PRIORITY_FOLLOW_UP_TOPICS.forEach(topic => {
+    if (combined.includes(topic)) pushUnique(topics, topic)
+    if (userSource.includes(topic)) pushUnique(userTopics, topic)
+  })
+
+  headings.forEach(value => pushUnique(topics, value))
+  return { headings, timeWindows, topics, userTopics }
+}
+
+function normalizeFollowUp(text: string): string {
+  return text.replace(/\s+/g, " ").replace(/[。.!！]+$/, "？").trim()
+}
+
+function pickContextTopic(context: FollowUpContext, fallback?: string): string | undefined {
+  return context.userTopics[0] || context.topics[0] || context.headings[0] || fallback
+}
+
+function takeFollowUps(candidates: string[], fallbacks: string[]): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (const raw of [...candidates, ...fallbacks]) {
+    const text = normalizeFollowUp(raw)
+    const key = text.replace(/[？?]/g, "")
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    result.push(text)
+    if (result.length >= FOLLOW_UP_LIMIT) break
+  }
+  return result
+}
+
+export function buildContextualFollowUps({
+  content,
+  previousUserContent,
+  reportType,
+}: {
+  content: string
+  previousUserContent?: string
+  reportType?: FeatureKind
+}): string[] {
+  const fallback = reportType ? FEATURE_META[reportType].suggests : DEFAULT_FOLLOW_UPS
+  const cleanContent = getRestAfterSentinel(content)
+  if (!cleanContent.trim()) return fallback.slice(0, FOLLOW_UP_LIMIT)
+
+  const context = extractFollowUpContext(cleanContent, previousUserContent)
+  const topic = pickContextTopic(context)
+  const secondary = context.topics.find(item => item !== topic)
+  const time = context.timeWindows[0]
+  const candidates: string[] = []
+
+  if (reportType === "fortune") {
+    if (time) candidates.push(`展开${time}的重点`)
+    if (topic && !["关键时间", "行动建议"].includes(topic)) candidates.push(`${topic}上要注意什么？`)
+    candidates.push("给我这段时间的行动清单")
+  } else if (reportType === "hepan") {
+    if (topic) candidates.push(`展开${topic}的磨合点`)
+    if (time) candidates.push(`${time}关系怎么推进？`)
+    candidates.push("怎么沟通会更顺？")
+  } else if (reportType === "avatar") {
+    if (topic) candidates.push(`把${topic}转成 prompt`)
+    candidates.push("再给 3 个配色方案", "适合哪些社交场景？")
+  } else if (reportType === "lifepath") {
+    if (time || topic) candidates.push(`展开${time || topic}`)
+    candidates.push("哪个阶段最关键？", "现在最适合做什么？")
+  } else {
+    if (topic) candidates.push(`展开${topic}`)
+    if (secondary) candidates.push(`${secondary}怎么做？`)
+    if (time) candidates.push(`展开${time}`)
+    if (topic) candidates.push(`把${topic}整理成行动清单`)
+  }
+
+  return takeFollowUps(candidates, fallback)
 }
 
 function summarizeUserRequest(kind: FeatureKind, content: string): string {
@@ -252,14 +530,14 @@ function ReportHeader({ kind }: { kind: FeatureKind }) {
 }
 
 function FollowUp({
-  kind,
+  suggestions,
   onFollowUp,
 }: {
-  kind?: FeatureKind
+  suggestions: string[]
   onFollowUp?: (text: string) => void
 }) {
   if (!onFollowUp) return null
-  const suggests = kind ? FEATURE_META[kind].suggests : DEFAULT_FOLLOW_UPS
+  const suggests = suggestions.length > 0 ? suggestions : DEFAULT_FOLLOW_UPS
   return (
     <div className="mt-4 pt-3 border-t border-border/50">
       <p className="text-[11px] text-muted-foreground/70 mb-2">想继续追问：</p>
@@ -279,17 +557,17 @@ function FollowUp({
   )
 }
 
-function MarkdownRenderer({ content }: { content: string }) {
+const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
+      remarkPlugins={markdownRemarkPlugins}
+      rehypePlugins={markdownRehypePlugins}
       components={markdownComponents}
     >
       {content}
     </ReactMarkdown>
   )
-}
+})
 
 function MessageSkeleton() {
   return (
@@ -409,6 +687,51 @@ function splitStreamingMarkdown(content: string) {
   }
 }
 
+function splitStableMarkdownBlocks(content: string): string[] {
+  if (!content.trim()) return []
+
+  const blocks: string[] = []
+  let blockStart = 0
+  let cursor = 0
+  let fenceOpen = false
+
+  while (cursor < content.length) {
+    if (content.startsWith("```", cursor)) {
+      fenceOpen = !fenceOpen
+      cursor += 3
+      continue
+    }
+
+    if (!fenceOpen && content[cursor] === "\n" && content[cursor + 1] === "\n") {
+      let blockEnd = cursor + 2
+      while (content[blockEnd] === "\n") blockEnd += 1
+      const block = content.slice(blockStart, blockEnd)
+      if (block.trim()) blocks.push(block)
+      blockStart = blockEnd
+      cursor = blockEnd
+      continue
+    }
+
+    cursor += 1
+  }
+
+  const tail = content.slice(blockStart)
+  if (tail.trim()) blocks.push(tail)
+  return blocks
+}
+
+const StableMarkdownBlocks = memo(function StableMarkdownBlocks({ content }: { content: string }) {
+  const blocks = useMemo(() => splitStableMarkdownBlocks(content), [content])
+
+  return (
+    <>
+      {blocks.map((block, index) => (
+        <MarkdownRenderer key={`markdown-block-${index}`} content={block} />
+      ))}
+    </>
+  )
+})
+
 function StreamingMarkdown({ content }: { content: string }) {
   const parts = useMemo(() => splitStreamingMarkdown(content), [content])
 
@@ -416,7 +739,7 @@ function StreamingMarkdown({ content }: { content: string }) {
 
   return (
     <div className="markdown-content max-w-none text-foreground">
-      {parts.stableMarkdown && <MarkdownRenderer content={parts.stableMarkdown} />}
+      {parts.stableMarkdown && <StableMarkdownBlocks content={parts.stableMarkdown} />}
       {parts.hasPendingTable && <TableSkeleton />}
       {parts.hasPendingCodeBlock && (
         <div className="my-4 rounded-lg border border-border bg-muted">
@@ -502,6 +825,7 @@ const ChatMessage = memo(function ChatMessage({
   message,
   isStreaming = false,
   reportType,
+  previousUserContent,
   onFollowUp,
   onAgentUiSubmit,
 }: ChatMessageProps) {
@@ -512,10 +836,19 @@ const ChatMessage = memo(function ChatMessage({
     () => sanitizeReplacementChars(message.content),
     [message.content],
   )
+  const visibleContent = useSmoothStreamingText(displayContent, isStreaming)
 
   const userKind = useMemo(
     () => (isUser ? detectFeatureKindFromContent(displayContent) : null),
     [isUser, displayContent],
+  )
+  const followUpSuggestions = useMemo(
+    () => buildContextualFollowUps({
+      content: displayContent,
+      previousUserContent,
+      reportType,
+    }),
+    [displayContent, previousUserContent, reportType],
   )
 
   const hasStoppedWithContent = message.streamState?.status === "stopped" && Boolean(displayContent.trim())
@@ -572,7 +905,7 @@ const ChatMessage = memo(function ChatMessage({
 
           <div className={contentClassName}>
             {isStreaming ? (
-              <StreamingMarkdown content={displayContent} />
+              <StreamingMarkdown content={visibleContent} />
             ) : (
               <div className="markdown-content max-w-none text-foreground">
                 {displayContent ? <MarkdownRenderer content={displayContent} /> : <MessageSkeleton />}
@@ -594,7 +927,7 @@ const ChatMessage = memo(function ChatMessage({
           />
 
           {!isStreaming && displayContent && (
-            <FollowUp kind={reportType} onFollowUp={onFollowUp} />
+            <FollowUp suggestions={followUpSuggestions} onFollowUp={onFollowUp} />
           )}
 
           {message.agentUi && onAgentUiSubmit && (

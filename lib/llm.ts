@@ -481,7 +481,7 @@ interface StreamOptions {
    */
   dripDelayMs?: number
   /**
-   * Semantic chunk delay in ms. Default 60.
+   * Semantic chunk delay in ms. Default 30.
    */
   semanticDelayMs?: number
   semanticMinChars?: number
@@ -501,9 +501,9 @@ export function createUnifiedStreamProcessor(
   const mode = opts.chunking ?? (opts.drip === false ? 'immediate' : 'character')
   const drip = mode === 'character'
   const dripDelayMs = opts.dripDelayMs ?? 12
-  const semanticDelayMs = opts.semanticDelayMs ?? opts.dripDelayMs ?? 60
-  const semanticMinChars = opts.semanticMinChars ?? 24
-  const semanticMaxChars = opts.semanticMaxChars ?? 220
+  const semanticDelayMs = opts.semanticDelayMs ?? opts.dripDelayMs ?? 30
+  const semanticMinChars = opts.semanticMinChars ?? 8
+  const semanticMaxChars = opts.semanticMaxChars ?? 90
 
   return new ReadableStream({
     async start(controller) {

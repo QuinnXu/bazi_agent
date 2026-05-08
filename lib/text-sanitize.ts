@@ -60,8 +60,8 @@ export function takeSemanticStreamChunk(
 ): string {
   if (!text) return ''
 
-  const minChars = Math.max(8, options.minChars ?? 24)
-  const maxChars = Math.max(minChars + 24, options.maxChars ?? 220)
+  const minChars = Math.max(8, options.minChars ?? 8)
+  const maxChars = Math.max(minChars + 24, options.maxChars ?? 90)
   const scanLimit = Math.min(text.length, maxChars)
 
   const doubleBreak = text.indexOf('\n\n')
