@@ -13,16 +13,16 @@ interface AuthDialogProps {
 }
 
 function authErrorMessage(err: { message?: string } | null): string {
-  if (!err?.message) return '操作失败，请稍后重试'
+  if (!err?.message) return '哎呀，网络好像打了个小盹，稍后再试一次喔 🐘'
   const msg = err.message.toLowerCase()
   if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('already been registered'))
-    return '该邮箱已注册，请直接登录'
+    return '这个邮筱已经是卜卜象的好朋友啊，直接登录吧 🐘'
   if (msg.includes('invalid login') || msg.includes('invalid_credentials'))
-    return '邮箱或密码错误，请重试'
+    return '哎呀，密码好像有点小脘气，要不再试一次？ 🐾'
   if (msg.includes('email not confirmed'))
-    return '邮箱尚未验证，请先完成验证'
+    return '需要去邮筱找找卜卜象发给你的验证小信封哦 ✉️'
   if (msg.includes('token has expired') || msg.includes('otp_expired'))
-    return '验证码已过期，请重新发送'
+    return '验证码已经在风中走散啊，让卜卜象再发一个吧 🌬️'
   if (msg.includes('otp_disabled'))
     return '验证码功能未启用，请联系管理员'
   return err.message
@@ -87,7 +87,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
         }
       }
     } catch {
-      setError('操作失败，请稍后重试')
+      setError('哎呀，网络好像打了个小盹，稍后再试一次喔 🐘')
     } finally {
       setLoading(false)
     }

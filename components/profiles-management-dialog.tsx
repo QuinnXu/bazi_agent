@@ -16,7 +16,7 @@ interface BaziProfile {
   birth_hour: number
   birth_minute: number
   is_solar_calendar: boolean
-  gender: 'male' | 'female' | 'other'
+  gender: 'male' | 'female' | 'other' | null
   birth_longitude: number
   birth_latitude: number
   bazi_result_text: string | null
@@ -57,9 +57,10 @@ interface BaziResultData {
 interface ProfilesManagementDialogProps {
   isOpen: boolean
   onClose: () => void
+  onProfileSaved?: (profile: BaziProfile) => void
 }
 
-export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagementDialogProps) {
+export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: ProfilesManagementDialogProps) {
   const [profiles, setProfiles] = useState<BaziProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogStep, setDialogStep] = useState<'list' | 'name' | 'bazi' | 'detail'>('list')
@@ -223,29 +224,23 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
         bazi_result: result.baziData,
       }
 
-      if (editingProfile) {
-        // @ts-ignore
-        const { error } = await supabase
-          .from('bazi_profiles')
-          // @ts-ignore
-          .update(profileData)
-          .eq('id', editingProfile.id)
+      const saveResponse = await fetch('/api/bazi-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(editingProfile ? { id: editingProfile.id } : {}),
+          ...profileData,
+          bazi_result_json: result.baziData,
+        }),
+      })
+      const saveResult = await saveResponse.json().catch(() => ({}))
+      if (!saveResponse.ok) {
+        throw new Error(saveResult?.details || saveResult?.error || '保存人物失败')
+      }
 
-        if (error) {
-          console.error('更新错误:', error)
-          throw error
-        }
-      } else {
-        // @ts-ignore
-        const { error } = await supabase
-          .from('bazi_profiles')
-          // @ts-ignore
-          .insert({ ...profileData, user_id: user.id })
-
-        if (error) {
-          console.error('插入错误:', error)
-          throw error
-        }
+      const savedProfile = saveResult.profile as BaziProfile | undefined
+      if (savedProfile) {
+        onProfileSaved?.(savedProfile)
       }
 
       // 刷新列表
@@ -253,18 +248,8 @@ export function ProfilesManagementDialog({ isOpen, onClose }: ProfilesManagement
 
       // 如果是从 detail 页编辑的，保存后返回 detail 并刷新数据
       if (viewingProfile && editingProfile) {
-        // 找到更新后的 profile
-        const updatedProfiles = profiles // loadProfiles 已更新 state，但此处可能还未同步
-        // 重新查询获取最新数据
-        // @ts-ignore
-        const { data: freshData } = await supabase
-          .from('bazi_profiles')
-          .select('*')
-          .eq('id', editingProfile.id)
-          .single()
-
-        if (freshData) {
-          setViewingProfile(freshData)
+        if (savedProfile) {
+          setViewingProfile(savedProfile)
         }
         setDialogStep('detail')
         setEditingProfile(null)

@@ -34,6 +34,7 @@ export interface Database {
           avatar_url?: string | null
           updated_at?: string
         }
+        Relationships: []
       }
 
       // ============================================
@@ -106,6 +107,7 @@ export interface Database {
           tags?: string[]
           updated_at?: string
         }
+        Relationships: []
       }
 
       // ============================================
@@ -118,6 +120,7 @@ export interface Database {
           bazi_profile_id: string | null
           title: string
           summary: string | null
+          mode: 'classic' | 'agent'
           message_count: number
           status: 'active' | 'archived' | 'deleted'
           created_at: string
@@ -130,6 +133,7 @@ export interface Database {
           bazi_profile_id?: string | null
           title?: string
           summary?: string | null
+          mode?: 'classic' | 'agent'
           message_count?: number
           status?: 'active' | 'archived' | 'deleted'
           created_at?: string
@@ -140,11 +144,13 @@ export interface Database {
           bazi_profile_id?: string | null
           title?: string
           summary?: string | null
+          mode?: 'classic' | 'agent'
           message_count?: number
           status?: 'active' | 'archived' | 'deleted'
           updated_at?: string
           last_message_at?: string
         }
+        Relationships: []
       }
 
       // ============================================
@@ -156,6 +162,7 @@ export interface Database {
           session_id: string
           role: 'user' | 'assistant' | 'system'
           content: string
+          mode: 'classic' | 'agent'
           model: string | null
           tokens_used: number | null
           is_edited: boolean
@@ -168,6 +175,7 @@ export interface Database {
           session_id: string
           role: 'user' | 'assistant' | 'system'
           content: string
+          mode?: 'classic' | 'agent'
           model?: string | null
           tokens_used?: number | null
           is_edited?: boolean
@@ -178,12 +186,60 @@ export interface Database {
         Update: {
           role?: 'user' | 'assistant' | 'system'
           content?: string
+          mode?: 'classic' | 'agent'
           model?: string | null
           tokens_used?: number | null
           is_edited?: boolean
           is_deleted?: boolean
           edited_at?: string | null
         }
+        Relationships: []
+      }
+
+      // ============================================
+      // LLM Usage Events Table
+      // ============================================
+      llm_usage_events: {
+        Row: {
+          id: string
+          user_id: string
+          source: 'classic_chat' | 'agent_planner' | 'feature_page' | 'agent_tool'
+          mode: 'classic' | 'agent' | 'feature'
+          feature_kind: 'fortune' | 'hepan' | 'avatar' | 'lifepath' | null
+          model: string
+          task: string
+          status: 'completed' | 'empty' | 'aborted' | 'failed'
+          input_tokens: number
+          output_tokens: number
+          total_tokens: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          source: 'classic_chat' | 'agent_planner' | 'feature_page' | 'agent_tool'
+          mode: 'classic' | 'agent' | 'feature'
+          feature_kind?: 'fortune' | 'hepan' | 'avatar' | 'lifepath' | null
+          model: string
+          task: string
+          status?: 'completed' | 'empty' | 'aborted' | 'failed'
+          input_tokens?: number
+          output_tokens?: number
+          total_tokens?: number
+          created_at?: string
+        }
+        Update: {
+          source?: 'classic_chat' | 'agent_planner' | 'feature_page' | 'agent_tool'
+          mode?: 'classic' | 'agent' | 'feature'
+          feature_kind?: 'fortune' | 'hepan' | 'avatar' | 'lifepath' | null
+          model?: string
+          task?: string
+          status?: 'completed' | 'empty' | 'aborted' | 'failed'
+          input_tokens?: number
+          output_tokens?: number
+          total_tokens?: number
+        }
+        Relationships: []
       }
 
       // ============================================
@@ -218,6 +274,7 @@ export interface Database {
           preferences?: Record<string, any>
           updated_at?: string
         }
+        Relationships: []
       }
 
       // ============================================
@@ -249,6 +306,7 @@ export interface Database {
           last_reset_date?: string
           updated_at?: string
         }
+        Relationships: []
       }
 
       // ============================================
@@ -278,6 +336,7 @@ export interface Database {
           feedback_type?: 'helpful' | 'not_helpful' | 'incorrect' | 'offensive' | null
           comment?: string | null
         }
+        Relationships: []
       }
     }
 
@@ -296,6 +355,7 @@ export interface Database {
           profile_name: string | null
           avatar_emoji: string | null
         }
+        Relationships: []
       }
       user_statistics: {
         Row: {
@@ -307,6 +367,7 @@ export interface Database {
           total_messages_count: number
           user_created_at: string
         }
+        Relationships: []
       }
     }
 
@@ -327,6 +388,7 @@ export type Profile = Database['public']['Tables']['profiles']['Row']
 export type BaziProfile = Database['public']['Tables']['bazi_profiles']['Row']
 export type ChatSession = Database['public']['Tables']['chat_sessions']['Row']
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row']
+export type LlmUsageEvent = Database['public']['Tables']['llm_usage_events']['Row']
 export type UserPreferences = Database['public']['Tables']['user_preferences']['Row']
 export type MessageFeedback = Database['public']['Tables']['message_feedback']['Row']
 export type UserQuota = Database['public']['Tables']['user_quotas']['Row']
@@ -335,6 +397,7 @@ export type ProfileInsert = Database['public']['Tables']['profiles']['Insert']
 export type BaziProfileInsert = Database['public']['Tables']['bazi_profiles']['Insert']
 export type ChatSessionInsert = Database['public']['Tables']['chat_sessions']['Insert']
 export type ChatMessageInsert = Database['public']['Tables']['chat_messages']['Insert']
+export type LlmUsageEventInsert = Database['public']['Tables']['llm_usage_events']['Insert']
 export type UserPreferencesInsert = Database['public']['Tables']['user_preferences']['Insert']
 export type MessageFeedbackInsert = Database['public']['Tables']['message_feedback']['Insert']
 export type UserQuotaInsert = Database['public']['Tables']['user_quotas']['Insert']
@@ -343,6 +406,7 @@ export type ProfileUpdate = Database['public']['Tables']['profiles']['Update']
 export type BaziProfileUpdate = Database['public']['Tables']['bazi_profiles']['Update']
 export type ChatSessionUpdate = Database['public']['Tables']['chat_sessions']['Update']
 export type ChatMessageUpdate = Database['public']['Tables']['chat_messages']['Update']
+export type LlmUsageEventUpdate = Database['public']['Tables']['llm_usage_events']['Update']
 export type UserPreferencesUpdate = Database['public']['Tables']['user_preferences']['Update']
 export type MessageFeedbackUpdate = Database['public']['Tables']['message_feedback']['Update']
 export type UserQuotaUpdate = Database['public']['Tables']['user_quotas']['Update']
@@ -354,5 +418,6 @@ export type UserQuotaUpdate = Database['public']['Tables']['user_quotas']['Updat
 export type Gender = 'male' | 'female' | 'other'
 export type MessageRole = 'user' | 'assistant' | 'system'
 export type SessionStatus = 'active' | 'archived' | 'deleted'
+export type ChatMode = 'classic' | 'agent'
 export type Theme = 'light' | 'dark' | 'auto'
 export type FeedbackType = 'helpful' | 'not_helpful' | 'incorrect' | 'offensive'

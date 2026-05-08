@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
     -- Session metadata
     title TEXT DEFAULT 'New Conversation',
     summary TEXT,
+    mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent')),
     
     -- Session statistics
     message_count INTEGER DEFAULT 0,
@@ -107,6 +108,7 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
     -- Message content
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
     content TEXT NOT NULL,
+    mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent')),
     
     -- Message metadata
     model TEXT,
@@ -119,6 +121,46 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
     -- Timestamps
     created_at TIMESTAMPTZ DEFAULT NOW(),
     edited_at TIMESTAMPTZ
+);
+
+-- Minimal dual-mode extension for existing deployments.
+ALTER TABLE public.chat_sessions
+    ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent'));
+
+ALTER TABLE public.chat_messages
+    ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent'));
+
+ALTER TABLE public.chat_messages
+    ADD COLUMN IF NOT EXISTS model TEXT;
+
+ALTER TABLE public.chat_messages
+    ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
+
+-- ============================================
+-- 4b. LLM Usage Events Table
+-- ============================================
+-- Purpose: Track model/token consumption for every user request.
+
+CREATE TABLE IF NOT EXISTS public.llm_usage_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+
+    -- Request source and context
+    source TEXT NOT NULL CHECK (source IN ('classic_chat', 'agent_planner', 'feature_page', 'agent_tool')),
+    mode TEXT NOT NULL CHECK (mode IN ('classic', 'agent', 'feature')),
+    feature_kind TEXT CHECK (feature_kind IS NULL OR feature_kind IN ('fortune', 'hepan', 'avatar', 'lifepath')),
+
+    -- Model routing metadata
+    model TEXT NOT NULL,
+    task TEXT NOT NULL,
+    status TEXT DEFAULT 'completed' CHECK (status IN ('completed', 'empty', 'aborted', 'failed')),
+
+    -- Estimated token usage
+    input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+    output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+    total_tokens INTEGER NOT NULL DEFAULT 0 CHECK (total_tokens >= 0),
+
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================
@@ -181,15 +223,23 @@ CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON public.chat_sessions(use
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_bazi_profile_id ON public.chat_sessions(bazi_profile_id);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON public.chat_sessions(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_status ON public.chat_sessions(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_mode ON public.chat_sessions(user_id, mode);
 
 -- Chat Messages indexes
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON public.chat_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON public.chat_messages(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_role ON public.chat_messages(session_id, role);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_mode ON public.chat_messages(session_id, mode);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_tokens ON public.chat_messages(session_id, tokens_used);
 
 -- Message Feedback indexes
 CREATE INDEX IF NOT EXISTS idx_message_feedback_user_id ON public.message_feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_message_feedback_message_id ON public.message_feedback(message_id);
+
+-- LLM Usage indexes
+CREATE INDEX IF NOT EXISTS idx_llm_usage_user_created ON public.llm_usage_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON public.llm_usage_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_source ON public.llm_usage_events(source, created_at DESC);
 
 -- ============================================
 -- ROW LEVEL SECURITY (RLS) Policies
@@ -202,6 +252,7 @@ ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.message_feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.llm_usage_events ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
 -- Profiles Table Policies
@@ -312,6 +363,14 @@ CREATE POLICY "Users can delete own chat messages"
             AND chat_sessions.user_id = auth.uid()
         )
     );
+
+-- ============================================
+-- LLM Usage Events Table Policies
+-- ============================================
+
+CREATE POLICY "Users can view own llm usage events"
+    ON public.llm_usage_events FOR SELECT
+    USING (auth.uid() = user_id);
 
 -- ============================================
 -- User Preferences Table Policies
@@ -480,7 +539,7 @@ WHERE table_schema = 'public'
     AND table_name IN (
         'profiles', 'bazi_profiles', 'chat_sessions', 
         'chat_messages', 'user_preferences', 'message_feedback',
-        'user_quotas'
+        'user_quotas', 'llm_usage_events'
     );
 
 -- Check RLS status
@@ -492,7 +551,7 @@ WHERE schemaname = 'public'
     AND tablename IN (
         'profiles', 'bazi_profiles', 'chat_sessions', 
         'chat_messages', 'user_preferences', 'message_feedback',
-        'user_quotas'
+        'user_quotas', 'llm_usage_events'
     )
 ORDER BY tablename;
 

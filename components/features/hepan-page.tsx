@@ -136,14 +136,14 @@ export function HepanPage({
                   // reset participants when switching subtype
                   setParticipants([])
                 }}
-                className={`w-full text-left rounded-2xl border p-4 transition-all flex items-start gap-3 ${
+                className={`w-full text-left rounded-lg border p-4 transition-all flex items-start gap-3 ${
                   active
                     ? 'bg-primary/10 border-primary/50 shadow-sm'
                     : 'bg-card/60 border-border/60 hover:bg-card/80 hover:border-primary/30'
                 }`}
               >
                 <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                  className={`w-10 h-10 rounded-md flex items-center justify-center flex-shrink-0 ${
                     active
                       ? 'bg-primary/20 text-primary'
                       : 'bg-muted text-muted-foreground'
@@ -185,11 +185,11 @@ export function HepanPage({
             selectedIds={participants.map(p => p.id || '').filter(Boolean)}
             onChange={setParticipants}
             onOpenManager={onOpenProfilesManager}
-            emptyHint="先添加几位人物，才能进行合盘哦~"
+            emptyHint="先添加几位人物，才能进行合盘"
           />
           {participants.length >= minPeople ? (
             <p className="text-[11px] text-muted-foreground/70">
-              选好了就点下一步~
+              选好了就点下一步
             </p>
           ) : (
             <p className="text-[11px] text-muted-foreground/70">
@@ -212,7 +212,7 @@ export function HepanPage({
                   <button
                     key={opt}
                     onClick={() => setRelationLabel(active ? '' : opt)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-light border transition-all ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-light border transition-all ${
                       active
                         ? 'bg-primary/15 text-primary border-primary/40'
                         : 'bg-card/60 text-muted-foreground border-border/60 hover:border-primary/30'
@@ -260,7 +260,7 @@ export function HepanPage({
             />
           </div>
 
-          <div className="rounded-xl bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
+          <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
             点击「开始分析」后，卜卜象会带着 {participants.length} 位人物的命盘来给你做合盘解读。
           </div>
         </div>

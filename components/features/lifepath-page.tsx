@@ -58,7 +58,7 @@ export function LifePathPage({
           selectedIds={profile?.id ? [profile.id] : []}
           onChange={list => setProfile(list[0] || null)}
           onOpenManager={onOpenProfilesManager}
-          emptyHint="先添加一位人物，才能解读人生脉络~"
+          emptyHint="先添加一位人物，才能解读人生脉络"
         />
       </div>
     </FeaturePageShell>

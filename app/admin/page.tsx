@@ -4,10 +4,10 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { isAdmin } from '@/lib/admin'
 import { AuthDialog } from '@/components/auth-dialog'
-import { RefreshCw, Save, Check, AlertCircle, BarChart3, Users } from 'lucide-react'
+import { RefreshCw, Save, Check, AlertCircle, BarChart3, Users, Calendar, Cpu } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer,
+  ResponsiveContainer, ComposedChart, Line,
 } from 'recharts'
 
 interface UserQuotaRow {
@@ -31,6 +31,10 @@ interface DailyStat {
   total: number
   free: number
   paid: number
+  total_tokens: number
+  input_tokens: number
+  output_tokens: number
+  llm_calls: number
 }
 
 interface UserStat {
@@ -40,24 +44,103 @@ interface UserStat {
   total: number
   free: number
   paid: number
+  total_tokens: number
+  input_tokens: number
+  output_tokens: number
+  llm_calls: number
+}
+
+interface ModelStat {
+  model: string
+  calls: number
+  total_tokens: number
+  input_tokens: number
+  output_tokens: number
+  completed: number
+  failed: number
+}
+
+interface StatsRange {
+  start_date: string
+  end_date: string
 }
 
 type TabKey = 'quotas' | 'stats'
 
+// ─── Date helpers (UTC, matches the API layer) ───
+
+function todayKey(): string {
+  return new Date().toISOString().split('T')[0]
+}
+
+function shiftDateKey(key: string, deltaDays: number): string {
+  const d = new Date(`${key}T00:00:00.000Z`)
+  d.setUTCDate(d.getUTCDate() + deltaDays)
+  return d.toISOString().split('T')[0]
+}
+
+function rangeDayCount(start: string, end: string): number {
+  const s = new Date(`${start}T00:00:00.000Z`).getTime()
+  const e = new Date(`${end}T00:00:00.000Z`).getTime()
+  return Math.max(1, Math.round((e - s) / 86_400_000) + 1)
+}
+
+// Friendly label for a model id (e.g. "google/gemini-3.1-flash-lite-preview")
+function modelDisplayName(model: string): string {
+  if (!model) return '未知模型'
+  const parts = model.split('/')
+  return parts[parts.length - 1]
+}
+
+function modelCategoryLabel(model: string): string {
+  const m = model.toLowerCase()
+  if (m.includes('flash')) return 'DeepSeek · Flash'
+  if (m.includes('deepseek') && m.includes('pro')) return 'DeepSeek · Pro'
+  if (m.includes('deepseek')) return 'DeepSeek'
+  if (m.includes('gemini')) return 'Google · Gemini'
+  if (m.includes('gpt') || m.includes('openai')) return 'OpenAI'
+  if (m.includes('claude')) return 'Anthropic'
+  return '其它'
+}
+
+const MODEL_PALETTE = [
+  '#10b981', // emerald
+  '#3b82f6', // blue
+  '#f59e0b', // amber
+  '#a855f7', // purple
+  '#ef4444', // red
+  '#14b8a6', // teal
+  '#ec4899', // pink
+  '#6366f1', // indigo
+] as const
+
 // ─── Traffic Stats Component ───
 
 function TrafficStats() {
-  const [days, setDays] = useState(30)
+  const initialEnd = todayKey()
+  const initialStart = shiftDateKey(initialEnd, -29)
+
+  const [startDate, setStartDate] = useState(initialStart)
+  const [endDate, setEndDate] = useState(initialEnd)
+  const [modelFilter, setModelFilter] = useState<string>('') // '' = 全部模型
+
   const [stats, setStats] = useState<DailyStat[]>([])
   const [userStats, setUserStats] = useState<UserStat[]>([])
+  const [modelStats, setModelStats] = useState<ModelStat[]>([])
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [appliedRange, setAppliedRange] = useState<StatsRange | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchStats = useCallback(async (d: number) => {
+  const fetchStats = useCallback(async (
+    start: string, end: string, model: string,
+  ) => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`/api/admin/stats?days=${d}`)
+      const params = new URLSearchParams({ start_date: start, end_date: end })
+      if (model) params.set('model', model)
+      const res = await fetch(`/api/admin/stats?${params.toString()}`)
       if (!res.ok) {
         const data = await res.json()
         setError(data.error || '获取统计数据失败')
@@ -66,6 +149,9 @@ function TrafficStats() {
       const data = await res.json()
       setStats(data.stats || [])
       setUserStats(data.userStats || [])
+      setModelStats(data.modelStats || [])
+      setAvailableModels(data.availableModels || [])
+      setAppliedRange(data.range || null)
     } catch {
       setError('网络错误')
     } finally {
@@ -74,17 +160,40 @@ function TrafficStats() {
   }, [])
 
   useEffect(() => {
-    fetchStats(days)
-  }, [days, fetchStats])
+    fetchStats(startDate, endDate, modelFilter)
+  }, [startDate, endDate, modelFilter, fetchStats])
+
+  // Quick-pick range buttons (relative to "today" in UTC).
+  const applyQuickRange = (mode: 'today' | 'd7' | 'd14' | 'd30') => {
+    const end = todayKey()
+    if (mode === 'today') {
+      setStartDate(end)
+      setEndDate(end)
+      return
+    }
+    const offset = mode === 'd7' ? 6 : mode === 'd14' ? 13 : 29
+    setStartDate(shiftDateKey(end, -offset))
+    setEndDate(end)
+  }
+
+  const dayCount = useMemo(
+    () => rangeDayCount(startDate, endDate),
+    [startDate, endDate],
+  )
 
   const summary = useMemo(() => {
     let total = 0, free = 0, paid = 0
+    let totalTokens = 0, inputTokens = 0, outputTokens = 0, llmCalls = 0
     for (const s of stats) {
       total += s.total
       free += s.free
       paid += s.paid
+      totalTokens += s.total_tokens || 0
+      inputTokens += s.input_tokens || 0
+      outputTokens += s.output_tokens || 0
+      llmCalls += s.llm_calls || 0
     }
-    return { total, free, paid }
+    return { total, free, paid, totalTokens, inputTokens, outputTokens, llmCalls }
   }, [stats])
 
   const chartData = useMemo(() =>
@@ -94,33 +203,110 @@ function TrafficStats() {
     })),
   [stats])
 
-  const dayOptions = [7, 14, 30] as const
+  const isSingleDay = startDate === endDate
+  const rangeLabel = isSingleDay ? startDate : `${startDate} ~ ${endDate}`
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-light text-foreground">流量统计</h2>
           <p className="text-sm font-light text-muted-foreground mt-1">
-            按日期查看用户对话次数
+            按日期与模型查看用户对话次数与 Token 消耗
           </p>
         </div>
         <div className="flex items-center gap-1 bg-card border border-border rounded-xl p-0.5">
-          {dayOptions.map(d => (
-            <button
-              key={d}
-              onClick={() => setDays(d)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-light transition-all duration-200 ${
-                days === d
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {d}天
-            </button>
-          ))}
+          {([
+            { key: 'today' as const, label: '今日' },
+            { key: 'd7' as const, label: '7天' },
+            { key: 'd14' as const, label: '14天' },
+            { key: 'd30' as const, label: '30天' },
+          ]).map(opt => {
+            const todayStr = todayKey()
+            const isActive =
+              (opt.key === 'today' && startDate === todayStr && endDate === todayStr) ||
+              (opt.key === 'd7' && startDate === shiftDateKey(todayStr, -6) && endDate === todayStr) ||
+              (opt.key === 'd14' && startDate === shiftDateKey(todayStr, -13) && endDate === todayStr) ||
+              (opt.key === 'd30' && startDate === shiftDateKey(todayStr, -29) && endDate === todayStr)
+            return (
+              <button
+                key={opt.key}
+                onClick={() => applyQuickRange(opt.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-light transition-all duration-200 ${
+                  isActive
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
         </div>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="bg-card/70 backdrop-blur-sm border border-border rounded-2xl p-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-muted-foreground" />
+          <span className="text-xs font-light text-muted-foreground">时间范围</span>
+          <input
+            type="date"
+            value={startDate}
+            max={endDate}
+            onChange={e => setStartDate(e.target.value || startDate)}
+            className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary/60"
+          />
+          <span className="text-muted-foreground/60 text-xs">至</span>
+          <input
+            type="date"
+            value={endDate}
+            min={startDate}
+            max={todayKey()}
+            onChange={e => setEndDate(e.target.value || endDate)}
+            className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary/60"
+          />
+          <button
+            onClick={() => { setStartDate(endDate) }}
+            className="h-8 px-2 rounded-lg border border-border text-[11px] font-light text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+            title="将开始日期对齐到结束日期，仅查询当天"
+          >
+            仅当天
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-muted-foreground" />
+          <span className="text-xs font-light text-muted-foreground">模型</span>
+          <select
+            value={modelFilter}
+            onChange={e => setModelFilter(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary/60 max-w-[260px]"
+          >
+            <option value="">全部模型</option>
+            {availableModels.map(m => (
+              <option key={m} value={m}>{modelDisplayName(m)}</option>
+            ))}
+          </select>
+          {modelFilter && (
+            <button
+              onClick={() => setModelFilter('')}
+              className="h-8 px-2 rounded-lg border border-border text-[11px] font-light text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+            >
+              清除
+            </button>
+          )}
+        </div>
+
+        <button
+          onClick={() => fetchStats(startDate, endDate, modelFilter)}
+          disabled={loading}
+          className="ml-auto flex items-center gap-1.5 h-8 px-3 rounded-lg bg-card border border-border text-xs font-light text-foreground hover:bg-muted transition-all duration-300 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          刷新
+        </button>
       </div>
 
       {/* Error */}
@@ -131,11 +317,12 @@ function TrafficStats() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {([
-          { label: '总对话', value: summary.total, color: 'text-foreground' },
-          { label: '免费体验', value: summary.free, color: 'text-blue-500' },
-          { label: '苹果用户', value: summary.paid, color: 'text-amber-500' },
+          { label: '总对话', value: summary.total.toLocaleString(), color: 'text-foreground', sub: `免费 ${summary.free} · 苹果 ${summary.paid}` },
+          { label: 'LLM 调用', value: summary.llmCalls.toLocaleString(), color: 'text-blue-500', sub: modelFilter ? modelDisplayName(modelFilter) : '全部模型' },
+          { label: 'Token 总消耗', value: summary.totalTokens.toLocaleString(), color: 'text-emerald-500', sub: `输入 ${summary.inputTokens.toLocaleString()} · 输出 ${summary.outputTokens.toLocaleString()}` },
+          { label: '模型种类', value: modelStats.length.toLocaleString(), color: 'text-amber-500', sub: `${dayCount} 天 · ${rangeLabel}` },
         ] as const).map(card => (
           <div
             key={card.label}
@@ -145,13 +332,23 @@ function TrafficStats() {
             <p className={`text-2xl font-light mt-1 ${card.color}`}>
               {loading ? '...' : card.value}
             </p>
-            <p className="text-[10px] text-muted-foreground/60 mt-0.5">近 {days} 天</p>
+            <p className="text-[10px] text-muted-foreground/60 mt-0.5 truncate">{card.sub}</p>
           </div>
         ))}
       </div>
 
       {/* Chart */}
       <div className="bg-card/70 backdrop-blur-sm border border-border rounded-2xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">每日趋势</h3>
+            <p className="text-xs font-light text-muted-foreground mt-0.5">
+              对话数量（柱状）+ Token 消耗（折线，右轴）
+              {modelFilter ? ` · 已筛选: ${modelDisplayName(modelFilter)}` : ''}
+            </p>
+          </div>
+          <span className="text-[11px] font-light text-muted-foreground/70">{rangeLabel}</span>
+        </div>
         {loading ? (
           <div className="flex items-center justify-center h-64 text-sm text-muted-foreground font-light">
             加载中...
@@ -162,7 +359,7 @@ function TrafficStats() {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={320}>
-            <BarChart data={chartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+            <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis
                 dataKey="label"
@@ -171,10 +368,22 @@ function TrafficStats() {
                 axisLine={false}
               />
               <YAxis
+                yAxisId="left"
                 allowDecimals={false}
                 tick={{ fontSize: 11, fill: 'var(--color-muted-foreground)' }}
                 tickLine={false}
                 axisLine={false}
+              />
+              <YAxis
+                yAxisId="right"
+                orientation="right"
+                allowDecimals={false}
+                tick={{ fontSize: 11, fill: 'var(--color-muted-foreground)' }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) =>
+                  v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)
+                }
               />
               <Tooltip
                 contentStyle={{
@@ -184,22 +393,152 @@ function TrafficStats() {
                   fontSize: '12px',
                 }}
                 labelFormatter={(v) => `日期: ${v}`}
+                formatter={(value: number, name: string) => [
+                  Number(value).toLocaleString(),
+                  name,
+                ]}
               />
-              <Legend
-                wrapperStyle={{ fontSize: '12px', fontWeight: 300 }}
+              <Legend wrapperStyle={{ fontSize: '12px', fontWeight: 300 }} />
+              <Bar yAxisId="left" dataKey="free" name="免费体验" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="left" dataKey="paid" name="苹果用户" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="total_tokens"
+                name="Token"
+                stroke="#10b981"
+                strokeWidth={2}
+                dot={{ r: 2.5 }}
+                activeDot={{ r: 4 }}
               />
-              <Bar dataKey="free" name="免费体验" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="paid" name="苹果用户" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-            </BarChart>
+            </ComposedChart>
           </ResponsiveContainer>
         )}
+      </div>
+
+      {/* Model Breakdown */}
+      <div className="bg-card/70 backdrop-blur-sm border border-border rounded-2xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">模型用量明细</h3>
+            <p className="text-xs font-light text-muted-foreground mt-0.5">
+              按模型统计调用次数与 Token 消耗 · 点击模型可一键过滤
+            </p>
+          </div>
+          <span className="text-[11px] font-light text-muted-foreground/70">
+            共 {modelStats.length} 个模型
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">模型</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">类别</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">调用</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">完成 / 失败</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">输入 Token</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">输出 Token</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">总 Token</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">占比</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground font-light">
+                    加载中...
+                  </td>
+                </tr>
+              ) : modelStats.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground font-light">
+                    当前范围内暂无模型调用记录
+                  </td>
+                </tr>
+              ) : (
+                modelStats.map((m, idx) => {
+                  const tokenSum = modelStats.reduce((acc, x) => acc + x.total_tokens, 0)
+                  const ratio = tokenSum > 0 ? m.total_tokens / tokenSum : 0
+                  const color = MODEL_PALETTE[idx % MODEL_PALETTE.length]
+                  const selected = modelFilter === m.model
+                  return (
+                    <tr
+                      key={m.model}
+                      className={`border-b border-border/50 transition-colors cursor-pointer ${
+                        selected ? 'bg-primary/5' : 'hover:bg-muted/20'
+                      }`}
+                      onClick={() => setModelFilter(selected ? '' : m.model)}
+                    >
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ backgroundColor: color }}
+                          />
+                          <span className="text-sm font-light text-foreground truncate max-w-[260px]" title={m.model}>
+                            {modelDisplayName(m.model)}
+                          </span>
+                          {selected && (
+                            <span className="text-[10px] text-primary font-medium">已筛选</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className="text-xs font-light text-muted-foreground">
+                          {modelCategoryLabel(m.model)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className="text-sm font-light text-foreground">{m.calls.toLocaleString()}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className="text-xs font-light text-emerald-500">{m.completed}</span>
+                        <span className="text-xs font-light text-muted-foreground/60"> / </span>
+                        <span className="text-xs font-light text-destructive">{m.failed}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className="text-sm font-light text-blue-500">{m.input_tokens.toLocaleString()}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className="text-sm font-light text-amber-500">{m.output_tokens.toLocaleString()}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className="text-sm font-medium text-emerald-500">{m.total_tokens.toLocaleString()}</span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${(ratio * 100).toFixed(1)}%`,
+                                backgroundColor: color,
+                              }}
+                            />
+                          </div>
+                          <span className="text-[11px] font-light text-muted-foreground tabular-nums w-10 text-right">
+                            {(ratio * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* User Breakdown Table */}
       <div className="bg-card/70 backdrop-blur-sm border border-border rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-border bg-muted/30">
           <h3 className="text-sm font-medium text-foreground">用户对话排行</h3>
-          <p className="text-xs font-light text-muted-foreground mt-0.5">近 {days} 天内各用户的对话次数</p>
+          <p className="text-xs font-light text-muted-foreground mt-0.5">
+            范围内各用户的对话次数与 Token 消耗
+            {modelFilter ? ` · Token 列已按模型 ${modelDisplayName(modelFilter)} 过滤` : ''}
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -211,18 +550,20 @@ function TrafficStats() {
                 <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">总对话</th>
                 <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">免费</th>
                 <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">苹果</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">LLM 调用</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-muted-foreground">Token</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground font-light">
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground font-light">
                     加载中...
                   </td>
                 </tr>
               ) : userStats.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground font-light">
+                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground font-light">
                     暂无数据
                   </td>
                 </tr>
@@ -255,6 +596,12 @@ function TrafficStats() {
                     <td className="px-4 py-2.5 text-center">
                       <span className="text-sm font-light text-amber-500">{u.paid}</span>
                     </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className="text-sm font-light text-muted-foreground">{(u.llm_calls || 0).toLocaleString()}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className="text-sm font-light text-emerald-500">{(u.total_tokens || 0).toLocaleString()}</span>
+                    </td>
                   </tr>
                 ))
               )}
@@ -265,7 +612,11 @@ function TrafficStats() {
 
       {/* Footer */}
       <p className="text-xs font-light text-muted-foreground/50 text-center">
-        统计范围：近 {days} 天 · 共 {summary.total} 次对话（免费 {summary.free} / 苹果 {summary.paid}）· {userStats.length} 位活跃用户
+        统计范围：{rangeLabel}（{dayCount} 天）· 共 {summary.total} 次对话（免费 {summary.free} / 苹果 {summary.paid}）·
+        LLM 调用 {summary.llmCalls.toLocaleString()} 次 · Token {summary.totalTokens.toLocaleString()}
+        （输入 {summary.inputTokens.toLocaleString()} / 输出 {summary.outputTokens.toLocaleString()}）·
+        {userStats.length} 位活跃用户 · {modelStats.length} 个模型
+        {appliedRange && appliedRange.start_date !== startDate ? ' · 已被服务端调整' : ''}
       </p>
     </div>
   )

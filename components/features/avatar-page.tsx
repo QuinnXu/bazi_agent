@@ -197,7 +197,7 @@ export function AvatarPage({
               }}
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
-              className={`relative cursor-pointer rounded-3xl border-2 border-dashed p-12 text-center transition-all ${
+              className={`relative cursor-pointer rounded-lg border-2 border-dashed p-12 text-center transition-all ${
                 dragOver
                   ? 'border-primary/60 bg-primary/5'
                   : 'border-border/60 bg-card/40 hover:border-primary/40 hover:bg-card/60'
@@ -219,8 +219,8 @@ export function AvatarPage({
               />
             </div>
           ) : (
-            <div className="rounded-3xl border border-border bg-card/60 p-5 flex items-center gap-4">
-              <div className="relative w-24 h-24 md:w-32 md:h-32 rounded-2xl overflow-hidden bg-muted flex-shrink-0">
+            <div className="rounded-lg border border-border bg-card/60 p-5 flex items-center gap-4">
+              <div className="relative w-24 h-24 md:w-32 md:h-32 rounded-md overflow-hidden bg-muted flex-shrink-0">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={imageDataUrl}
@@ -237,7 +237,7 @@ export function AvatarPage({
                 </p>
                 <button
                   onClick={handleClear}
-                  className="mt-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  className="mt-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                 >
                   <Trash2 className="w-3 h-3" />
                   重新上传
@@ -254,7 +254,7 @@ export function AvatarPage({
 
       {step === 2 && (
         <div className="space-y-5">
-          <div className="rounded-2xl border border-border/60 bg-card/60 p-4 flex items-start justify-between gap-3">
+          <div className="rounded-lg border border-border/60 bg-card/60 p-4 flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground">
                 结合个人五行与近期运势
@@ -286,7 +286,7 @@ export function AvatarPage({
                 selectedIds={profile?.id ? [profile.id] : []}
                 onChange={list => setProfile(list[0] || null)}
                 onOpenManager={onOpenProfilesManager}
-                emptyHint="还没有人物，添加一位才能结合八字哦~"
+                emptyHint="还没有人物，添加一位才能结合八字"
               />
               {!profile && (
                 <p className="text-[11px] text-muted-foreground/70">
@@ -296,7 +296,7 @@ export function AvatarPage({
             </div>
           )}
 
-          <div className="rounded-xl bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
+          <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
             点击「开始分析」后，卜卜象会用多模态模型看图，再结合
             {combineBazi ? '命主五行' : '气质特征'}给出建议。
           </div>

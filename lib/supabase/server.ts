@@ -18,9 +18,9 @@ export async function createServerSupabaseClient() {
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, ...options }) =>
-              cookieStore.set(name, value, options)
-            )
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          )
           } catch {
             // 在 Server Component 等只读上下文中忽略
           }

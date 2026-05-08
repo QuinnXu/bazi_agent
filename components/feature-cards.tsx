@@ -16,32 +16,32 @@ interface FeatureCardItem {
 const ITEMS: FeatureCardItem[] = [
   {
     id: 'hepan',
-    title: '合盘 · 双人 / 多人 / 应事',
-    description: '看看你们的缘分倾向、互动模式与关键时间节点',
+    title: '合盘',
+    description: '两人或多人缘分碰撞，看看彼此的能量如何流动 🌹',
     cost: 2,
     icon: Users,
     accent: 'rose',
   },
   {
     id: 'fortune',
-    title: '近期运势推演',
-    description: '选时间段，逐日 / 逐月给出走势与行动建议',
+    title: '运势',
+    description: '近期能量起伏与行事天气预报，提前看清风向 🌤️',
     cost: 1,
     icon: CalendarRange,
     accent: 'gold',
   },
   {
     id: 'avatar',
-    title: '头像分析推荐',
-    description: '上传头像，结合气质与五行给风格与配色建议',
+    title: '头像',
+    description: '用色彩和风格滋养你的面相，让气场更顺 🌸',
     cost: 3,
     icon: ImageIcon,
     accent: 'violet',
   },
   {
     id: 'lifepath',
-    title: '人生脉络与总体分析',
-    description: '从第一步大运到晚年，一起看清整段人生节奏',
+    title: '人生脉络',
+    description: '铺展你的专属大运长卷，看见属于你的人生风景 📜',
     cost: 2,
     icon: Compass,
     accent: 'teal',
@@ -62,37 +62,31 @@ interface FeatureCardsProps {
 export function FeatureCards({ onPick }: FeatureCardsProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
-      <div className="text-center mb-3 sm:mb-4">
-        <p className="text-[10px] sm:text-xs uppercase tracking-[0.2em] text-muted-foreground/70 font-light">
-          想试试结构化的小象功能？
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3 md:gap-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         {ITEMS.map(item => {
           const Icon = item.icon
           return (
             <button
               key={item.id}
               onClick={() => onPick(item.id)}
-              className="group text-left rounded-2xl border border-border bg-card/70 backdrop-blur-sm p-3.5 sm:p-4 md:p-5 hover:bg-card/90 hover:border-primary/40 hover:shadow-md transition-all duration-300 glass-minimal"
+              className="group min-h-[82px] min-w-0 rounded-lg border border-border bg-card/76 p-2.5 text-left backdrop-blur-sm transition-all duration-200 hover:border-primary/35 hover:bg-card hover:shadow-sm sm:min-h-[104px] sm:p-3"
             >
-              <div className="flex items-start gap-2.5 sm:gap-3">
-                <div
-                  className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center border ${ACCENT_BG[item.accent]} flex-shrink-0`}
-                >
-                  <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="text-sm md:text-base font-medium text-foreground leading-snug">
-                      {item.title}
-                    </h3>
-                    <span className="text-[10px] sm:text-[11px] text-primary/80 bg-primary/10 border border-primary/20 rounded-full px-2 py-0.5 whitespace-nowrap font-light flex-shrink-0">
-                      🍎×{item.cost}
-                    </span>
+              <div className="flex h-full flex-col justify-between gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div
+                    className={`h-7 w-7 rounded-md flex items-center justify-center border ${ACCENT_BG[item.accent]} flex-shrink-0 sm:h-8 sm:w-8`}
+                  >
+                    <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   </div>
-                  <p className="text-xs md:text-sm text-muted-foreground font-light leading-relaxed mt-1">
+                  <span className="whitespace-nowrap rounded-md border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-light text-primary/80">
+                    苹果 ×{item.cost}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-medium text-foreground leading-snug truncate">
+                    {item.title}
+                  </h3>
+                  <p className="mt-1 line-clamp-1 text-[11px] font-light leading-snug text-muted-foreground sm:text-xs">
                     {item.description}
                   </p>
                 </div>

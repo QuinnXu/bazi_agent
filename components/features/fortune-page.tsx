@@ -19,7 +19,7 @@ interface FortunePageProps {
   loading?: boolean
 }
 
-const FOCUS_PRESETS = ['事业', '感情', '财运', '学业', '健康状态', '人际']
+const FOCUS_PRESETS = ['事业突破', '感情缘分', '财富能量', '学业成长', '身心状态', '人际磁场']
 
 const MAX_RANGE_DAYS = 92 // ~3 months
 
@@ -51,7 +51,7 @@ export function FortunePage({
   const [start, setStart] = useState(fmtToday(0))
   const [end, setEnd] = useState(fmtToday(13)) // default 14 days
   const [granularity, setGranularity] = useState<Granularity>('day')
-  const [focus, setFocus] = useState<string[]>(['事业', '感情'])
+  const [focus, setFocus] = useState<string[]>(['事业突破', '感情缘分'])
   const [customFocus, setCustomFocus] = useState('')
 
   const stepLabels = ['人物', '时间范围', '关注方向']
@@ -63,9 +63,9 @@ export function FortunePage({
   }, [start, end])
 
   const rangeError = useMemo(() => {
-    if (!start || !end) return '请选择起止日期'
-    if (new Date(end) < new Date(start)) return '结束日期需在起始日期之后'
-    if (rangeDays > MAX_RANGE_DAYS) return `时间范围最长 3 个月（约 ${MAX_RANGE_DAYS} 天），当前 ${rangeDays} 天`
+    if (!start || !end) return '卜卜象需要明确的时间范围才能看清趋势哦 🐘'
+    if (new Date(end) < new Date(start)) return '结束时间跑到开始时间前面去啦，稍微调整一下吧~'
+    if (rangeDays > MAX_RANGE_DAYS) return `卜卜象的鼻子不够长，一次最多只能看约 ${MAX_RANGE_DAYS} 天的风景喔 🐘（当前 ${rangeDays} 天）`
     return null
   }, [start, end, rangeDays])
 
@@ -131,12 +131,12 @@ export function FortunePage({
     >
       {step === 1 && (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">先选一位想推演的人物吧~</p>
+          <p className="text-sm text-muted-foreground">先选一位想推演的人物</p>
           <ProfilePicker
             selectedIds={profile?.id ? [profile.id] : []}
             onChange={list => setProfile(list[0] || null)}
             onOpenManager={onOpenProfilesManager}
-            emptyHint="先添加一位人物，才能推演运势~"
+            emptyHint="先添加一位人物，才能推演运势"
           />
         </div>
       )}
@@ -219,7 +219,7 @@ export function FortunePage({
                   <button
                     key={label}
                     onClick={() => toggleFocus(label)}
-                    className={`px-3 py-1.5 rounded-full text-xs font-light border transition-all ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-light border transition-all ${
                       active
                         ? 'bg-primary/15 text-primary border-primary/40'
                         : 'bg-card/60 text-muted-foreground border-border/60 hover:border-primary/30'
@@ -234,7 +234,7 @@ export function FortunePage({
                 .map(label => (
                   <span
                     key={label}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-light bg-accent/15 text-accent border border-accent/30"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-light bg-accent/15 text-accent border border-accent/30"
                   >
                     {label}
                     <button
@@ -279,7 +279,7 @@ export function FortunePage({
             <p className="text-xs text-destructive">至少选择一个关注方向</p>
           )}
 
-          <div className="rounded-xl bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed space-y-1">
+          <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed space-y-1">
             <p>
               <span className="text-foreground/80">人物：</span>
               {profile?.name || '未选择'}

@@ -58,7 +58,7 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenCha
 
   if (!user) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex w-max items-center gap-2">
         <ThemeToggle />
         <button
           onClick={onOpenAuth}
@@ -71,7 +71,7 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenCha
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex w-max items-center gap-2">
       <ThemeToggle />
       <div className="relative">
         <button

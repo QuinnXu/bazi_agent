@@ -49,7 +49,15 @@ interface FeatureLauncherButtonProps {
    * Profile selection (passed through from parent so state is shared with the chat path).
    */
   selectedProfileId?: string | null
-  onSelectProfile?: (profileId: string | null, baziResult: string | null) => void
+  onSelectProfile?: (
+    profileId: string | null,
+    baziResult: string | null,
+    profile?: {
+      name: string
+      pillars?: string | null
+      baziText?: string | null
+    } | null,
+  ) => void
   onOpenProfilesDialog?: () => void
 }
 
@@ -95,7 +103,8 @@ export function FeatureLauncherButton({
   }, [open, user])
 
   const sizeClass =
-    variant === 'sm' ? 'w-9 h-9 md:w-10 md:h-10' : 'w-10 h-10'
+    variant === 'sm' ? 'w-8 h-8' : 'w-10 h-10'
+  const shapeClass = variant === 'sm' ? 'rounded-full' : 'rounded-lg'
 
   const selected = profiles.find(p => p.id === selectedProfileId) || null
   const selectedSummary = selected
@@ -107,9 +116,17 @@ export function FeatureLauncherButton({
   const handlePickProfile = (row: BaziProfileRow | null) => {
     if (!onSelectProfile) return
     if (row === null) {
-      onSelectProfile(null, null)
+      onSelectProfile(null, null, null)
     } else {
-      onSelectProfile(row.id, row.bazi_result_text || null)
+      const fp = row.bazi_result?.fourPillars
+      const pillars = fp
+        ? `${fp.year} ${fp.month} ${fp.day} ${fp.hour}`
+        : null
+      onSelectProfile(row.id, row.bazi_result_text || null, {
+        name: row.profile_name,
+        pillars,
+        baziText: row.bazi_result_text || null,
+      })
     }
   }
 
@@ -119,8 +136,8 @@ export function FeatureLauncherButton({
         type="button"
         onClick={() => setOpen(o => !o)}
         disabled={disabled}
-        title="人物 / 结构化功能"
-        className={`${sizeClass} rounded-full border border-border bg-card/80 hover:bg-card transition-all flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed`}
+        title="工具与人物"
+        className={`${sizeClass} ${shapeClass} border border-border bg-card/80 hover:bg-card transition-all flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed`}
       >
         <Plus
           className={`w-4 h-4 transition-transform ${open ? 'rotate-45' : ''}`}
@@ -133,7 +150,7 @@ export function FeatureLauncherButton({
             className="fixed inset-0 z-40"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute left-0 bottom-full mb-3 w-72 max-w-[calc(100vw-1.5rem)] bg-card border border-border rounded-2xl shadow-2xl z-50 overflow-hidden glass-minimal">
+          <div className="absolute left-0 bottom-full mb-3 w-72 max-w-[calc(100vw-1.5rem)] bg-card border border-border rounded-lg shadow-2xl z-50 overflow-hidden glass-minimal">
             {/* ---------- Section 1: Current bazi subject ---------- */}
             {user && onSelectProfile && (
               <>
@@ -161,7 +178,7 @@ export function FeatureLauncherButton({
                             : 'hover:bg-muted/40 text-muted-foreground'
                         }`}
                       >
-                        <div className="w-7 h-7 rounded-full bg-muted/60 flex items-center justify-center flex-shrink-0">
+                        <div className="w-7 h-7 rounded-md bg-muted/60 flex items-center justify-center flex-shrink-0">
                           <User className="w-3.5 h-3.5" />
                         </div>
                         <span className="text-sm flex-1 truncate">不选择</span>
@@ -187,7 +204,7 @@ export function FeatureLauncherButton({
                             }`}
                           >
                             <div
-                              className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${
                                 isSelected
                                   ? 'bg-primary/15 text-primary'
                                   : 'bg-muted/60 text-muted-foreground'
@@ -249,7 +266,7 @@ export function FeatureLauncherButton({
                     }}
                     className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-muted/50 transition-colors text-left"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                    <div className="w-8 h-8 rounded-md bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
                       <Icon className="w-4 h-4" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -257,8 +274,8 @@ export function FeatureLauncherButton({
                         {item.title}
                       </p>
                     </div>
-                    <span className="text-[11px] text-primary/80 bg-primary/10 border border-primary/20 rounded-full px-2 py-0.5 whitespace-nowrap font-light">
-                      🍎×{item.cost}
+                    <span className="text-[11px] text-primary/80 bg-primary/10 border border-primary/20 rounded-md px-2 py-0.5 whitespace-nowrap font-light">
+                      苹果 ×{item.cost}
                     </span>
                   </button>
                 )

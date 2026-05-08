@@ -48,13 +48,13 @@ export function FeaturePageShell({
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* ---- Top bar ---- */}
       {/* pl/pr-16 leave room for floating sidebar toggle (left) and user menu (right) */}
-      <div className="pl-16 pr-16 md:pl-20 md:pr-20 pt-3 pb-3 border-b border-border/40 bg-card/30 backdrop-blur-sm flex-shrink-0">
+      <div className="pl-16 pr-16 md:pl-20 md:pr-20 pt-3 pb-3 border-b border-border/50 bg-background/82 backdrop-blur-xl flex-shrink-0">
         <div className="max-w-3xl mx-auto">
           <div className="flex items-center justify-between gap-3">
             <button
               onClick={onBack}
               disabled={loading}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all disabled:opacity-40"
+              className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all disabled:opacity-40"
             >
               <ArrowLeft className="w-4 h-4" />
               返回
@@ -71,20 +71,18 @@ export function FeaturePageShell({
               )}
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span>第</span>
+            <div className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-card/60 px-2.5 py-1 text-xs text-muted-foreground">
               <span className="text-foreground font-medium">{step}</span>
               <span>/</span>
               <span>{totalSteps}</span>
-              <span>步</span>
             </div>
           </div>
 
           {/* Progress + step labels */}
           <div className="mt-3 space-y-1.5">
-            <div className="h-1 rounded-full bg-muted/60 overflow-hidden">
+            <div className="h-1 rounded-full bg-muted/70 overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-500"
+                className="h-full bg-primary transition-all duration-500"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -110,12 +108,12 @@ export function FeaturePageShell({
       </div>
 
       {/* ---- Footer ---- */}
-      <div className="px-4 md:px-6 py-3 border-t border-border/40 bg-card/30 backdrop-blur-sm flex-shrink-0">
+      <div className="px-4 md:px-6 py-3 border-t border-border/50 bg-background/82 backdrop-blur-xl flex-shrink-0">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
           <button
             onClick={onPrev}
             disabled={!canPrev || step === 1 || loading}
-            className="px-5 py-2.5 rounded-full text-sm font-light text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            className="h-9 rounded-lg px-4 text-sm font-light text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
           >
             上一步
           </button>
@@ -128,7 +126,7 @@ export function FeaturePageShell({
               </span>
             ) : isLastStep && cost !== undefined ? (
               <span>
-                需消耗 <span className="text-primary">🍎 × {cost}</span>
+                需消耗 <span className="text-primary">苹果 × {cost}</span>
               </span>
             ) : null}
           </div>
@@ -137,7 +135,7 @@ export function FeaturePageShell({
             <button
               onClick={onSubmit}
               disabled={!canSubmit || loading}
-              className="px-6 py-2.5 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+              className="flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-light text-primary-foreground hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               开始分析
@@ -146,7 +144,7 @@ export function FeaturePageShell({
             <button
               onClick={onNext}
               disabled={!canNext || loading}
-              className="px-6 py-2.5 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className="h-9 rounded-lg bg-primary px-5 text-sm font-light text-primary-foreground hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               下一步
             </button>
