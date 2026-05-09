@@ -1,6 +1,6 @@
 "use client"
 
-import React, { memo, useEffect, useMemo, useRef, useState } from "react"
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Image from "next/image"
 import ReactMarkdown from "react-markdown"
 import rehypeHighlight from "rehype-highlight"
@@ -88,8 +88,8 @@ const FEATURE_META: Record<
 
 const DEFAULT_FOLLOW_UPS = ["继续展开上面的重点", "整理成行动清单", "下一步怎么做？"]
 const FOLLOW_UP_LIMIT = 3
-const SMOOTH_REVEAL_MS = 24
-const SMOOTH_REVEAL_FAST_MS = 12
+const SMOOTH_REVEAL_MS = 16
+const SMOOTH_REVEAL_FAST_MS = 8
 const SMOOTH_REVEAL_CATCHUP_CHARS = 48
 
 const markdownComponents = {
@@ -217,6 +217,7 @@ function useSmoothStreamingText(targetContent: string, isStreaming: boolean): st
   const [visibleContent, setVisibleContent] = useState(targetContent)
   const visibleRef = useRef(targetContent)
   const targetRef = useRef(targetContent)
+  const streamingRef = useRef(isStreaming)
   const frameRef = useRef<number | null>(null)
   const lastRevealAtRef = useRef(0)
 
@@ -224,10 +225,59 @@ function useSmoothStreamingText(targetContent: string, isStreaming: boolean): st
     visibleRef.current = visibleContent
   }, [visibleContent])
 
+  const cancelRevealFrame = useCallback(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+  }, [])
+
+  const revealStep = useCallback((timestamp: number) => {
+    frameRef.current = null
+    if (!streamingRef.current) return
+
+    const target = targetRef.current
+    const current = visibleRef.current
+
+    if (!target.startsWith(current)) {
+      visibleRef.current = target
+      setVisibleContent(target)
+      lastRevealAtRef.current = timestamp
+      return
+    }
+
+    if (target.length <= current.length) return
+
+    const backlogLength = target.length - current.length
+    const revealDelay = backlogLength > SMOOTH_REVEAL_CATCHUP_CHARS
+      ? SMOOTH_REVEAL_FAST_MS
+      : SMOOTH_REVEAL_MS
+
+    if (timestamp - lastRevealAtRef.current >= revealDelay) {
+      const pending = target.slice(current.length)
+      const next = current + takeSmoothRevealStep(pending, backlogLength)
+      visibleRef.current = next
+      setVisibleContent(next)
+      lastRevealAtRef.current = timestamp
+    }
+
+    if (targetRef.current.length > visibleRef.current.length && frameRef.current === null) {
+      frameRef.current = window.requestAnimationFrame(revealStep)
+    }
+  }, [])
+
+  const requestRevealFrame = useCallback(() => {
+    if (frameRef.current === null) {
+      frameRef.current = window.requestAnimationFrame(revealStep)
+    }
+  }, [revealStep])
+
   useEffect(() => {
+    streamingRef.current = isStreaming
     targetRef.current = targetContent
 
     if (!isStreaming) {
+      cancelRevealFrame()
       if (visibleRef.current !== targetContent) {
         visibleRef.current = targetContent
         setVisibleContent(targetContent)
@@ -239,55 +289,13 @@ function useSmoothStreamingText(targetContent: string, isStreaming: boolean): st
       visibleRef.current = targetContent
       setVisibleContent(targetContent)
     }
-  }, [isStreaming, targetContent])
+
+    requestRevealFrame()
+  }, [cancelRevealFrame, isStreaming, requestRevealFrame, targetContent])
 
   useEffect(() => {
-    if (!isStreaming) {
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current)
-        frameRef.current = null
-      }
-      return
-    }
-
-    let cancelled = false
-
-    const reveal = (timestamp: number) => {
-      if (cancelled) return
-      const target = targetRef.current
-      const current = visibleRef.current
-
-      if (!target.startsWith(current)) {
-        visibleRef.current = target
-        setVisibleContent(target)
-        lastRevealAtRef.current = timestamp
-      } else if (target.length > current.length) {
-        const backlogLength = target.length - current.length
-        const revealDelay = backlogLength > SMOOTH_REVEAL_CATCHUP_CHARS
-          ? SMOOTH_REVEAL_FAST_MS
-          : SMOOTH_REVEAL_MS
-
-        if (timestamp - lastRevealAtRef.current >= revealDelay) {
-          const pending = target.slice(current.length)
-          const next = current + takeSmoothRevealStep(pending, backlogLength)
-          visibleRef.current = next
-          setVisibleContent(next)
-          lastRevealAtRef.current = timestamp
-        }
-      }
-
-      frameRef.current = window.requestAnimationFrame(reveal)
-    }
-
-    frameRef.current = window.requestAnimationFrame(reveal)
-    return () => {
-      cancelled = true
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current)
-        frameRef.current = null
-      }
-    }
-  }, [isStreaming])
+    return () => cancelRevealFrame()
+  }, [cancelRevealFrame])
 
   return isStreaming ? visibleContent : targetContent
 }
@@ -557,11 +565,17 @@ function FollowUp({
   )
 }
 
-const MarkdownRenderer = memo(function MarkdownRenderer({ content }: { content: string }) {
+const MarkdownRenderer = memo(function MarkdownRenderer({
+  content,
+  enableHighlight = true,
+}: {
+  content: string
+  enableHighlight?: boolean
+}) {
   return (
     <ReactMarkdown
       remarkPlugins={markdownRemarkPlugins}
-      rehypePlugins={markdownRehypePlugins}
+      rehypePlugins={enableHighlight ? markdownRehypePlugins : []}
       components={markdownComponents}
     >
       {content}
@@ -720,13 +734,19 @@ function splitStableMarkdownBlocks(content: string): string[] {
   return blocks
 }
 
-const StableMarkdownBlocks = memo(function StableMarkdownBlocks({ content }: { content: string }) {
+const StableMarkdownBlocks = memo(function StableMarkdownBlocks({
+  content,
+  enableHighlight = true,
+}: {
+  content: string
+  enableHighlight?: boolean
+}) {
   const blocks = useMemo(() => splitStableMarkdownBlocks(content), [content])
 
   return (
     <>
       {blocks.map((block, index) => (
-        <MarkdownRenderer key={`markdown-block-${index}`} content={block} />
+        <MarkdownRenderer key={`markdown-block-${index}`} content={block} enableHighlight={enableHighlight} />
       ))}
     </>
   )
@@ -739,7 +759,7 @@ function StreamingMarkdown({ content }: { content: string }) {
 
   return (
     <div className="markdown-content max-w-none text-foreground">
-      {parts.stableMarkdown && <StableMarkdownBlocks content={parts.stableMarkdown} />}
+      {parts.stableMarkdown && <StableMarkdownBlocks content={parts.stableMarkdown} enableHighlight={false} />}
       {parts.hasPendingTable && <TableSkeleton />}
       {parts.hasPendingCodeBlock && (
         <div className="my-4 rounded-lg border border-border bg-muted">
@@ -843,17 +863,19 @@ const ChatMessage = memo(function ChatMessage({
     [isUser, displayContent],
   )
   const followUpSuggestions = useMemo(
-    () => buildContextualFollowUps({
-      content: displayContent,
-      previousUserContent,
-      reportType,
-    }),
-    [displayContent, previousUserContent, reportType],
+    () => isStreaming
+      ? []
+      : buildContextualFollowUps({
+          content: displayContent,
+          previousUserContent,
+          reportType,
+        }),
+    [displayContent, isStreaming, previousUserContent, reportType],
   )
 
   const hasStoppedWithContent = message.streamState?.status === "stopped" && Boolean(displayContent.trim())
   const actionsDisabled = isStreaming && !hasStoppedWithContent
-  const canCollapse = displayContent.length > 1400 || displayContent.split("\n").length > 22
+  const canCollapse = !isStreaming && (displayContent.length > 1400 || displayContent.split("\n").length > 22)
   const contentClassName = collapsed && canCollapse && !isStreaming
     ? "relative max-h-[28rem] overflow-hidden"
     : "relative"

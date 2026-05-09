@@ -24,6 +24,7 @@ export interface HepanParams {
   relationLabel?: string
   eventDesc?: string
   participants: FeatureParticipant[]
+  analysisAngle?: string
 }
 
 export type Granularity = 'day' | 'month'
@@ -34,16 +35,19 @@ export interface FortuneParams {
   end: string // YYYY-MM-DD
   granularity: Granularity
   focus: string[]
+  analysisAngle?: string
 }
 
 export interface AvatarParams {
   imageDataUrl: string // data:image/...;base64,...
   combineBazi: boolean
   profile?: FeatureParticipant | null
+  analysisAngle?: string
 }
 
 export interface LifePathParams {
   profile: FeatureParticipant
+  analysisAngle?: string
 }
 
 // ==================== Discriminated payload ====================

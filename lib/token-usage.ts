@@ -7,6 +7,7 @@ import type { LlmTaskKind } from '@/lib/llm'
 export type LlmUsageSource =
   | 'classic_chat'
   | 'agent_planner'
+  | 'agent_analysis'
   | 'feature_page'
   | 'agent_tool'
 

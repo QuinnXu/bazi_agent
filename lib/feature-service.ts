@@ -51,6 +51,7 @@ export interface HepanParams {
   relationLabel?: string
   eventDesc?: string
   participants: Participant[]
+  analysisAngle?: string
 }
 
 export interface FortuneParams {
@@ -59,16 +60,19 @@ export interface FortuneParams {
   end: string // YYYY-MM-DD
   granularity: Granularity
   focus: string[]
+  analysisAngle?: string
 }
 
 export interface AvatarParams {
   imageDataUrl: string // data:image/...;base64,...
   combineBazi: boolean
   profile?: Participant | null
+  analysisAngle?: string
 }
 
 export interface LifePathParams {
   profile: Participant
+  analysisAngle?: string
 }
 
 export type FeatureParams =
@@ -118,6 +122,11 @@ function describeParticipant(p: Participant, idx?: number): string {
   return `${head}${pillars}${bazi}`
 }
 
+function analysisAngleBlock(angle?: string | null): string {
+  const text = String(angle || '').trim()
+  return text ? `\n\n【卜卜象本次规划方向】${text}` : ''
+}
+
 export function buildHepanUserMessage(params: HepanParams): string {
   const subtypeLabel =
     params.subtype === 'pair'
@@ -141,7 +150,7 @@ export function buildHepanUserMessage(params: HepanParams): string {
 
 请基于以下 ${params.participants.length} 位参与者的八字信息进行合盘分析。
 
-${blocks}${relation}${event}
+${blocks}${relation}${event}${analysisAngleBlock(params.analysisAngle)}
 
 请按系统提示中要求的结构输出。`
 }
@@ -161,6 +170,7 @@ ${describeParticipant(params.profile)}
 
 【时间范围】${params.start} ~ ${params.end}
 【关注方向】${focusLabel}
+${analysisAngleBlock(params.analysisAngle)}
 
 ${calendarTable}
 
@@ -224,7 +234,7 @@ export function buildAvatarUserText(params: AvatarParams): string {
   return `${FEATURE_SENTINELS.avatar}
 
 请分析下方上传的头像图片，并结合命理参考给出建议。
-${profileBlock}
+${profileBlock}${analysisAngleBlock(params.analysisAngle)}
 
 请按系统提示中要求的 6 段式结构输出。`
 }
@@ -234,6 +244,7 @@ export function buildLifePathUserMessage(params: LifePathParams): string {
 
 【命主信息】
 ${describeParticipant(params.profile)}
+${analysisAngleBlock(params.analysisAngle)}
 
 请按系统提示中要求的结构，做一次贯穿一生的脉络梳理与总体分析。`
 }
@@ -534,11 +545,8 @@ export async function runFeatureAnalysisStream(
   }
 
   const baseStream = createUnifiedStreamProcessor(upstreamResponse, {
-    chunking: opts.drip ? 'character' : 'semantic',
+    chunking: opts.drip ? 'character' : 'immediate',
     dripDelayMs: opts.dripDelayMs,
-    semanticDelayMs: opts.dripDelayMs ?? 36,
-    semanticMinChars: 14,
-    semanticMaxChars: 140,
   })
   const refundableStream = createRefundableStream(
     baseStream,

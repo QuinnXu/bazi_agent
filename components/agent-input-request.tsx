@@ -20,7 +20,15 @@ export interface AgentInputField {
   required?: boolean
   value?: string | boolean | number | null
   placeholder?: string
-  options?: Array<{ label: string; value: string | boolean | number }>
+  options?: Array<{
+    label: string
+    value: string | boolean | number
+    description?: string
+    params?: any
+    resumeIntent?: string
+    reportPreference?: any
+    complexity?: string | null
+  }>
   multiple?: boolean
   allowCustom?: boolean
   customPlaceholder?: string
@@ -71,6 +79,33 @@ const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) =>
   i.toString().padStart(2, '0'),
 )
 
+function hasInputValue(value: AgentInputValue): boolean {
+  if (Array.isArray(value)) return value.some(item => String(item).trim())
+  if (typeof value === 'boolean') return true
+  return String(value ?? '').trim().length > 0
+}
+
+function validateInputValues(
+  fields: AgentInputField[],
+  values: AgentInputValues,
+): Record<string, string> {
+  const errors: Record<string, string> = {}
+
+  fields.forEach(field => {
+    if (field.required && !hasInputValue(values[field.name])) {
+      errors[field.name] = `请填写${field.label}`
+    }
+  })
+
+  const hasTimePreset = fields.some(field => field.name === 'timeRangePreset')
+  if (hasTimePreset && String(values.timeRangePreset ?? '') === 'custom') {
+    if (!hasInputValue(values.customStart)) errors.customStart = '请选择自定义开始日期'
+    if (!hasInputValue(values.customEnd)) errors.customEnd = '请选择自定义结束日期'
+  }
+
+  return errors
+}
+
 export function AgentInputRequest({ request, disabled = false, onSubmit }: AgentInputRequestProps) {
   const initialValues = useMemo(() => {
     return Object.fromEntries(request.fields.map(field => [field.name, initialValueFor(field)])) as AgentInputValues
@@ -78,6 +113,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
 
   const [values, setValues] = useState<AgentInputValues>(initialValues)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [locationData, setLocationData] = useState<LocationData[]>([])
   const [selectedProvince, setSelectedProvince] = useState('')
   const [selectedCity, setSelectedCity] = useState('')
@@ -106,6 +142,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
 
   useEffect(() => {
     setValues(initialValues)
+    setFieldErrors({})
   }, [initialValues])
 
   useEffect(() => {
@@ -139,6 +176,16 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
 
   const updateValue = (name: string, value: AgentInputValue) => {
     setValues(prev => ({ ...prev, [name]: value }))
+    setFieldErrors(prev => {
+      if (!prev[name] && name !== 'timeRangePreset') return prev
+      const next = { ...prev }
+      delete next[name]
+      if (name === 'timeRangePreset' && value !== 'custom') {
+        delete next.customStart
+        delete next.customEnd
+      }
+      return next
+    })
   }
 
   const toggleChoiceValue = (
@@ -188,6 +235,9 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (disabled || isSubmitting) return
+    const nextErrors = validateInputValues(request.fields, values)
+    setFieldErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
     setIsSubmitting(true)
     try {
       await onSubmit(request, values)
@@ -199,6 +249,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
   return (
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="mt-4 rounded-xl border border-border/70 bg-background/70 p-4 shadow-sm"
     >
       <div className="flex items-start gap-3">
@@ -212,6 +263,17 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
           )}
         </div>
       </div>
+
+      {Object.keys(fieldErrors).length > 0 && (
+        <div
+          role="alert"
+          className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs leading-relaxed text-destructive"
+        >
+          {Object.values(fieldErrors).map(error => (
+            <div key={error}>{error}</div>
+          ))}
+        </div>
+      )}
 
       {isBaziProfileRequest ? (
         <div className="mt-4 space-y-4">
@@ -438,13 +500,20 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
                         type="button"
                         disabled={disabled || isSubmitting}
                         onClick={() => toggleChoiceValue(field, option.value)}
-                        className={`min-h-9 rounded-lg border px-3 py-1.5 text-sm transition-all ${
+                        className={`min-h-9 rounded-lg border px-3 py-1.5 text-left text-sm transition-all ${
                           selected
                             ? 'border-primary/60 bg-primary text-primary-foreground shadow-sm'
                             : 'border-border bg-card text-foreground hover:border-primary/40 hover:bg-muted/50'
                         } disabled:cursor-not-allowed disabled:opacity-60`}
                       >
-                        {option.label}
+                        <span className="block leading-snug">{option.label}</span>
+                        {option.description && (
+                          <span className={`mt-0.5 block text-[11px] leading-relaxed ${
+                            selected ? 'text-primary-foreground/80' : 'text-muted-foreground'
+                          }`}>
+                            {option.description}
+                          </span>
+                        )}
                       </button>
                     )
                   })}

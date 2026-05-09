@@ -10,10 +10,10 @@ import {
   Bot,
   MessageCircle,
   CheckCircle2,
-  Wrench,
   Brain,
   MessageSquareText,
   AtSign,
+  Hash,
   Users,
   CalendarRange,
   ImageIcon,
@@ -73,12 +73,43 @@ interface Message {
 
 // Track structured feature context for follow-up Q&A.
 // Keeps participants & params so /api/chat can re-inject after a feature analysis.
+type AgentFeatureContextKind = FeatureKind | 'agent_analysis'
+
 interface FeatureContext {
-  kind: FeatureKind
+  kind: AgentFeatureContextKind
   // light summary of the original request (for the follow-up system prompt)
   summary: string
   // participants info for hepan/fortune/lifepath; empty for avatar
   participants: { name: string; baziText?: string | null; pillars?: string | null }[]
+  people?: { name: string; baziText?: string | null; pillars?: string | null }[]
+  timeRange?: { label?: string; start: string; end: string } | null
+  matter?: string | null
+}
+
+interface AgentPendingConfirmation {
+  kind: 'select_person' | 'create_profile' | 'confirm_time' | 'confirm_focus' | 'select_depth' | 'ready_to_analyze' | FeatureKind
+  draftSlots?: any
+  field?: AgentInputField
+  params?: any
+  resumeIntent: string
+  options?: Array<{
+    label: string
+    value: string
+    description?: string
+    params?: any
+    resumeIntent?: string
+    reportPreference?: AgentReportPreference | null
+    complexity?: AgentComplexityMode | null
+  }>
+  workflowId?: string
+  taskKind?: FeatureKind | 'agent_analysis' | 'direct_chat' | 'bazi_profile' | 'profile_management' | 'follow_up'
+  stage?: 'collecting_profile' | 'planning' | 'ready_to_execute' | 'suspended'
+  sourceIntent?: string
+  missingInputs?: string[]
+  executionProfile?: {
+    reportPreference?: AgentReportPreference | null
+    complexity?: AgentComplexityMode | null
+  }
 }
 
 interface BaziData {
@@ -98,6 +129,13 @@ interface SelectedProfileContext {
   name: string
   pillars?: string | null
   baziText?: string | null
+  dayun?: Array<{
+    ageStart: number
+    ageEnd: number
+    ganZhi: string
+    yearStart: number
+    yearEnd: number
+  }> | null
 }
 
 interface AgentTimeRange {
@@ -113,6 +151,13 @@ interface BaziProfileOption {
   bazi_result_text: string | null
   bazi_result: {
     fourPillars?: { year: string; month: string; day: string; hour: string }
+    dayun?: Array<{
+      ageStart: number
+      ageEnd: number
+      ganZhi: string
+      yearStart: number
+      yearEnd: number
+    }>
   } | null
 }
 
@@ -138,11 +183,17 @@ type AgentStreamEvent =
   | { type: 'trace'; trace: unknown }
   | { type: 'ui'; ui: AgentUiEvent }
   | { type: 'delta'; content: string }
-  | { type: 'done'; trace: unknown[] }
+  | {
+      type: 'done'
+      trace: unknown[]
+      pendingConfirmation?: AgentPendingConfirmation | null
+      featureContext?: (FeatureContext & { participants?: FeatureContext['participants'] }) | null
+    }
   | { type: 'error'; message: string }
 
 const COMPOSER_MIN_HEIGHT = 32
 const COMPOSER_MAX_HEIGHT = 128
+const STREAM_AUTO_SCROLL_INTERVAL_MS = 80
 
 const AGENT_FEATURE_MENTIONS: Array<{
   kind: FeatureKind
@@ -164,7 +215,6 @@ const AGENT_COMPLEXITY_OPTIONS: Array<{
 }> = [
   { mode: 'instant', label: 'Instant', icon: MessageSquareText, title: '快速短答，减少规划步骤' },
   { mode: 'thinking', label: 'Thinking', icon: Brain, title: '卜卜象用心调整思考深度，准备恰到好处的建议 🌟' },
-  { mode: 'extend', label: 'Extend', icon: Wrench, title: '更长规划和更细报告' },
 ]
 
 const EMPTY_BAZI_FORM_DATA: BaziData = {
@@ -241,6 +291,7 @@ function profileOptionToContext(row: BaziProfileOption): SelectedProfileContext 
     name: row.profile_name,
     pillars,
     baziText: row.bazi_result_text || null,
+    dayun: row.bazi_result?.dayun || null,
   }
 }
 
@@ -280,6 +331,10 @@ function addMonthsForInput(date: Date, months: number): Date {
   return next
 }
 
+function addYearsEndForInput(date: Date, years: number): string {
+  return `${date.getFullYear() + years - 1}-12-31`
+}
+
 function resolveInlineTimeRange(values: AgentInputValues): AgentTimeRange | null {
   const preset = agentInputValueToText(values.timeRangePreset)
   if (!preset) return null
@@ -293,6 +348,12 @@ function resolveInlineTimeRange(values: AgentInputValues): AgentTimeRange | null
       ? formatDateInput(addDaysForInput(today, 30))
       : preset === 'future_3m'
       ? formatDateInput(addMonthsForInput(today, 3))
+      : preset === 'future_1y'
+      ? formatDateInput(addDaysForInput(addMonthsForInput(today, 12), -1))
+      : preset === 'future_3y'
+      ? addYearsEndForInput(today, 3)
+      : preset === 'future_5y'
+      ? addYearsEndForInput(today, 5)
       : preset === 'rest_of_year'
       ? `${today.getFullYear()}-12-31`
       : agentInputValueToText(values.customEnd)
@@ -308,9 +369,15 @@ function resolveInlineTimeRange(values: AgentInputValues): AgentTimeRange | null
       ? '未来 30 天'
       : preset === 'future_3m'
       ? '未来 3 个月'
+      : preset === 'future_1y'
+      ? '未来 12 个月'
+      : preset === 'future_3y'
+      ? '未来 3 年'
+      : preset === 'future_5y'
+      ? '未来 5 年'
       : preset === 'rest_of_year'
       ? '今年剩余时间'
-      : `${normalizedStart} ~ ${normalizedEnd}`
+      : '自定义时间段'
 
   return {
     id: `inline-${normalizedStart}-${normalizedEnd}-${label}`,
@@ -342,6 +409,12 @@ function reportPreferenceFromAgentValue(value: AgentInputValues[string]): AgentR
   if (text === 'balanced') return { mode: 'balanced' }
   if (text === 'detailed') return { mode: 'detailed' }
   return { mode: 'custom', customInstruction: text }
+}
+
+function agentComplexityFromAgentValue(value: AgentInputValues[string]): AgentComplexityMode | null {
+  const text = agentInputValueToText(value)
+  if (text === 'instant' || text === 'thinking') return text
+  return null
 }
 
 function reportPreferenceToDisplay(preference: AgentReportPreference | null): string {
@@ -429,6 +502,9 @@ function HomeContent() {
   const stopRequestedRef = useRef(false)
   const streamHadOutputRef = useRef(false)
   const autoScrollRef = useRef(true)
+  const autoScrollFrameRef = useRef<number | null>(null)
+  const autoScrollTimeoutRef = useRef<number | null>(null)
+  const lastAutoScrollAtRef = useRef(0)
   const lastScrollTopRef = useRef(0)
   const { user } = useAuth()
   const supabase = useMemo(() => createBrowserClient(), [])
@@ -467,10 +543,13 @@ function HomeContent() {
   const [activeFeature, setActiveFeature] = useState<FeatureType>('chat')
   const [showDonationDialog, setShowDonationDialog] = useState(false)
   const [featureContext, setFeatureContext] = useState<FeatureContext | null>(null)
+  const [sessionSummary, setSessionSummary] = useState<string | null>(null)
+  const [agentPendingConfirmation, setAgentPendingConfirmation] = useState<AgentPendingConfirmation | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [agentProfiles, setAgentProfiles] = useState<BaziProfileOption[]>([])
   const [mentionOpen, setMentionOpen] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
+  const [mentionTrigger, setMentionTrigger] = useState<'@' | '#'>('@')
   const [composerModeOpen, setComposerModeOpen] = useState(false)
 
   // Apple quota state
@@ -574,9 +653,21 @@ function HomeContent() {
     return () => container.removeEventListener('scroll', handleScroll)
   }, [isLoading])
 
-  const scrollToTop = useCallback(() => {
-    messagesStartRef.current?.scrollIntoView({ behavior: 'smooth' })
+  const cancelScheduledAutoScroll = useCallback(() => {
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current)
+      autoScrollFrameRef.current = null
+    }
+    if (autoScrollTimeoutRef.current !== null) {
+      window.clearTimeout(autoScrollTimeoutRef.current)
+      autoScrollTimeoutRef.current = null
+    }
   }, [])
+
+  const scrollToTop = useCallback(() => {
+    cancelScheduledAutoScroll()
+    messagesStartRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [cancelScheduledAutoScroll])
 
   const upsertAgentStep = useCallback((step: AgentClientStep) => {
     updateStreamingMessage(message => ({
@@ -591,18 +682,58 @@ function HomeContent() {
   }, [updateStreamingMessage])
 
   const scrollToBottom = useCallback((instant = false) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: instant ? "instant" : "smooth" })
+    const container = messagesContainerRef.current
+    if (container && instant) {
+      container.scrollTop = container.scrollHeight
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: instant ? "instant" : "smooth" })
+    }
+    lastAutoScrollAtRef.current = Date.now()
   }, [])
+
+  const scheduleScrollToBottom = useCallback((instant = false) => {
+    if (!autoScrollRef.current) return
+
+    if (!instant) {
+      cancelScheduledAutoScroll()
+      scrollToBottom(false)
+      return
+    }
+
+    if (autoScrollFrameRef.current !== null || autoScrollTimeoutRef.current !== null) return
+
+    const elapsed = Date.now() - lastAutoScrollAtRef.current
+    const delay = Math.max(0, STREAM_AUTO_SCROLL_INTERVAL_MS - elapsed)
+    const run = () => {
+      autoScrollTimeoutRef.current = null
+      if (!autoScrollRef.current) return
+      autoScrollFrameRef.current = window.requestAnimationFrame(() => {
+        autoScrollFrameRef.current = null
+        if (autoScrollRef.current) scrollToBottom(true)
+      })
+    }
+
+    if (delay > 0) {
+      autoScrollTimeoutRef.current = window.setTimeout(run, delay)
+    } else {
+      run()
+    }
+  }, [cancelScheduledAutoScroll, scrollToBottom])
 
   const scrollToStreamingMessageTop = useCallback(() => {
     streamingMessageTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
   const scrollToLatest = useCallback(() => {
+    cancelScheduledAutoScroll()
     autoScrollRef.current = true
     setShowJumpLatest(false)
     scrollToBottom(false)
-  }, [scrollToBottom])
+  }, [cancelScheduledAutoScroll, scrollToBottom])
+
+  useEffect(() => {
+    return () => cancelScheduledAutoScroll()
+  }, [cancelScheduledAutoScroll])
 
   useEffect(() => {
     const activeMessage = activeStreamingMessageId
@@ -621,13 +752,13 @@ function HomeContent() {
     }
 
     if (autoScrollRef.current) {
-      scrollToBottom(isStreamingStarted)
+      scheduleScrollToBottom(isStreamingStarted)
     }
   }, [
     activeStreamingMessageId,
     isStreamingStarted,
     messages,
-    scrollToBottom,
+    scheduleScrollToBottom,
     scrollToStreamingMessageTop,
   ])
 
@@ -731,6 +862,8 @@ function HomeContent() {
       setCurrentSessionMode(nextMode)
       setActiveChatMode(nextMode)
       setFeatureContext(null)
+      setSessionSummary(null)
+      setAgentPendingConfirmation(null)
       setAgentParticipants([])
       setAgentTimeRanges([])
       setAgentReportPreference(null)
@@ -769,6 +902,8 @@ function HomeContent() {
       setActiveChatMode(sessionMode)
       // Reset feature context when switching sessions; will be re-derived if needed
       setFeatureContext(null)
+      setSessionSummary((sessionData as any)?.summary || null)
+      setAgentPendingConfirmation(null)
       setAgentParticipants([])
       setAgentTimeRanges([])
       setAgentReportPreference(null)
@@ -808,9 +943,10 @@ function HomeContent() {
     setInput(nextInput)
 
     if (activeChatMode === 'agent' && user) {
-      const mentionMatch = nextInput.match(/(?:^|\s)@([^\s@]*)$/)
+      const mentionMatch = nextInput.match(/(?:^|\s)([@#])([^\s@#]*)$/)
       if (mentionMatch) {
-        setMentionQuery(mentionMatch[1] || '')
+        setMentionTrigger(mentionMatch[1] === '#' ? '#' : '@')
+        setMentionQuery(mentionMatch[2] || '')
         setMentionOpen(true)
         if (agentProfiles.length === 0) loadAgentProfiles()
         return
@@ -859,25 +995,25 @@ function HomeContent() {
         end: formatDateInput(addDaysForInput(today, 30)),
       },
       {
-        label: '未来一年',
+        label: '未来 12 个月',
         start: formatDateInput(today),
-        end: formatDateInput(addMonthsForInput(today, 12)),
+        end: formatDateInput(addDaysForInput(addMonthsForInput(today, 12), -1)),
       },
     ]
   }, [])
 
-  const replaceActiveMention = useCallback((label: string) => {
+  const replaceActiveMention = useCallback((label: string, trigger: '@' | '#' = mentionTrigger) => {
     setInput(prev => {
-      const mention = `@${label} `
-      if (/(^|\s)@[^\s@]*$/.test(prev)) {
-        return prev.replace(/(^|\s)@[^\s@]*$/, match => {
+      const mention = `${trigger}${label} `
+      if (/(^|\s)[@#][^\s@#]*$/.test(prev)) {
+        return prev.replace(/(^|\s)[@#][^\s@#]*$/, match => {
           const prefix = match.startsWith(' ') ? ' ' : ''
           return `${prefix}${mention}`
         })
       }
       return `${prev}${prev.endsWith(' ') || prev.length === 0 ? '' : ' '}${mention}`
     })
-  }, [])
+  }, [mentionTrigger])
 
   const addAgentParticipant = useCallback((profile: SelectedProfileContext) => {
     const next = mergeProfileContexts([...agentParticipants, profile])
@@ -905,7 +1041,7 @@ function HomeContent() {
       ...range,
       start,
       end,
-      label: range.label.trim() || `${start} ~ ${end}`,
+      label: range.label.trim() || '自定义时间段',
       id: `${start}-${end}-${range.label || Date.now()}`,
     }
     setAgentTimeRanges(prev => {
@@ -933,18 +1069,18 @@ function HomeContent() {
     if (!alreadySelected) {
       addAgentParticipant(ctx)
     }
-    replaceActiveMention(profile.profile_name)
+    replaceActiveMention(profile.profile_name, '@')
     setMentionOpen(false)
   }, [addAgentParticipant, agentParticipants, replaceActiveMention])
 
   const selectAgentFeatureMention = useCallback((_kind: FeatureKind, label: string) => {
-    replaceActiveMention(label)
+    replaceActiveMention(label, '#')
     setMentionOpen(false)
   }, [replaceActiveMention])
 
   const selectAgentTimeMention = useCallback((range: Omit<AgentTimeRange, 'id'>) => {
     addAgentTimeRange(range)
-    replaceActiveMention(range.label)
+    replaceActiveMention(range.label, '#')
     setMentionOpen(false)
   }, [addAgentTimeRange, replaceActiveMention])
 
@@ -999,6 +1135,8 @@ function HomeContent() {
       __selectedProfileOverride?: SelectedProfileContext | null
       __selectedParticipantsOverride?: SelectedProfileContext[]
       __agentReportPreferenceOverride?: AgentReportPreference | null
+      __agentComplexityOverride?: AgentComplexityMode | null
+      __pendingConfirmationOverride?: AgentPendingConfirmation | null
       __preserveCurrentProfile?: boolean
       __timeRangesOverride?: AgentTimeRange[]
     }
@@ -1006,8 +1144,13 @@ function HomeContent() {
     const selectedProfileOverride = submitEvent.__selectedProfileOverride
     const selectedParticipantsOverride = submitEvent.__selectedParticipantsOverride
     const reportPreferenceOverride = submitEvent.__agentReportPreferenceOverride
+    const complexityOverride = submitEvent.__agentComplexityOverride
+    const pendingConfirmationOverride = submitEvent.__pendingConfirmationOverride
     const preserveCurrentProfile = submitEvent.__preserveCurrentProfile === true
     const requestTimeRanges = submitEvent.__timeRangesOverride ?? agentTimeRanges
+    const requestPendingConfirmation = pendingConfirmationOverride !== undefined
+      ? pendingConfirmationOverride
+      : agentPendingConfirmation
     if (!submittedText || isLoading) return;
     setComposerModeOpen(false)
     const requestConsumesApple =
@@ -1101,7 +1244,13 @@ function HomeContent() {
       if (baziAnalysisResult) requestData.baziAnalysisResult = baziAnalysisResult;
       requestData.useUltraMode = requestConsumesApple;
       if (activeChatMode === 'agent') {
-        requestData.complexity = agentComplexity
+        requestData.complexity = complexityOverride || agentComplexity
+        if (sessionSummary) {
+          requestData.sessionSummary = sessionSummary
+        }
+        if (requestPendingConfirmation) {
+          requestData.pendingConfirmation = requestPendingConfirmation
+        }
         const requestReportPreference =
           reportPreferenceOverride !== undefined
             ? reportPreferenceOverride
@@ -1130,6 +1279,9 @@ function HomeContent() {
         requestData.featureContext = {
           kind: featureContext.kind,
           summary: featureContext.summary,
+          people: featureContext.people,
+          timeRange: featureContext.timeRange,
+          matter: featureContext.matter,
         }
       }
 
@@ -1185,6 +1337,13 @@ function HomeContent() {
         let fullContent = ''
         let streamingStarted = false
         let agentAssistantMessage: Message | null = assistantMessage
+        const agentDoneState: {
+          pendingConfirmation: AgentPendingConfirmation | null
+          featureContext: FeatureContext | null
+        } = {
+          pendingConfirmation: null,
+          featureContext: null,
+        }
 
         const ensureAssistantMessage = (): Message => {
           return agentAssistantMessage || assistantMessage
@@ -1244,6 +1403,20 @@ function HomeContent() {
             scheduleAssistantUpdate()
             return
           }
+          if (event.type === 'done') {
+            agentDoneState.pendingConfirmation = event.pendingConfirmation || null
+            agentDoneState.featureContext = event.featureContext
+              ? {
+                  kind: event.featureContext.kind,
+                  summary: event.featureContext.summary,
+                  participants: event.featureContext.participants || [],
+                  people: event.featureContext.people,
+                  timeRange: event.featureContext.timeRange,
+                  matter: event.featureContext.matter,
+                }
+              : null
+            return
+          }
           if (event.type === 'error') {
             throw new Error(event.message || 'Agent stream error')
           }
@@ -1298,6 +1471,19 @@ function HomeContent() {
               tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
             })
           }
+          setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
+          if (agentDoneState.featureContext) {
+            setFeatureContext(agentDoneState.featureContext)
+            setSessionSummary(agentDoneState.featureContext.summary)
+            if (user && sessionId) {
+              await supabase
+                .from('chat_sessions')
+                .update({ summary: agentDoneState.featureContext.summary } as any)
+                .eq('id', sessionId)
+            }
+          } else if (!agentDoneState.pendingConfirmation) {
+            setAgentPendingConfirmation(null)
+          }
         } else {
           const fallbackContent = 'Agent 已完成步骤，但没有返回正文。请换一种说法再试，或先补充人物与问题范围。'
           const fallbackMessage: Message = {
@@ -1314,6 +1500,7 @@ function HomeContent() {
               tokensUsed: llmMeta.inputTokens + estimateTokensForText(fallbackContent),
             })
           }
+          setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
         }
 
         fetchQuota()
@@ -1450,7 +1637,7 @@ function HomeContent() {
       streamHadOutputRef.current = false
       if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
     }
-  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId])
+  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, sessionSummary, agentPendingConfirmation, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId])
 
   const handleComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -1646,6 +1833,13 @@ function HomeContent() {
         fetchQuota()
         // Save feature context for follow-up
         setFeatureContext({ kind: payload.kind, summary, participants })
+        setSessionSummary(summary)
+        if (sessionId) {
+          await supabase
+            .from('chat_sessions')
+            .update({ summary } as any)
+            .eq('id', sessionId)
+        }
       }
     } catch (error) {
       if (stopRequestedRef.current || isAbortLikeError(error)) {
@@ -1876,12 +2070,28 @@ function HomeContent() {
           updateCurrent: false,
           addToAgentContext: false,
         })
-        const resumeText = `${request.resumeIntent || '请继续刚才的问题'}\n已创建八字人物：${savedProfile.name}。`
+        const nextSelectedProfile = selectedProfile || savedProfile
+        const nextParticipants = mergeProfileContexts([
+          ...agentParticipants,
+          ...(selectedProfile ? [selectedProfile] : []),
+          savedProfile,
+        ])
+        setAgentParticipants(nextParticipants)
+        if (!selectedProfile) {
+          setSelectedProfile(savedProfile)
+          setSelectedProfileId(savedProfile.id || null)
+          setBaziAnalysisResult(savedProfile.baziText || null)
+        }
+        const originalProfileName = agentPendingConfirmation?.draftSlots?.unresolvedNames?.[0]
+        const nameCorrection = originalProfileName && originalProfileName !== savedProfile.name
+          ? `\n人物名修正：${originalProfileName} -> ${savedProfile.name}`
+          : ''
+        const resumeText = `${request.resumeIntent || '请继续刚才的问题'}\n已创建八字人物：${savedProfile.name}。${nameCorrection}`
         const event = {
           preventDefault: () => {},
           __contentOverride: resumeText,
-          __selectedProfileOverride: savedProfile,
-          __selectedParticipantsOverride: mergeProfileContexts([...agentParticipants, savedProfile]),
+          __selectedProfileOverride: nextSelectedProfile,
+          __selectedParticipantsOverride: nextParticipants,
           __preserveCurrentProfile: true,
         } as React.FormEvent & {
           __contentOverride: string
@@ -1900,13 +2110,97 @@ function HomeContent() {
       if (nextReportPreference) {
         setAgentReportPreference(nextReportPreference)
       }
-      const inlineTimeRange = request.fields.some(field =>
+      const hasComplexityField = request.fields.some(field => field.name === 'agentComplexity')
+      const nextAgentComplexity = hasComplexityField
+        ? agentComplexityFromAgentValue(values.agentComplexity)
+        : null
+      if (nextAgentComplexity) {
+        setAgentComplexity(nextAgentComplexity)
+      }
+      const confirmationAction = agentInputValueToText(values.confirmationAction)
+      if (confirmationAction) {
+        const actionField = request.fields.find(field => field.name === 'confirmationAction')
+        const selectedOption = actionField?.options?.find(option => String(option.value) === confirmationAction)
+        const requestReportPreference = nextReportPreference || selectedOption?.reportPreference || null
+        const requestAgentComplexity = nextAgentComplexity || selectedOption?.complexity || null
+        if (!selectedOption && actionField?.allowCustom) {
+          const nextPendingConfirmation = agentPendingConfirmation
+            ? {
+                ...agentPendingConfirmation,
+                executionProfile: {
+                  ...(agentPendingConfirmation.executionProfile || {}),
+                  ...(requestReportPreference ? { reportPreference: requestReportPreference } : {}),
+                  ...(requestAgentComplexity ? { complexity: requestAgentComplexity } : {}),
+                },
+              }
+            : agentPendingConfirmation
+          const event = {
+            preventDefault: () => {},
+            __contentOverride: `${request.resumeIntent || '请继续刚才的问题'}\n我想调整分析路径：${confirmationAction}`,
+            __pendingConfirmationOverride: nextPendingConfirmation,
+            ...(requestReportPreference ? { __agentReportPreferenceOverride: requestReportPreference } : {}),
+            ...(requestAgentComplexity ? { __agentComplexityOverride: requestAgentComplexity } : {}),
+          } as React.FormEvent & {
+            __contentOverride: string
+            __pendingConfirmationOverride?: AgentPendingConfirmation | null
+            __agentReportPreferenceOverride?: AgentReportPreference | null
+            __agentComplexityOverride?: AgentComplexityMode | null
+          }
+          handleSubmit(event)
+          return
+        }
+        const selectedParams = selectedOption?.params && typeof selectedOption.params === 'object'
+          ? selectedOption.params
+          : null
+        const selectedRange = selectedParams?.start && selectedParams?.end
+          ? {
+              id: `confirm-${selectedParams.start}-${selectedParams.end}-${confirmationAction}`,
+              label: selectedOption?.label || '已选时间范围',
+              start: String(selectedParams.start),
+              end: String(selectedParams.end),
+            }
+          : null
+        const nextPendingConfirmation = selectedParams && agentPendingConfirmation
+          ? {
+              ...agentPendingConfirmation,
+              params: selectedParams,
+              resumeIntent: selectedOption?.resumeIntent || request.resumeIntent || agentPendingConfirmation.resumeIntent,
+              executionProfile: {
+                ...(agentPendingConfirmation.executionProfile || {}),
+                ...(requestReportPreference ? { reportPreference: requestReportPreference } : {}),
+                ...(requestAgentComplexity ? { complexity: requestAgentComplexity } : {}),
+              },
+            }
+          : agentPendingConfirmation
+        const actionLabel = actionField
+          ? agentInputValueToDisplay(actionField, values.confirmationAction)
+          : ''
+        const event = {
+          preventDefault: () => {},
+          __contentOverride: `${request.resumeIntent || '请继续刚才的问题'}\n确认：可以${actionLabel ? `\n选择：${actionLabel}` : ''}`,
+          __pendingConfirmationOverride: nextPendingConfirmation,
+          ...(requestReportPreference ? { __agentReportPreferenceOverride: requestReportPreference } : {}),
+          ...(requestAgentComplexity ? { __agentComplexityOverride: requestAgentComplexity } : {}),
+          ...(selectedRange ? { __timeRangesOverride: [selectedRange] } : {}),
+        } as React.FormEvent & {
+          __contentOverride: string
+          __pendingConfirmationOverride?: AgentPendingConfirmation | null
+          __agentReportPreferenceOverride?: AgentReportPreference | null
+          __agentComplexityOverride?: AgentComplexityMode | null
+          __timeRangesOverride?: AgentTimeRange[]
+        }
+        handleSubmit(event)
+        return
+      }
+      const hasTimeRangeField = request.fields.some(field =>
         field.name === 'timeRangePreset' ||
         field.name === 'customStart' ||
         field.name === 'customEnd',
       )
-        ? resolveInlineTimeRange(values)
-        : null
+      const inlineTimeRange = hasTimeRangeField ? resolveInlineTimeRange(values) : null
+      if (hasTimeRangeField && !inlineTimeRange) {
+        throw new Error('请补全自定义开始日期和结束日期后再继续。')
+      }
 
       const filled = request.fields
         .map(field => `${field.label}：${agentInputValueToDisplay(field, values[field.name])}`)
@@ -1914,12 +2208,14 @@ function HomeContent() {
         .join('\n')
       const event = {
         preventDefault: () => {},
-        __contentOverride: `${request.resumeIntent || '请继续刚才的问题'}\n${filled}${inlineTimeRange ? `\n开始日期：${inlineTimeRange.start}\n结束日期：${inlineTimeRange.end}` : ''}`,
+        __contentOverride: `${request.resumeIntent || '请继续刚才的问题'}\n${filled}`,
         ...(hasReportStyleField ? { __agentReportPreferenceOverride: nextReportPreference } : {}),
+        ...(hasComplexityField ? { __agentComplexityOverride: nextAgentComplexity } : {}),
         ...(inlineTimeRange ? { __timeRangesOverride: [inlineTimeRange] } : {}),
       } as React.FormEvent & {
         __contentOverride: string
         __agentReportPreferenceOverride?: AgentReportPreference | null
+        __agentComplexityOverride?: AgentComplexityMode | null
         __timeRangesOverride?: AgentTimeRange[]
       }
       handleSubmit(event)
@@ -1934,7 +2230,7 @@ function HomeContent() {
       console.error('Agent inline input failed:', error)
       alert(error instanceof Error ? error.message : '提交失败，请检查输入后再试。')
     }
-  }, [agentParticipants, createAndSaveBaziProfile, handleSubmit, user])
+  }, [agentParticipants, agentPendingConfirmation, createAndSaveBaziProfile, handleSubmit, selectedProfile, user])
 
   const selectComposerClassicMode = useCallback((ultra: boolean) => {
     if (activeChatMode !== 'classic') {
@@ -2313,7 +2609,7 @@ function HomeContent() {
                       >
                         <p className="text-xs text-foreground">{range.label}</p>
                         <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                          {range.start} ~ {range.end}
+                          点击后带入这段时间
                         </p>
                       </button>
                     ))}
@@ -2343,7 +2639,7 @@ function HomeContent() {
                       disabled={!agentTimeDraft.start || !agentTimeDraft.end}
                       onClick={() => {
                         addAgentCustomTimeRange()
-                        replaceActiveMention(agentTimeDraft.label || `${agentTimeDraft.start}~${agentTimeDraft.end}`)
+                        replaceActiveMention(agentTimeDraft.label || '自定义时间段', '#')
                         setMentionOpen(false)
                       }}
                       className="col-span-2 h-9 rounded-lg bg-primary text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
@@ -2412,11 +2708,8 @@ function HomeContent() {
                       key={range.id}
                       className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-muted/45 px-2.5 py-1 text-xs text-foreground"
                     >
-                      <CalendarRange className="w-3 h-3 flex-shrink-0 text-primary" />
+                      <Hash className="w-3 h-3 flex-shrink-0 text-primary" />
                       <span className="max-w-[8rem] truncate">{range.label}</span>
-                      <span className="hidden text-muted-foreground sm:inline">
-                        {range.start} ~ {range.end}
-                      </span>
                       <button
                         type="button"
                         onClick={() => removeAgentTimeRange(range.id)}
@@ -2478,6 +2771,7 @@ function HomeContent() {
                         return
                       }
                       setMentionQuery('')
+                      setMentionTrigger('@')
                       setMentionOpen(open => !open)
                       if (agentProfiles.length === 0) loadAgentProfiles()
                     }}

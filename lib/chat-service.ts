@@ -20,8 +20,11 @@ export interface ChatParticipant {
 }
 
 export interface ChatFeatureContext {
-  kind: 'hepan' | 'fortune' | 'avatar' | 'lifepath'
+  kind: 'hepan' | 'fortune' | 'avatar' | 'lifepath' | 'agent_analysis'
   summary?: string
+  people?: ChatParticipant[]
+  timeRange?: { label?: string; start: string; end: string } | null
+  matter?: string | null
 }
 
 export interface ClassicChatInput {
@@ -76,6 +79,7 @@ const FEATURE_KIND_LABEL: Record<ChatFeatureContext['kind'], string> = {
   fortune: '近期运势',
   avatar: '头像分析',
   lifepath: '人生脉络与总体分析',
+  agent_analysis: 'Agent 统一分析',
 }
 
 // Helper function to get current date string with Chinese calendar GanZhi
@@ -196,10 +200,7 @@ export async function runClassicChatStream(
     signal: opts.signal,
   })
   const baseStream = createUnifiedStreamProcessor(response, {
-    chunking: 'semantic',
-    semanticDelayMs: 30,
-    semanticMinChars: 8,
-    semanticMaxChars: 90,
+    chunking: 'immediate',
   })
   const stream = createUsageTrackedStream(baseStream, {
     userId: input.userId,

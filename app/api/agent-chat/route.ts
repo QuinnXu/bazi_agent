@@ -3,14 +3,19 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 
 import { createServerSupabaseClient } from '@/lib/supabase/server'
-import { createAgentEventStream, type AgentMessage, type AgentTimeRangeContext } from '@/lib/agent-service'
+import {
+  createAgentEventStream,
+  type AgentMessage,
+  type AgentPendingConfirmation,
+  type AgentTimeRangeContext,
+} from '@/lib/agent-service'
 import {
   normalizeAgentComplexityMode,
   type AgentComplexityMode,
   type AgentReportPreference,
 } from '@/lib/agent-complexity'
 import type { ChatFeatureContext, ChatParticipant } from '@/lib/chat-service'
-import type { Participant } from '@/lib/feature-service'
+import type { AgentParticipant } from '@/lib/agent-workflow-types'
 
 export async function POST(req: Request) {
   try {
@@ -27,10 +32,12 @@ export async function POST(req: Request) {
     const body = await req.json() as {
       messages: AgentMessage[]
       baziAnalysisResult?: string | null
-      selectedProfile?: Participant | null
+      selectedProfile?: AgentParticipant | null
       participants?: ChatParticipant[]
       timeRanges?: AgentTimeRangeContext[]
       reportPreference?: AgentReportPreference | null
+      sessionSummary?: string | null
+      pendingConfirmation?: AgentPendingConfirmation | null
       featureContext?: ChatFeatureContext
       complexity?: AgentComplexityMode
       maxSteps?: number
@@ -47,6 +54,8 @@ export async function POST(req: Request) {
       participants: body.participants,
       timeRanges: body.timeRanges,
       reportPreference: body.reportPreference,
+      sessionSummary: body.sessionSummary,
+      pendingConfirmation: body.pendingConfirmation,
       featureContext: body.featureContext,
       complexity,
       maxSteps: body.maxSteps,

@@ -1,6 +1,6 @@
 import type { FeatureKind } from '@/lib/feature-service'
 
-export type AgentComplexityMode = 'instant' | 'thinking' | 'extend'
+export type AgentComplexityMode = 'instant' | 'thinking'
 export type AgentReasoningEffort = 'none' | 'high' | 'max'
 export type AgentThinkingMode = 'enabled' | 'disabled'
 export type AgentReportPreferenceMode = 'concise' | 'balanced' | 'detailed' | 'custom'
@@ -26,18 +26,18 @@ export interface AgentComplexityProfile {
 export const DEFAULT_AGENT_COMPLEXITY: AgentComplexityMode = 'instant'
 
 const REPORT_PREFERENCE_MAX_TOKENS: Partial<Record<AgentReportPreferenceMode, number>> = {
-  concise: 2_000,
-  balanced: 8_000,
-  detailed: 16_000,
+  concise: 8_000,
+  balanced: 32_000,
+  detailed: 128_000,
 }
 
 const REPORT_PREFERENCE_INSTRUCTIONS: Record<AgentReportPreferenceMode, string> = {
   concise:
     '【报告风格：简洁结论型】此要求优先于 Agent 复杂度。输出约 300-800 中文字；最多 4 个主段：先给结论，再给关键依据、关键时间/风险、行动建议。压缩背景铺垫，不写完整逐月/逐项长章。',
   balanced:
-    '【报告风格：均衡报告型】此要求优先于 Agent 复杂度。输出约 8000-2000 中文字；保留清晰层级，兼顾命理依据、关键阶段/窗口、重点方向和行动建议。不要短成摘要，也不要铺成研究长文。',
+    '【报告风格：均衡报告型】此要求优先于 Agent 复杂度。输出约 800-2000 中文字；保留清晰层级，兼顾命理依据、关键阶段/窗口、重点方向和行动建议。不要短成摘要，也不要铺成研究长文。',
   detailed:
-    '【报告风格：深度展开型】此要求优先于 Agent 复杂度。输出深度长报告：近期运势按月份/阶段充分拆解，合盘强化互动模式与关键时间窗，人生脉络强化大运连续性；展开依据、阶段差异、风险点和执行清单。',
+    '【报告风格：深度展开型】此要求优先于 Agent 复杂度。输出深度长报告：近期运势按月份/阶段充分拆解，合盘强化互动模式与关键时间窗，人生脉络强化大运连续性；展开依据、阶段差异、风险点和执行清单。若内容很长，先保证结构完整和重点密度，不要为了凑满篇幅重复。',
   custom:
     '【报告风格：自定义】此要求优先于 Agent 复杂度。按用户补充的风格要求调整表达、篇幅和重点。',
 }
@@ -74,26 +74,12 @@ export const AGENT_COMPLEXITY_PROFILES: Record<
     featureInstruction:
       '【Agent 复杂度：Thinking】请输出中等深度报告：保留清晰层级、命理依据、关键时间窗口和行动建议；避免过短，也避免多年研究报告式铺陈。',
   },
-  extend: {
-    mode: 'extend',
-    label: 'Extend',
-    plannerMaxTokens: 3500,
-    maxSteps: 5,
-    timeoutMs: 300_000,
-    featureMaxTokens: 384_000,
-    thinking: 'enabled',
-    reasoningEffort: 'max',
-    plannerInstruction:
-      '当前复杂度：Extend。允许更细的拆解和更长的工具报告；对复杂命理、长周期、多人关系和应事问题，优先调用结构化工具并保留充分上下文。',
-    featureInstruction:
-      '【Agent 复杂度：Extend】请输出深度长报告：展开完整结构、充分解释命局依据和阶段差异，覆盖关键月份/年份/人物互动，给出细颗粒度风险点与执行清单。',
-  },
 }
 
 export function normalizeAgentComplexityMode(
   value: unknown,
 ): AgentComplexityMode {
-  if (value === 'instant' || value === 'thinking' || value === 'extend') {
+  if (value === 'instant' || value === 'thinking') {
     return value
   }
   return DEFAULT_AGENT_COMPLEXITY

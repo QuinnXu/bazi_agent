@@ -29,6 +29,7 @@ import {
 export type LlmTaskKind =
   | 'free'          // free chat (no apple)
   | 'agent_planner' // Agent planner / middle orchestration call
+  | 'agent_extractor' // low-latency Agent correction/slot extractor
   | 'apple_first'   // reserved compatibility name; text now prefers DeepSeek
   | 'apple_avatar'  // subsequent apple call, avatar (needs multimodal)
   | 'apple_report'  // subsequent apple call, long report (fortune/hepan/lifepath)
@@ -163,6 +164,14 @@ function deepseekV4FlashConfig(overrides: Partial<LlmConfig> = {}): LlmConfig {
 }
 
 export function selectLlmConfig(task: LlmTaskKind): LlmConfig {
+  if (task === 'agent_extractor') {
+    return deepseekV4FlashConfig({
+      temperature: 0,
+      maxTokens: 700,
+      label: `${process.env.DEEPSEEK_V4_FLASH_MODEL || 'deepseek-v4-flash'} @ DeepSeek (agent-extractor)`,
+    })
+  }
+
   if (task === 'agent_planner') {
     return deepseekV4FlashConfig({
       temperature: 0.2,
@@ -265,6 +274,11 @@ function applyRequestOverrides(body: any, opts: LlmRequestOverrides) {
     return
   }
   if (opts.reasoningEffort) {
+    if (body.thinking?.type === 'disabled') {
+      delete body.reasoning_effort
+      delete body.reasoning
+      return
+    }
     if (body.reasoning) {
       body.reasoning.effort =
         opts.reasoningEffort === 'max' ? 'high' : opts.reasoningEffort
@@ -272,6 +286,12 @@ function applyRequestOverrides(body: any, opts: LlmRequestOverrides) {
       body.reasoning_effort = opts.reasoningEffort
     }
   }
+}
+
+function normalizeReasoningParams(body: any) {
+  if (body.thinking?.type !== 'disabled') return
+  delete body.reasoning_effort
+  delete body.reasoning
 }
 
 // ==================== Caller ====================
@@ -313,6 +333,7 @@ export async function callLLM(
   }
   applyReasoningParams(body, config)
   applyRequestOverrides(body, opts)
+  normalizeReasoningParams(body)
 
   console.log(`[LLM] Calling ${config.label} (task=${task})`)
   console.log('[LLM] request', JSON.stringify({
@@ -397,6 +418,7 @@ export async function callLLMTextWithUsage(
   }
   applyReasoningParams(body, config)
   applyRequestOverrides(body, opts)
+  normalizeReasoningParams(body)
 
   console.log(`[LLM] Calling ${config.label} text (task=${task})`)
   console.log('[LLM] request', JSON.stringify({
