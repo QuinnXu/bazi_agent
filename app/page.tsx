@@ -47,6 +47,13 @@ import { AvatarPage } from "@/components/features/avatar-page"
 import { LifePathPage } from "@/components/features/lifepath-page"
 import { detectFeatureKindFromContent } from "@/components/chat-message"
 import { sanitizeReplacementChars } from "@/lib/text-sanitize"
+import {
+  BUBU_EMPTY_RESPONSE,
+  createBubuMessageId,
+  getBubuGeneratingLabel,
+  getBubuStreamLabel,
+  shouldSkipFollowUpSuggestions,
+} from "@/lib/bubu-copy"
 import type {
   FeatureKind,
   FeaturePayload,
@@ -69,6 +76,8 @@ interface Message {
   streamState?: MessageStreamState;
   agentUi?: AgentInlineInputRequest;
   agentUiStatus?: 'pending' | 'submitted';
+  suggestedFollowUps?: string[];
+  followUpStatus?: 'idle' | 'loading' | 'ready' | 'error';
 }
 
 // Track structured feature context for follow-up Q&A.
@@ -84,6 +93,17 @@ interface FeatureContext {
   people?: { name: string; baziText?: string | null; pillars?: string | null }[]
   timeRange?: { label?: string; start: string; end: string } | null
   matter?: string | null
+}
+
+interface FollowUpSuggestionRequest {
+  assistantContent: string
+  runKind: MessageRunKind
+  previousUserContent?: string | null
+  recentMessages?: Pick<Message, 'role' | 'content'>[]
+  reportType?: string | null
+  featureContext?: FeatureContext | null
+  participants?: { name?: string | null }[]
+  pendingKind?: string | null
 }
 
 interface AgentPendingConfirmation {
@@ -244,10 +264,10 @@ function legacyBaziEventToHumanInput(event: AgentBaziFormEvent): AgentInlineInpu
     type: 'human_input_request',
     requestId: `legacy-bazi-${Date.now()}`,
     kind: 'bazi_profile',
-    title: '补全八字人物资料',
+    title: '小象还缺一份人物资料',
     message: event.message,
-    submitLabel: '生成 Bazi Analysis Results 并继续',
-    resumeIntent: '创建八字人物后继续当前问题',
+    submitLabel: '交给小象排盘并继续',
+    resumeIntent: '创建八字人物后，请小象继续当前问题',
     fields: [
       { name: 'profileName', label: '人物名称', inputType: 'text', required: true, value: '我' },
       { name: 'year', label: '出生年份', inputType: 'number', required: true, value: data.year },
@@ -402,6 +422,33 @@ function agentInputValueToDisplay(field: AgentInputField, value: AgentInputValue
   return text ? optionLabel(text) : ''
 }
 
+function agentInputSelectedOption(field: AgentInputField, value: AgentInputValues[string]) {
+  const text = agentInputValueToText(value)
+  if (!text || field.multiple) return null
+  return field.options?.find(option => String(option.value) === text) || null
+}
+
+function selectedParamsToTimeRange(params: any, fallbackLabel?: string): AgentTimeRange | null {
+  const askedTime = params?.draftSlots?.askedTime
+  if (askedTime?.start && askedTime?.end) {
+    return {
+      id: `confirm-${askedTime.start}-${askedTime.end}-${askedTime.label || fallbackLabel || 'time-range'}`,
+      label: String(askedTime.label || fallbackLabel || '已选时间范围'),
+      start: String(askedTime.start),
+      end: String(askedTime.end),
+    }
+  }
+  if (params?.start && params?.end) {
+    return {
+      id: `confirm-${params.start}-${params.end}-${fallbackLabel || 'time-range'}`,
+      label: fallbackLabel || '已选时间范围',
+      start: String(params.start),
+      end: String(params.end),
+    }
+  }
+  return null
+}
+
 function reportPreferenceFromAgentValue(value: AgentInputValues[string]): AgentReportPreference | null {
   const text = agentInputValueToText(value)
   if (!text) return null
@@ -456,29 +503,29 @@ function getLlmResponseMeta(response: Response) {
   }
 }
 
+function getFinalFollowUpState(content: string, enabled: boolean): Pick<Message, 'suggestedFollowUps' | 'followUpStatus'> {
+  if (!enabled || shouldSkipFollowUpSuggestions(content)) {
+    return { suggestedFollowUps: [], followUpStatus: 'ready' }
+  }
+  return { suggestedFollowUps: [], followUpStatus: 'loading' }
+}
+
 function createMessageStreamState(
   runKind: MessageRunKind,
   status: MessageStreamState['status'],
   label?: string,
   phase: MessageStreamState['phase'] = status === 'queued' ? 'understanding' : 'generating',
 ): MessageStreamState {
-  const fallbackLabel: Record<MessageRunKind, string> = {
-    classic: status === 'queued' ? '正在理解问题' : '正在生成回复',
-    agent: status === 'queued' ? '正在规划步骤' : '正在生成回复',
-    feature: status === 'queued' ? '正在整理报告' : '正在生成报告',
-  }
   return {
     status,
     runKind,
     phase,
-    label: label || (status === 'complete' ? '已完成' : fallbackLabel[runKind]),
+    label: label || getBubuStreamLabel(runKind, status),
   }
 }
 
 function getGeneratingLabel(runKind: MessageRunKind) {
-  if (runKind === 'feature') return '正在生成报告'
-  if (runKind === 'agent') return '正在生成回复'
-  return '正在生成回复'
+  return getBubuGeneratingLabel(runKind)
 }
 
 export default function Home() {
@@ -913,6 +960,68 @@ function HomeContent() {
     }
   }, [activeChatMode, supabase])
 
+  const requestFollowUpSuggestions = useCallback(async (
+    messageId: string,
+    request: FollowUpSuggestionRequest,
+  ) => {
+    const finalContent = sanitizeReplacementChars(request.assistantContent).trim()
+    if (!user || !finalContent) return
+    if (request.pendingKind && request.pendingKind !== 'ready_to_analyze') return
+    if (shouldSkipFollowUpSuggestions(finalContent)) {
+      setMessages(prev => prev.map(message =>
+        message.id === messageId
+          ? { ...message, suggestedFollowUps: [], followUpStatus: 'ready' }
+          : message
+      ))
+      return
+    }
+
+    setMessages(prev => prev.map(message =>
+      message.id === messageId
+        ? { ...message, suggestedFollowUps: [], followUpStatus: 'loading' }
+        : message
+    ))
+
+    try {
+      const response = await fetch('/api/follow-up-suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assistantContent: finalContent,
+          previousUserContent: request.previousUserContent || null,
+          recentMessages: (request.recentMessages || [])
+            .slice(-8)
+            .map(message => ({
+              role: message.role,
+              content: sanitizeReplacementChars(message.content).slice(0, 1200),
+            })),
+          mode: request.runKind,
+          reportType: request.reportType || null,
+          featureContext: request.featureContext || null,
+          participants: request.participants || [],
+          pendingKind: request.pendingKind || null,
+        }),
+      })
+      if (!response.ok) throw new Error(`follow-up HTTP ${response.status}`)
+      const data = await response.json().catch(() => ({}))
+      const suggestions = Array.isArray(data?.suggestions)
+        ? data.suggestions.filter((item: unknown): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 3)
+        : []
+      setMessages(prev => prev.map(message =>
+        message.id === messageId
+          ? { ...message, suggestedFollowUps: suggestions, followUpStatus: 'ready' }
+          : message
+      ))
+    } catch (error) {
+      console.warn('追问推荐生成失败，使用本地兜底:', error)
+      setMessages(prev => prev.map(message =>
+        message.id === messageId
+          ? { ...message, suggestedFollowUps: [], followUpStatus: 'error' }
+          : message
+      ))
+    }
+  }, [user])
+
   const resizeComposerTextarea = useCallback(() => {
     const textarea = composerTextareaRef.current
     if (!textarea) return
@@ -1122,8 +1231,8 @@ function HomeContent() {
     updateStreamingMessage(message => ({
       ...message,
       streamState: message.streamState
-        ? { ...message.streamState, label: '正在停止本次输出…' }
-        : createMessageStreamState('classic', 'streaming', '正在停止本次输出…'),
+        ? { ...message.streamState, label: '小象正在收住笔尖…' }
+        : createMessageStreamState('classic', 'streaming', '小象正在收住笔尖…'),
     }))
     abortControllerRef.current?.abort()
   }, [isLoading, updateStreamingMessage])
@@ -1190,7 +1299,7 @@ function HomeContent() {
     }
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: createBubuMessageId('user'),
       role: 'user',
       content: submittedText,
       createdAt: new Date(),
@@ -1198,7 +1307,7 @@ function HomeContent() {
     };
     const runKind: MessageRunKind = activeChatMode === 'agent' ? 'agent' : 'classic'
     const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
+      id: createBubuMessageId('assistant'),
       role: 'assistant',
       content: '',
       createdAt: new Date(),
@@ -1451,56 +1560,53 @@ function HomeContent() {
         }
         setStreamingMessageId(null)
 
-        if (agentAssistantMessage) {
-          const fallbackContent = 'Agent 已完成步骤，但没有返回正文。请换一种说法再试，或先补充人物与问题范围。'
-          const finalContent = fullContent.trim() ? fullContent : fallbackContent
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === agentAssistantMessage?.id
-                ? {
-                    ...msg,
-                    content: finalContent,
-                    streamState: createMessageStreamState('agent', 'complete'),
-                  }
-                : msg
-            )
+        const currentAssistant = agentAssistantMessage || assistantMessage
+        const finalContent = fullContent.trim() ? fullContent : BUBU_EMPTY_RESPONSE.agent
+        const shouldRequestAgentFollowUps = Boolean(user) &&
+          !agentDoneState.pendingConfirmation &&
+          !shouldSkipFollowUpSuggestions(finalContent)
+        setMessages(prev =>
+          prev.map(msg =>
+            msg.id === currentAssistant.id
+              ? {
+                  ...msg,
+                  content: finalContent,
+                  streamState: createMessageStreamState('agent', 'complete'),
+                  ...getFinalFollowUpState(finalContent, shouldRequestAgentFollowUps),
+                }
+              : msg
           )
-          if (user && sessionId && finalContent) {
-            await saveMessage(sessionId, 'assistant', finalContent, activeChatMode, {
-              model: llmMeta.model,
-              tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
-            })
-          }
-          setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
-          if (agentDoneState.featureContext) {
-            setFeatureContext(agentDoneState.featureContext)
-            setSessionSummary(agentDoneState.featureContext.summary)
-            if (user && sessionId) {
-              await supabase
-                .from('chat_sessions')
-                .update({ summary: agentDoneState.featureContext.summary } as any)
-                .eq('id', sessionId)
-            }
-          } else if (!agentDoneState.pendingConfirmation) {
-            setAgentPendingConfirmation(null)
-          }
-        } else {
-          const fallbackContent = 'Agent 已完成步骤，但没有返回正文。请换一种说法再试，或先补充人物与问题范围。'
-          const fallbackMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: fallbackContent,
-            createdAt: new Date(),
-            mode: activeChatMode,
-          }
-          setMessages(prev => [...prev, fallbackMessage])
+        )
+        if (user && sessionId && finalContent) {
+          await saveMessage(sessionId, 'assistant', finalContent, activeChatMode, {
+            model: llmMeta.model,
+            tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
+          })
+        }
+        setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
+        if (agentDoneState.featureContext) {
+          setFeatureContext(agentDoneState.featureContext)
+          setSessionSummary(agentDoneState.featureContext.summary)
           if (user && sessionId) {
-            await saveMessage(sessionId, 'assistant', fallbackContent, activeChatMode, {
-              model: llmMeta.model,
-              tokensUsed: llmMeta.inputTokens + estimateTokensForText(fallbackContent),
-            })
+            await supabase
+              .from('chat_sessions')
+              .update({ summary: agentDoneState.featureContext.summary } as any)
+              .eq('id', sessionId)
           }
-          setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
+        } else if (!agentDoneState.pendingConfirmation) {
+          setAgentPendingConfirmation(null)
+        }
+        if (shouldRequestAgentFollowUps) {
+          const nextFeatureContext = agentDoneState.featureContext || featureContext
+          void requestFollowUpSuggestions(currentAssistant.id, {
+            assistantContent: finalContent,
+            runKind: 'agent',
+            previousUserContent: submittedText,
+            recentMessages: [...messages, userMessage, { ...currentAssistant, content: finalContent }],
+            reportType: nextFeatureContext?.kind || null,
+            featureContext: nextFeatureContext,
+            participants: requestParticipants,
+          })
         }
 
         fetchQuota()
@@ -1554,7 +1660,8 @@ function HomeContent() {
         setStreamingMessageId(null);
         const finalContent = fullContent.trim()
           ? fullContent
-          : '这次没有收到完整回复。你可以换一种说法再试一次。'
+          : BUBU_EMPTY_RESPONSE.classic
+        const shouldRequestClassicFollowUps = Boolean(user) && !shouldSkipFollowUpSuggestions(finalContent)
         setMessages(prev =>
           prev.map(msg =>
             msg.id === assistantMessage.id
@@ -1562,6 +1669,7 @@ function HomeContent() {
                   ...msg,
                   content: finalContent,
                   streamState: createMessageStreamState('classic', 'complete'),
+                  ...getFinalFollowUpState(finalContent, shouldRequestClassicFollowUps),
                 }
               : msg
           )
@@ -1570,6 +1678,17 @@ function HomeContent() {
           await saveMessage(sessionId, 'assistant', finalContent, activeChatMode, {
             model: llmMeta.model,
             tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
+          })
+        }
+        if (shouldRequestClassicFollowUps) {
+          void requestFollowUpSuggestions(assistantMessage.id, {
+            assistantContent: finalContent,
+            runKind: 'classic',
+            previousUserContent: submittedText,
+            recentMessages: [...messages, userMessage, { ...assistantMessage, content: finalContent }],
+            reportType: featureContext?.kind || null,
+            featureContext,
+            participants: requestData.participants || requestParticipants,
           })
         }
       }
@@ -1583,20 +1702,24 @@ function HomeContent() {
               msg.id === currentMessageId
                 ? {
                     ...msg,
-                    content: partialContent || '已停止本次输出。你可以调整问题后继续问我。',
-                    streamState: createMessageStreamState(runKind, 'stopped', '已停止'),
+                    content: partialContent || BUBU_EMPTY_RESPONSE.stopped,
+                    streamState: createMessageStreamState(runKind, 'stopped'),
+                    suggestedFollowUps: [],
+                    followUpStatus: 'ready',
                   }
                 : msg,
             ),
           )
         } else if (!streamHadOutputRef.current) {
           const stoppedMessage: Message = {
-            id: (Date.now() + 2).toString(),
+            id: createBubuMessageId('assistant'),
             role: 'assistant',
-            content: '已停止本次输出。你可以调整问题后继续问我。',
+            content: BUBU_EMPTY_RESPONSE.stopped,
             createdAt: new Date(),
             mode: activeChatMode,
-            streamState: createMessageStreamState(runKind, 'stopped', '已停止'),
+            streamState: createMessageStreamState(runKind, 'stopped'),
+            suggestedFollowUps: [],
+            followUpStatus: 'ready',
           }
           setMessages(prev => [...prev, stoppedMessage])
         }
@@ -1610,20 +1733,24 @@ function HomeContent() {
             msg.id === currentMessageId
               ? {
                   ...msg,
-                  content: '抱歉，发生了错误。请稍后再试。',
-                  streamState: createMessageStreamState(runKind, 'error', '生成失败'),
+                    content: BUBU_EMPTY_RESPONSE.genericError,
+                    streamState: createMessageStreamState(runKind, 'error'),
+                    suggestedFollowUps: [],
+                    followUpStatus: 'ready',
                 }
               : msg,
           ),
         )
       } else {
         const errorMessage: Message = {
-          id: (Date.now() + 2).toString(),
+          id: createBubuMessageId('assistant'),
           role: 'assistant',
-          content: '抱歉，发生了错误。请稍后再试。',
+          content: BUBU_EMPTY_RESPONSE.genericError,
           createdAt: new Date(),
           mode: activeChatMode,
-          streamState: createMessageStreamState(runKind, 'error', '生成失败'),
+          streamState: createMessageStreamState(runKind, 'error'),
+          suggestedFollowUps: [],
+          followUpStatus: 'ready',
         };
         setMessages(prev => [...prev, errorMessage]);
       }
@@ -1637,7 +1764,7 @@ function HomeContent() {
       streamHadOutputRef.current = false
       if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
     }
-  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, sessionSummary, agentPendingConfirmation, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId])
+  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, sessionSummary, agentPendingConfirmation, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId, requestFollowUpSuggestions])
 
   const handleComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -1695,14 +1822,14 @@ function HomeContent() {
     setActiveFeature('chat')
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: createBubuMessageId('user'),
       role: 'user',
       content: userDisplay,
       createdAt: new Date(),
       mode: activeChatMode,
     }
     const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
+      id: createBubuMessageId('assistant'),
       role: 'assistant',
       content: '',
       createdAt: new Date(),
@@ -1813,13 +1940,15 @@ function HomeContent() {
         setStreamingMessageId(null)
         const finalContent = fullContent.trim()
           ? fullContent
-          : '这次报告没有生成完整正文。苹果状态已刷新，你可以稍后再试一次。'
+          : BUBU_EMPTY_RESPONSE.feature
+        const shouldRequestFeatureFollowUps = Boolean(user) && !shouldSkipFollowUpSuggestions(finalContent)
         setMessages(prev => prev.map(m =>
           m.id === assistantMessage.id
             ? {
                 ...m,
                 content: finalContent,
                 streamState: createMessageStreamState('feature', 'complete'),
+                ...getFinalFollowUpState(finalContent, shouldRequestFeatureFollowUps),
               }
             : m
         ))
@@ -1832,13 +1961,25 @@ function HomeContent() {
         // After successful analysis: refresh quota again (server may have refunded if empty stream)
         fetchQuota()
         // Save feature context for follow-up
-        setFeatureContext({ kind: payload.kind, summary, participants })
+        const nextFeatureContext: FeatureContext = { kind: payload.kind, summary, participants }
+        setFeatureContext(nextFeatureContext)
         setSessionSummary(summary)
         if (sessionId) {
           await supabase
             .from('chat_sessions')
             .update({ summary } as any)
             .eq('id', sessionId)
+        }
+        if (shouldRequestFeatureFollowUps) {
+          void requestFollowUpSuggestions(assistantMessage.id, {
+            assistantContent: finalContent,
+            runKind: 'feature',
+            previousUserContent: userDisplay,
+            recentMessages: [...messages, userMessage, { ...assistantMessage, content: finalContent }],
+            reportType: payload.kind,
+            featureContext: nextFeatureContext,
+            participants,
+          })
         }
       }
     } catch (error) {
@@ -1851,20 +1992,24 @@ function HomeContent() {
               message.id === currentMessageId
                 ? {
                     ...message,
-                    content: partialContent || '已停止本次分析。当前没有生成可保留的正文。',
-                    streamState: createMessageStreamState('feature', 'stopped', '已停止'),
+                    content: partialContent || BUBU_EMPTY_RESPONSE.stoppedFeature,
+                    streamState: createMessageStreamState('feature', 'stopped'),
+                    suggestedFollowUps: [],
+                    followUpStatus: 'ready',
                   }
                 : message,
             ),
           )
         } else if (!streamHadOutputRef.current) {
           const stoppedMessage: Message = {
-            id: (Date.now() + 2).toString(),
+            id: createBubuMessageId('assistant'),
             role: 'assistant',
-            content: '已停止本次分析。当前没有生成可保留的正文。',
+            content: BUBU_EMPTY_RESPONSE.stoppedFeature,
             createdAt: new Date(),
             mode: activeChatMode,
-            streamState: createMessageStreamState('feature', 'stopped', '已停止'),
+            streamState: createMessageStreamState('feature', 'stopped'),
+            suggestedFollowUps: [],
+            followUpStatus: 'ready',
           }
           setMessages(prev => [...prev, stoppedMessage])
         }
@@ -1878,19 +2023,23 @@ function HomeContent() {
           message.id === currentMessageId
             ? {
                 ...message,
-                content: '抱歉，分析时遇到了一点小问题，已为你退还苹果🍎，请稍后再试。',
-                streamState: createMessageStreamState('feature', 'error', '生成失败'),
+                content: BUBU_EMPTY_RESPONSE.featureError,
+                streamState: createMessageStreamState('feature', 'error'),
+                suggestedFollowUps: [],
+                followUpStatus: 'ready',
               }
             : message
         ))
       } else {
         const errorMessage: Message = {
-          id: (Date.now() + 2).toString(),
+          id: createBubuMessageId('assistant'),
           role: 'assistant',
-          content: '抱歉，分析时遇到了一点小问题，已为你退还苹果🍎，请稍后再试。',
+          content: BUBU_EMPTY_RESPONSE.featureError,
           createdAt: new Date(),
           mode: activeChatMode,
-          streamState: createMessageStreamState('feature', 'error', '生成失败'),
+          streamState: createMessageStreamState('feature', 'error'),
+          suggestedFollowUps: [],
+          followUpStatus: 'ready',
         }
         setMessages(prev => [...prev, errorMessage])
       }
@@ -1907,7 +2056,7 @@ function HomeContent() {
       streamHadOutputRef.current = false
       if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
     }
-  }, [user, isLoading, isAnalyzing, currentSessionId, ensureSession, saveMessage, supabase, isUltraMode, fetchQuota, activeChatMode, agentComplexity, setStreamingMessageId])
+  }, [user, isLoading, isAnalyzing, currentSessionId, ensureSession, saveMessage, supabase, isUltraMode, fetchQuota, activeChatMode, agentComplexity, setStreamingMessageId, requestFollowUpSuggestions, messages])
 
   // Helper used by chat-message follow-up buttons & launcher button.
   const fillAndSubmit = useCallback((text: string) => {
@@ -2017,9 +2166,9 @@ function HomeContent() {
       setAgentBaziInitialData(undefined);
       setShowBaziDialog(false);
       const infoMessage: Message = {
-        id: Date.now().toString(),
+        id: createBubuMessageId('assistant'),
         role: 'assistant',
-        content: '八字人物已新增。需要分析时，请在人物管理或 Agent 上下文里选择这个人物，我再结合对应命盘继续看。',
+        content: '小象已经把这个人物收进资料里啦。需要分析时，在人物管理或 Agent 上下文里选 TA，我就能结合命盘继续看。',
         createdAt: new Date(),
         mode: activeChatMode,
       };
@@ -2117,12 +2266,22 @@ function HomeContent() {
       if (nextAgentComplexity) {
         setAgentComplexity(nextAgentComplexity)
       }
+      const structuredChoice = request.fields
+        .filter(field => field.inputType === 'choice' && !field.multiple)
+        .map(field => ({
+          field,
+          option: agentInputSelectedOption(field, values[field.name]),
+        }))
+        .find(item => item.option?.params && typeof item.option.params === 'object')
       const confirmationAction = agentInputValueToText(values.confirmationAction)
       if (confirmationAction) {
         const actionField = request.fields.find(field => field.name === 'confirmationAction')
         const selectedOption = actionField?.options?.find(option => String(option.value) === confirmationAction)
         const requestReportPreference = nextReportPreference || selectedOption?.reportPreference || null
-        const requestAgentComplexity = nextAgentComplexity || selectedOption?.complexity || null
+        const requestAgentComplexity = nextAgentComplexity || agentComplexityFromAgentValue(selectedOption?.complexity ?? null) || null
+        if (requestAgentComplexity) {
+          setAgentComplexity(requestAgentComplexity)
+        }
         if (!selectedOption && actionField?.allowCustom) {
           const nextPendingConfirmation = agentPendingConfirmation
             ? {
@@ -2152,17 +2311,11 @@ function HomeContent() {
         const selectedParams = selectedOption?.params && typeof selectedOption.params === 'object'
           ? selectedOption.params
           : null
-        const selectedRange = selectedParams?.start && selectedParams?.end
-          ? {
-              id: `confirm-${selectedParams.start}-${selectedParams.end}-${confirmationAction}`,
-              label: selectedOption?.label || '已选时间范围',
-              start: String(selectedParams.start),
-              end: String(selectedParams.end),
-            }
-          : null
+        const selectedRange = selectedParamsToTimeRange(selectedParams, selectedOption?.label || '已选时间范围')
         const nextPendingConfirmation = selectedParams && agentPendingConfirmation
           ? {
               ...agentPendingConfirmation,
+              ...(selectedParams.draftSlots ? { draftSlots: selectedParams.draftSlots } : {}),
               params: selectedParams,
               resumeIntent: selectedOption?.resumeIntent || request.resumeIntent || agentPendingConfirmation.resumeIntent,
               executionProfile: {
@@ -2202,6 +2355,30 @@ function HomeContent() {
         throw new Error('请补全自定义开始日期和结束日期后再继续。')
       }
 
+      const selectedOption = structuredChoice?.option || null
+      const selectedParams = selectedOption?.params && typeof selectedOption.params === 'object'
+        ? selectedOption.params
+        : null
+      const selectedRange = selectedParamsToTimeRange(selectedParams, selectedOption?.label || '已选时间范围')
+      const requestReportPreference = nextReportPreference || selectedOption?.reportPreference || null
+      const requestAgentComplexity = nextAgentComplexity || agentComplexityFromAgentValue(selectedOption?.complexity ?? null) || null
+      if (requestAgentComplexity) {
+        setAgentComplexity(requestAgentComplexity)
+      }
+      const nextPendingConfirmation = selectedParams && agentPendingConfirmation
+        ? {
+            ...agentPendingConfirmation,
+            ...(selectedParams.draftSlots ? { draftSlots: selectedParams.draftSlots } : {}),
+            params: selectedParams,
+            resumeIntent: selectedOption?.resumeIntent || request.resumeIntent || agentPendingConfirmation.resumeIntent,
+            executionProfile: {
+              ...(agentPendingConfirmation.executionProfile || {}),
+              ...(requestReportPreference ? { reportPreference: requestReportPreference } : {}),
+              ...(requestAgentComplexity ? { complexity: requestAgentComplexity } : {}),
+            },
+          }
+        : agentPendingConfirmation
+
       const filled = request.fields
         .map(field => `${field.label}：${agentInputValueToDisplay(field, values[field.name])}`)
         .filter(line => !line.endsWith('：'))
@@ -2209,11 +2386,13 @@ function HomeContent() {
       const event = {
         preventDefault: () => {},
         __contentOverride: `${request.resumeIntent || '请继续刚才的问题'}\n${filled}`,
-        ...(hasReportStyleField ? { __agentReportPreferenceOverride: nextReportPreference } : {}),
-        ...(hasComplexityField ? { __agentComplexityOverride: nextAgentComplexity } : {}),
-        ...(inlineTimeRange ? { __timeRangesOverride: [inlineTimeRange] } : {}),
+        ...(selectedParams ? { __pendingConfirmationOverride: nextPendingConfirmation } : {}),
+        ...(requestReportPreference ? { __agentReportPreferenceOverride: requestReportPreference } : {}),
+        ...(requestAgentComplexity ? { __agentComplexityOverride: requestAgentComplexity } : {}),
+        ...(selectedRange || inlineTimeRange ? { __timeRangesOverride: [selectedRange || inlineTimeRange].filter(Boolean) as AgentTimeRange[] } : {}),
       } as React.FormEvent & {
         __contentOverride: string
+        __pendingConfirmationOverride?: AgentPendingConfirmation | null
         __agentReportPreferenceOverride?: AgentReportPreference | null
         __agentComplexityOverride?: AgentComplexityMode | null
         __timeRangesOverride?: AgentTimeRange[]

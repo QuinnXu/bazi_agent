@@ -14,6 +14,12 @@ import { runAgentAnalysisStream } from '@/lib/agent-analysis-runner'
 import { extractAgentCorrectionWithLLM } from '@/lib/agent-correction-extractor'
 import { buildCalendarContext } from '@/lib/agent-prompt-builder'
 import {
+  applyAgentToolDecisionToSlots,
+  selectAgentToolWithLLM,
+  type AgentToolDecision,
+  type AgentToolPlanningInput,
+} from '@/lib/agent-tools'
+import {
   applyPendingAnswer,
   planNextQuestion,
 } from '@/lib/agent-question-planner'
@@ -122,6 +128,7 @@ export interface AgentRuntimeDeps {
     input: {
       userId: string
       request: AgentAnalysisRequest
+      complexity?: AgentComplexityMode | null
     },
     opts: { signal?: AbortSignal },
   ) => Promise<ReadableStream | string>
@@ -134,6 +141,10 @@ export interface AgentRuntimeDeps {
     },
     opts: { signal?: AbortSignal },
   ) => Promise<AgentWorkflowCorrection | null>
+  selectTool?: (
+    input: AgentToolPlanningInput,
+    opts: { signal?: AbortSignal },
+  ) => Promise<AgentToolDecision | null>
 }
 
 function truncateText(text: string | null | undefined, max: number): string {
@@ -290,10 +301,21 @@ async function openDirectChatStream(
       useUltraMode: false,
       participants: contextProfiles(input),
       featureContext: input.featureContext,
+      complexity: effectiveAgentComplexity(input),
     },
     { signal },
   )
   return stream
+}
+
+function effectiveAgentComplexity(input: AgentChatInput): AgentComplexityMode {
+  return normalizeAgentComplexityMode(
+    input.pendingConfirmation?.executionProfile?.complexity || input.complexity,
+  )
+}
+
+function effectiveReportPreference(input: AgentChatInput): AgentReportPreference | null {
+  return input.reportPreference || input.pendingConfirmation?.executionProfile?.reportPreference || null
 }
 
 function reportPreferenceToDepth(
@@ -311,7 +333,7 @@ function finalizeDepth(
   input: AgentChatInput,
 ): AgentAnalysisSlots {
   if (slots.outputDepth) return slots
-  const depth = reportPreferenceToDepth(input.reportPreference || input.pendingConfirmation?.executionProfile?.reportPreference)
+  const depth = reportPreferenceToDepth(effectiveReportPreference(input))
   if (!depth) return slots
   return {
     ...slots,
@@ -372,7 +394,8 @@ function buildAnalysisRequest(
     ? slots.outputDepth
     : 'balanced') as Exclude<AgentOutputDepth, 'chat'>
   const calendar = buildCalendarContext(slots)
-  const customInstruction = normalizeAgentReportPreference(input.reportPreference)?.customInstruction || null
+  const preference = effectiveReportPreference(input)
+  const customInstruction = normalizeAgentReportPreference(preference)?.customInstruction || null
   return {
     slots,
     calendar,
@@ -381,7 +404,7 @@ function buildAnalysisRequest(
     conversationSummary: input.sessionSummary || input.featureContext?.summary || null,
     promptStyleHint: customInstruction
       ? customInstruction
-      : `当前报告风格：${getAgentReportPreferenceLabel(input.reportPreference)}`,
+      : `当前报告风格：${getAgentReportPreferenceLabel(preference)}`,
   }
 }
 
@@ -392,13 +415,13 @@ async function openAnalysisStream(
 ): Promise<ReadableStream> {
   if (deps.runAnalysisStream) {
     const result = await deps.runAnalysisStream(
-      { userId: input.userId, request },
+      { userId: input.userId, request, complexity: effectiveAgentComplexity(input) },
       { signal: input.signal },
     )
     return typeof result === 'string' ? textToStream(result, { dripDelayMs: 0 }) : result
   }
   const result = await runAgentAnalysisStream(
-    { userId: input.userId, request },
+    { userId: input.userId, request, complexity: effectiveAgentComplexity(input) },
     { signal: input.signal },
   )
   return result.stream
@@ -442,12 +465,36 @@ async function maybeExtractLiveCorrection(
   })
 }
 
+async function maybeSelectAgentTool(
+  input: AgentChatInput,
+  deps: AgentRuntimeDeps,
+  latest: string,
+): Promise<AgentToolDecision | null> {
+  if (input.pendingConfirmation) return null
+  if (!deps.selectTool && !process.env.DEEPSEEK_API_KEY) return null
+  const planningInput: AgentToolPlanningInput = {
+    latestText: latest,
+    messages: input.messages,
+    pendingConfirmation: input.pendingConfirmation,
+    selectedProfile: input.selectedProfile,
+    participants: input.participants,
+    timeRanges: input.timeRanges,
+    sessionSummary: input.sessionSummary || null,
+    featureContext: input.featureContext,
+    baziAnalysisResult: input.baziAnalysisResult,
+  }
+  if (deps.selectTool) {
+    return deps.selectTool(planningInput, { signal: input.signal })
+  }
+  return selectAgentToolWithLLM(planningInput, { signal: input.signal })
+}
+
 export async function* runAgentChatEvents(
   input: AgentChatInput,
   deps: AgentRuntimeDeps = {},
 ): AsyncGenerator<AgentStreamEvent> {
   const startedAt = Date.now()
-  const complexity = normalizeAgentComplexityMode(input.complexity)
+  const complexity = effectiveAgentComplexity(input)
   const trace: AgentTraceEvent[] = []
   const latest = latestUserText(input.messages)
 
@@ -474,32 +521,60 @@ export async function* runAgentChatEvents(
       step: 1,
       phase: 'final',
       status: 'running',
-      title: '快速回复',
+      title: '小象先接住这一句',
     })
     yield* streamTextEvents(fastAnswer)
     yield progressEvent(startedAt, {
       step: 1,
       phase: 'final',
       status: 'completed',
-      title: '已快速回复',
+      title: '小象短答递上啦',
     })
     yield { type: 'done', trace }
     return
   }
 
-  if (shouldDirectChat(input, latest)) {
+  let toolDecision: AgentToolDecision | null = null
+  if (!input.pendingConfirmation && (deps.selectTool || process.env.DEEPSEEK_API_KEY)) {
+    yield progressEvent(startedAt, {
+      step: 1,
+      phase: 'planner',
+      status: 'running',
+      title: '小象在挑工具',
+      detail: '挑一把顺手的小工具',
+    })
+    toolDecision = await maybeSelectAgentTool(input, deps, latest)
+    if (toolDecision) {
+      yield traceEvent(trace, {
+        step: 1,
+        action: `tool_call:${toolDecision.name}`,
+        ok: true,
+        detail: JSON.stringify(toolDecision.arguments),
+        elapsedMs: Date.now() - startedAt,
+      })
+    }
+    yield progressEvent(startedAt, {
+      step: 1,
+      phase: 'planner',
+      status: 'completed',
+      title: toolDecision ? '小象挑好工具啦' : '小象按规则排好路',
+      detail: toolDecision?.name,
+    })
+  }
+
+  if (toolDecision?.name === 'agent_direct_chat' || (!toolDecision && shouldDirectChat(input, latest))) {
     yield traceEvent(trace, {
       step: 1,
       action: 'direct_chat',
       ok: true,
-      detail: 'lightweight_chat',
+      detail: toolDecision ? `tool:${toolDecision.name}` : 'lightweight_chat',
       elapsedMs: Date.now() - startedAt,
     })
     yield progressEvent(startedAt, {
       step: 1,
       phase: 'final',
       status: 'running',
-      title: '直接回复',
+      title: '小象直接开讲',
     })
     if (input.pendingConfirmation) {
       yield* streamTextEvents('刚才那一步分析我先帮你放在旁边，不会丢。我们先接住你现在这句。\n\n')
@@ -510,7 +585,7 @@ export async function* runAgentChatEvents(
       step: 1,
       phase: 'final',
       status: 'completed',
-      title: '已直接回复',
+      title: '小象讲完啦',
     })
     yield { type: 'done', trace, pendingConfirmation: input.pendingConfirmation || null }
     return
@@ -520,18 +595,24 @@ export async function* runAgentChatEvents(
     step: 1,
     phase: 'planner',
     status: 'running',
-    title: '抽取问题要素',
-    detail: '人物、时间、事宜、补充信息',
+    title: '小象在捡关键信息',
+    detail: '人物、时间、事宜，一颗颗摆好',
   })
 
   const liveCorrection = await maybeExtractLiveCorrection(input, deps, latest)
   const pendingSlots = applyPendingAnswer(input.pendingConfirmation, latest, liveCorrection)
   const sourceText = input.pendingConfirmation?.sourceIntent || latest
-  const initialSlots = pendingSlots || buildInitialSlots({
+  const baseSlots = pendingSlots || buildInitialSlots({
     messages: input.messages,
     timeRanges: input.timeRanges,
     sessionSummary: input.sessionSummary || input.featureContext?.summary || null,
   })
+  const initialSlots = !pendingSlots && toolDecision
+    ? applyAgentToolDecisionToSlots(baseSlots, toolDecision, {
+        latestText: sourceText,
+        timeRanges: input.timeRanges,
+      })
+    : baseSlots
   const resolved = finalizeDepth(
     resolveSlots({
       slots: initialSlots,
@@ -553,6 +634,7 @@ export async function* runAgentChatEvents(
       matter: resolved.matter?.category || null,
       focus: resolved.matter?.focus || [],
       depth: resolved.outputDepth || null,
+      tool: toolDecision?.name || null,
     }),
     elapsedMs: Date.now() - startedAt,
   })
@@ -560,7 +642,7 @@ export async function* runAgentChatEvents(
     step: 1,
     phase: 'planner',
     status: 'completed',
-    title: '已抽取问题要素',
+    title: '关键信息捡好啦',
   })
 
   if (resolved.matter?.category === 'avatar') {
@@ -575,14 +657,14 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'running',
-      title: '提示补充图片',
+      title: '小象想先看看图',
     })
     yield* streamTextEvents(content)
     yield progressEvent(startedAt, {
       step: 2,
       phase: 'final',
       status: 'completed',
-      title: '已提示补充图片',
+      title: '图片提醒递上啦',
     })
     yield { type: 'done', trace }
     return
@@ -608,7 +690,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'completed',
-      title: '已请求用户选择',
+      title: '小象等你选一下',
     })
     yield {
       type: 'done',
@@ -632,8 +714,8 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'running',
-      title: '生成卜卜象分析',
-      detail: `深度：${request.depth}`,
+      title: '小象开始认真分析',
+      detail: `小象思考深度：${request.depth}`,
     })
     const stream = await openAnalysisStream(input, deps, request)
     const reader = stream.getReader()
@@ -655,7 +737,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'completed',
-      title: '已生成卜卜象分析',
+      title: '小象分析完成啦',
     })
     yield {
       type: 'done',
@@ -677,7 +759,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'failed',
-      title: '分析生成失败',
+      title: '小象分析卡住啦',
       detail,
     })
     yield { type: 'error', message: detail }

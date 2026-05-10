@@ -110,8 +110,8 @@ export function FeatureLauncherButton({
   const selectedSummary = selected
     ? selected.profile_name
     : profiles.length === 0
-    ? '暂无人物'
-    : '未选择'
+    ? '人物册空空'
+    : '还没选'
 
   const handlePickProfile = (row: BaziProfileRow | null) => {
     if (!onSelectProfile) return
@@ -156,7 +156,7 @@ export function FeatureLauncherButton({
               <>
                 <div className="px-3 pt-2.5 pb-1.5 flex items-center justify-between border-b border-border/40">
                   <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                    当前命主
+                    小象当前看的命主
                   </p>
                   <span className="text-[11px] text-foreground/60 truncate max-w-[8rem]">
                     {selectedSummary}
@@ -165,7 +165,7 @@ export function FeatureLauncherButton({
                 <div className="py-1.5 max-h-44 overflow-y-auto">
                   {profiles.length === 0 ? (
                     <p className="px-3 py-2 text-xs text-muted-foreground/80 text-center">
-                      还没有命主，先添加一位吧~
+                      人物册还是空的，先给小象添加一位吧~
                     </p>
                   ) : (
                     <>
@@ -181,7 +181,7 @@ export function FeatureLauncherButton({
                         <div className="w-7 h-7 rounded-md bg-muted/60 flex items-center justify-center flex-shrink-0">
                           <User className="w-3.5 h-3.5" />
                         </div>
-                        <span className="text-sm flex-1 truncate">不选择</span>
+                        <span className="text-sm flex-1 truncate">先不选</span>
                         {selectedProfileId === null && (
                           <Check className="w-3.5 h-3.5 text-primary" />
                         )}
@@ -241,7 +241,7 @@ export function FeatureLauncherButton({
                     className="w-full px-3 py-2 flex items-center gap-2 text-xs text-primary hover:bg-muted/40 transition-colors border-t border-border/40"
                   >
                     <Settings2 className="w-3.5 h-3.5" />
-                    管理人物档案
+                    管理小象人物册
                   </button>
                 )}
               </>
@@ -250,7 +250,7 @@ export function FeatureLauncherButton({
             {/* ---------- Section 2: Structured features ---------- */}
             <div className="px-3 pt-2.5 pb-1.5 border-t border-border/40">
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                结构化功能
+                小象专项能力
               </p>
             </div>
             <div className="py-1.5">

@@ -11,6 +11,44 @@ import type {
 
 const SELF_NAMES = new Set(['我', '本人', '自己', '当前命主', '用户', '命主'])
 
+const WEALTH_INTENT_RE = /财运|财富|财库|偏财|正财|钱|收入|投资|副业|生意|赚钱|挣钱|搞钱|暴富|发财|发达|进账|现金流|资产|资源|财富跃迁|收入跃迁/
+const LIFETIME_CUE_RE = /此生|这一生|这辈子|一辈子|一生|终身|人生|几岁|哪步大运|什么大运|什么时候|何时|哪年|哪几年/
+const PARTNER_ARCHETYPE_RE = /和谁|跟谁|与谁|谁一起|哪类人|什么样的人|什么人|哪种人|合伙人|搭子|伙伴|贵人|合作对象|搭档/
+
+function uniqueFocus(focus: string[]): string[] {
+  return Array.from(new Set(focus.filter(Boolean)))
+}
+
+export function isWealthIntent(text: string): boolean {
+  return WEALTH_INTENT_RE.test(text)
+}
+
+export function isLifetimeWealthQuestion(text: string): boolean {
+  const compact = text.replace(/\s+/g, '')
+  if (!isWealthIntent(compact)) return false
+  if (LIFETIME_CUE_RE.test(compact)) return true
+  return /(?:暴富|发财|财富跃迁|收入跃迁).{0,8}(?:窗口|节点|阶段|机会)|(?:什么时候|何时|哪年|哪几年).{0,10}(?:暴富|发财|财运|财富|赚钱|搞钱)/.test(compact)
+}
+
+export function isSpecificCounterpartyQuestion(text: string): boolean {
+  if (/@[^\s@#]+/.test(text)) return true
+  return extractMentionedNames(text).length > 0
+}
+
+export function isPartnerArchetypeQuestion(text: string): boolean {
+  const compact = text.replace(/\s+/g, '')
+  if (!isWealthIntent(compact)) return false
+  if (!PARTNER_ARCHETYPE_RE.test(compact)) return false
+  if (/和谁|跟谁|与谁|谁一起|哪类人|什么样的人|什么人|哪种人|合伙人|搭子|伙伴|贵人|合作对象|搭档/.test(compact)) {
+    return true
+  }
+  return !isSpecificCounterpartyQuestion(text)
+}
+
+export function hasClearFocusIntent(text: string): boolean {
+  return inferFocus(text).length > 0 || isLifetimeWealthQuestion(text) || isPartnerArchetypeQuestion(text)
+}
+
 export type AgentPersonCorrection = Extract<AgentWorkflowCorrection, { scope: 'person' }>
 
 export function latestUserText(messages: AgentMessage[]): string {
@@ -350,6 +388,8 @@ export function parseAskedTime(
   selectedTimeRanges?: AgentTimeRangeContext[],
   category?: AgentMatterCategory | null,
 ): AgentAskedTime | null {
+  if (isLifetimeWealthQuestion(text) || isPartnerArchetypeQuestion(text)) return null
+
   const explicit = parseExplicitRange(text)
   if (explicit) return explicit
 
@@ -371,11 +411,12 @@ export function parseAskedTime(
 export function inferFocus(text: string): string[] {
   const focus: string[] = []
   if (/事业|工作|职业|项目|职场|创业|升职|跳槽/.test(text)) focus.push('事业')
-  if (/财|钱|收入|投资|副业|生意|财富/.test(text)) focus.push('财富')
+  if (isWealthIntent(text)) focus.push('财富')
+  if (isPartnerArchetypeQuestion(text) || /合作|合伙|搭档|伙伴|贵人|搭子/.test(text)) focus.push('合作对象')
   if (/感情|恋爱|婚姻|桃花|关系|伴侣|对象/.test(text)) focus.push('感情')
   if (/健康|身体|睡眠|压力|情绪|状态/.test(text)) focus.push('身心状态')
   if (/学业|学习|考试|成长/.test(text)) focus.push('学习成长')
-  return focus.length > 0 ? focus : []
+  return uniqueFocus(focus)
 }
 
 export function inferDepth(text: string): AgentOutputDepth | null {
@@ -388,7 +429,12 @@ export function inferDepth(text: string): AgentOutputDepth | null {
 
 function inferCategory(text: string): AgentMatterCategory {
   if (/头像|照片|形象|自拍|职业照/.test(text)) return 'avatar'
-  if (/合盘|关系|缘分|相处|伴侣|情侣|夫妻|合作|同事|朋友|我和|跟.*关系|与.*关系/.test(text)) return 'relationship'
+  if (isLifetimeWealthQuestion(text) || isPartnerArchetypeQuestion(text)) return 'lifepath'
+  if (
+    /合盘|关系|缘分|相处|伴侣|情侣|夫妻|合作|同事|朋友/.test(text) ||
+    /(?:我|本人|自己|当前命主)\s*(?:和|跟|与)/.test(text) ||
+    /(?:和|跟|与).{1,18}(?:适合|合适|匹配|般配|合不合|配不配|关系|缘分)/.test(text)
+  ) return 'relationship'
   if (/应事|事件|这件事|选择|决策|要不要|适不适合|能不能/.test(text)) return 'event'
   if (/人生脉络|人生总览|一生|大运|格局|命格|长期趋势/.test(text)) return 'lifepath'
   if (/运势|流年|财运|事业运|感情运|桃花|健康运|这段时间|最近|近期|接下来|未来|今年|怎么样|如何/.test(text)) return 'fortune'
@@ -405,13 +451,13 @@ export function isPlainChatRequest(text: string): boolean {
 
 export function hasAnalysisIntent(text: string): boolean {
   if (isPlainChatRequest(text)) return false
-  return /(分析|报告|推演|看看|看下|看一下|测|算|问|如何|怎么样|适合|运势|流年|合盘|关系|人生|大运|财运|事业|感情|健康|选择|应事)/.test(text)
+  return /(分析|报告|推演|看看|看下|看一下|测|算|问|如何|怎么样|什么时候|何时|几岁|哪年|哪几年|适合|合适|合不合适|配不配|般配|匹配|运势|流年|合盘|关系|人生|此生|一生|大运|财运|财富|暴富|发财|搞钱|赚钱|财库|事业|感情|健康|选择|应事)/.test(text)
 }
 
 function cleanName(raw: string): string | null {
   const name = raw
     .replace(/^[@#]/, '')
-    .replace(/(今年|本年|明年|后年|未来|接下来|最近|近期|这段时间|那段时间|关系|合盘|相处|合作|缘分|感情|怎么样|如何|好不好|适不适合|好吗|吗|呢|呀).*$/u, '')
+    .replace(/(今年|本年|明年|后年|未来|接下来|最近|近期|这段时间|那段时间|关系|合盘|相处|合作|缘分|感情|怎么样|如何|好不好|适不适合|合不合适|合不合|配不配|适合|合适|匹配|般配|要不要|能不能|可不可以|好吗|吗|呢|呀).*$/u, '')
     .replace(/[，,。！？!?.、：:；;（）()【】\[\]{}"'“”‘’\s]/g, '')
     .trim()
   if (!name || SELF_NAMES.has(name)) return null
@@ -482,7 +528,7 @@ export function extractMentionedNames(text: string): string[] {
   const names: string[] = []
   const patterns = [
     /(?:我|本人|自己|当前命主)\s*(?:和|跟|与)\s*([^，,。！？!?\s]{2,18})/gu,
-    /(?:和|跟|与)\s*([^，,。！？!?\s]{2,18})\s*(?:合盘|关系|相处|合作|缘分|感情|怎么样|如何)/gu,
+    /(?:和|跟|与)\s*([^，,。！？!?\s]{2,18})\s*(?:合盘|关系|相处|合作|缘分|感情|怎么样|如何|适合|合适|匹配|般配|合不合|配不配)/gu,
   ]
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -509,6 +555,13 @@ export function buildInitialSlots(input: {
       : null
   )
   const analysisIntent = hasAnalysisIntent(latest)
+  const supplements = input.sessionSummary ? [input.sessionSummary] : []
+  if (isLifetimeWealthQuestion(latest)) {
+    supplements.push('用户在问人生尺度的财富突破/财富窗口，应结合命盘底色与大运阶段分析，不需要再追问短期时间范围。')
+  }
+  if (isPartnerArchetypeQuestion(latest)) {
+    supplements.push('用户在问适合哪类合作对象/搞钱搭档，不是指定某个第二人合盘；请基于当前命主给出合作对象画像。')
+  }
   const matter: AgentMatter | null = analysisIntent
     ? {
         raw: latest,
@@ -530,7 +583,7 @@ export function buildInitialSlots(input: {
     mentionedNames: extractMentionedNames(latest),
     askedTime,
     matter,
-    supplements: input.sessionSummary ? [input.sessionSummary] : [],
+    supplements,
     outputDepth: depth,
     confidence: {
       people: 'none',

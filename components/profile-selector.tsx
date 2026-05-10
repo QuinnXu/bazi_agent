@@ -96,7 +96,7 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
       >
         <User className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         <span className="text-sm text-foreground flex-1 truncate text-left">
-          {profiles.length === 0 ? '添加人物' : (selectedProfile ? selectedProfile.profile_name : '选择人物')}
+          {profiles.length === 0 ? '加人物' : (selectedProfile ? selectedProfile.profile_name : '选人物')}
         </span>
         <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-300 ${showDropdown ? 'rotate-180' : ''}`} />
       </button>
@@ -111,7 +111,7 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
             <div className="py-2 max-h-64 overflow-y-auto">
               {profiles.length === 0 ? (
                 <div className="px-4 py-3 text-sm text-muted-foreground text-center">
-                  <p>暂无人物档案</p>
+                  <p>人物册还是空的</p>
                 </div>
               ) : (
                 <>
@@ -124,7 +124,7 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
                         : 'text-foreground hover:bg-muted/50'
                     }`}
                   >
-                    不选择人物
+                    先不选人物
                   </button>
                   {profiles.map((profile) => {
                     const fp = profile.bazi_result?.fourPillars
@@ -159,7 +159,7 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
                   className="w-full px-4 py-2 text-left text-sm text-primary hover:bg-muted/50 transition-colors flex items-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
-                  新建人物
+                  给小象加人物
                 </button>
               </div>
             </div>

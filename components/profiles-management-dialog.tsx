@@ -133,7 +133,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
 
   const handleNextToBazi = () => {
     if (!profileName.trim()) {
-      alert('请输入人物名称')
+      alert('小象还不知道这个人物叫什么喔')
       return
     }
     setDialogStep('bazi')
@@ -157,7 +157,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
   }
 
   const handleDeleteProfile = async (profileId: string) => {
-    if (!confirm('确定要删除这个人物吗？')) return
+    if (!confirm('真的要把这个人物从小象资料里移除吗？')) return
 
     try {
       // @ts-ignore - Database types will be generated after schema deployment
@@ -174,14 +174,14 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       }
     } catch (error) {
       console.error('删除人物失败:', error)
-      alert('删除失败，请稍后重试')
+      alert('小象暂时删不掉这个人物，稍后再试一次喔')
     }
   }
 
   const handleBaziSubmit = async (data: BaziData) => {
     if (!user) return
     if (!profileName.trim()) {
-      alert('请输入人物名称')
+      alert('小象还不知道这个人物叫什么喔')
       return
     }
 
@@ -206,7 +206,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       const result = await response.json()
       
       if (!response.ok) {
-        throw new Error(result.error || '八字计算失败')
+        throw new Error(result.error || '小象排盘没成功')
       }
 
       const profileData = {
@@ -235,7 +235,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       })
       const saveResult = await saveResponse.json().catch(() => ({}))
       if (!saveResponse.ok) {
-        throw new Error(saveResult?.details || saveResult?.error || '保存人物失败')
+        throw new Error(saveResult?.details || saveResult?.error || '小象暂时保存不了这个人物')
       }
 
       const savedProfile = saveResult.profile as BaziProfile | undefined
@@ -262,7 +262,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       }
     } catch (error) {
       console.error('保存人物失败:', error)
-      alert('保存失败，请稍后重试')
+      alert('小象暂时保存不了这个人物，稍后再试一次喔')
     }
   }
 
@@ -287,8 +287,8 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
             </button>
 
             <div className="mb-6">
-              <h2 className="text-2xl font-light text-foreground mb-2">人物管理</h2>
-              <p className="text-sm text-muted-foreground">管理您的八字人物档案</p>
+              <h2 className="text-2xl font-light text-foreground mb-2">小象人物册</h2>
+              <p className="text-sm text-muted-foreground">把常看的命主放在这里，小象会记得他们的命盘</p>
             </div>
 
             <button
@@ -296,17 +296,17 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
               className="mb-4 w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              添加新人物
+              添加一位给小象看
             </button>
 
             <div className="flex-1 overflow-y-auto space-y-2">
               {loading ? (
-                <div className="text-center py-8 text-muted-foreground">加载中...</div>
+                <div className="text-center py-8 text-muted-foreground">小象在翻人物册...</div>
               ) : profiles.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <User className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
-                  <p>暂无人物档案</p>
-                  <p className="text-xs mt-1">点击上方按钮添加</p>
+                  <p>人物册还是空的</p>
+                  <p className="text-xs mt-1">先添加一位，小象才好结合命盘看</p>
                 </div>
               ) : (
                 profiles.map((profile) => {
@@ -377,7 +377,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
                 className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
-                返回列表
+                回人物册
               </button>
               <button
                 onClick={onClose}
@@ -407,7 +407,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
                   className="px-3 py-1.5 rounded-lg bg-muted hover:bg-muted/80 text-xs text-muted-foreground hover:text-foreground transition-all duration-300 flex items-center gap-1.5 flex-shrink-0"
                 >
                   <Edit2 className="w-3 h-3" />
-                  修改信息
+                  修改资料
                 </button>
               </div>
 
@@ -459,13 +459,13 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
                       {viewingProfile.bazi_result_text}
                     </pre>
                     <p className="text-[10px] text-muted-foreground/60 mt-3">
-                      点击「修改信息」重新保存可更新为结构化展示
+                      点击「修改资料」重新保存，小象会整理成更清楚的展示
                     </p>
                   </div>
                 ) : (
                   <div className="text-center py-6 text-muted-foreground">
-                    <p className="text-sm">暂无八字数据</p>
-                    <p className="text-xs mt-1">点击「修改信息」添加出生信息</p>
+                    <p className="text-sm">小象还没有这份八字数据</p>
+                    <p className="text-xs mt-1">点击「修改资料」补出生信息</p>
                   </div>
                 )}
               </div>
@@ -491,7 +491,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
             </button>
 
             <h3 className="text-lg font-light text-foreground mb-4">
-              {editingProfile ? '编辑人物' : '添加新人物'}
+              {editingProfile ? '帮小象更新人物' : '给小象添加人物'}
             </h3>
             
             <div className="mb-4">
@@ -508,7 +508,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
                   }
                 }}
                 className="w-full px-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
-                placeholder="例如：张三、李四、本人等"
+                placeholder="例如：本人、伴侣、朋友的名字"
                 autoFocus
               />
             </div>
@@ -518,13 +518,13 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
                 onClick={viewingProfile ? handleBackToDetail : handleBackToList}
                 className="flex-1 px-4 py-2 rounded-lg bg-muted text-muted-foreground text-sm font-light hover:bg-muted/80 transition-all duration-300"
               >
-                取消
+                先不填
               </button>
               <button
                 onClick={handleNextToBazi}
                 className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
               >
-                下一步
+                继续补资料
               </button>
             </div>
           </div>

@@ -13,10 +13,12 @@ export interface AgentReportPreference {
 export interface AgentComplexityProfile {
   mode: AgentComplexityMode
   label: string
+  answerMaxTokens: number
   plannerMaxTokens: number
   maxSteps: number
   timeoutMs: number
   featureMaxTokens: number
+  analysisMaxTokens: number
   thinking: AgentThinkingMode
   reasoningEffort: AgentReasoningEffort
   plannerInstruction: string
@@ -24,12 +26,6 @@ export interface AgentComplexityProfile {
 }
 
 export const DEFAULT_AGENT_COMPLEXITY: AgentComplexityMode = 'instant'
-
-const REPORT_PREFERENCE_MAX_TOKENS: Partial<Record<AgentReportPreferenceMode, number>> = {
-  concise: 8_000,
-  balanced: 32_000,
-  detailed: 128_000,
-}
 
 const REPORT_PREFERENCE_INSTRUCTIONS: Record<AgentReportPreferenceMode, string> = {
   concise:
@@ -49,10 +45,12 @@ export const AGENT_COMPLEXITY_PROFILES: Record<
   instant: {
     mode: 'instant',
     label: 'Instant',
+    answerMaxTokens: 8_000,
     plannerMaxTokens: 1000,
     maxSteps: 2,
     timeoutMs: 120_000,
     featureMaxTokens: 8_000,
+    analysisMaxTokens: 8_000,
     thinking: 'disabled',
     reasoningEffort: 'none',
     plannerInstruction:
@@ -63,10 +61,12 @@ export const AGENT_COMPLEXITY_PROFILES: Record<
   thinking: {
     mode: 'thinking',
     label: 'Thinking',
+    answerMaxTokens: 64_000,
     plannerMaxTokens: 2200,
     maxSteps: 4,
     timeoutMs: 285_000,
     featureMaxTokens: 64_000,
+    analysisMaxTokens: 64_000,
     thinking: 'enabled',
     reasoningEffort: 'high',
     plannerInstruction:
@@ -142,14 +142,6 @@ export function getAgentReportPreferenceInstruction(
     return `${base}\n用户自定义要求：${normalized.customInstruction}`
   }
   return base
-}
-
-export function getAgentReportPreferenceMaxTokens(
-  preference?: AgentReportPreference | null,
-): number | undefined {
-  const normalized = normalizeAgentReportPreference(preference)
-  if (!normalized) return undefined
-  return REPORT_PREFERENCE_MAX_TOKENS[normalized.mode]
 }
 
 export function getAgentReportPreferenceLabel(

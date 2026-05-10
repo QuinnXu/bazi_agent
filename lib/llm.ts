@@ -2,10 +2,9 @@
  * Unified LLM router for the BuBuXiang chatbot.
  *
  * Routing rules (production):
- *   - Free / ordinary chat (no apple)   → DeepSeek V4 Flash
- *   - Agent planning / middle calls     → DeepSeek V4 Flash
+ *   - Main text answers / reports       → DeepSeek V4 Pro
+ *   - Agent planning / extractor calls  → DeepSeek V4 Flash
  *   - Apple-consuming avatar (multimodal) → google/gemini-3.1-flash-lite-preview via OpenRouter
- *   - Apple-consuming text/report       → DeepSeek V4 Pro
  *
  * Routing rules (local dev):
  *   - Same as production by default.
@@ -30,6 +29,7 @@ export type LlmTaskKind =
   | 'free'          // free chat (no apple)
   | 'agent_planner' // Agent planner / middle orchestration call
   | 'agent_extractor' // low-latency Agent correction/slot extractor
+  | 'follow_up_suggestions' // low-latency contextual follow-up suggestions
   | 'apple_first'   // reserved compatibility name; text now prefers DeepSeek
   | 'apple_avatar'  // subsequent apple call, avatar (needs multimodal)
   | 'apple_report'  // subsequent apple call, long report (fortune/hepan/lifepath)
@@ -64,12 +64,42 @@ export interface LlmConfig {
 
 export type LlmRequestReasoningEffort = 'none' | 'high' | 'max'
 
-interface LlmRequestOverrides {
+export interface LlmRequestOverrides {
   signal?: AbortSignal
   maxTokens?: number
   temperature?: number
   thinking?: 'enabled' | 'disabled'
   reasoningEffort?: LlmRequestReasoningEffort
+}
+
+export type LlmToolChoice =
+  | 'auto'
+  | 'none'
+  | 'required'
+  | { type: 'function'; function: { name: string } }
+
+export interface LlmToolDefinition {
+  type: 'function'
+  function: {
+    name: string
+    description?: string
+    parameters: Record<string, unknown>
+  }
+}
+
+export interface LlmToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
+export interface LlmToolRequestOptions extends LlmRequestOverrides {
+  tools: LlmToolDefinition[]
+  toolChoice?: LlmToolChoice
+  parallelToolCalls?: boolean
 }
 
 // ==================== Helpers ====================
@@ -180,9 +210,20 @@ export function selectLlmConfig(task: LlmTaskKind): LlmConfig {
     })
   }
 
-  // Free/ordinary chat: shallow, fast DeepSeek V4 Flash with no long reasoning.
+  if (task === 'follow_up_suggestions') {
+    return deepseekV4FlashConfig({
+      temperature: 0.4,
+      maxTokens: 500,
+      label: `${process.env.DEEPSEEK_V4_FLASH_MODEL || 'deepseek-v4-flash'} @ DeepSeek (follow-up-suggestions)`,
+    })
+  }
+
+  // Free/ordinary chat is still a main answer, so it uses DeepSeek V4 Pro.
   if (task === 'free') {
-    return deepseekV4FlashConfig()
+    const model = process.env.DEEPSEEK_V4_PRO_MODEL || 'deepseek-v4-pro'
+    return deepseekV4Config({
+      label: `${model} @ DeepSeek (free-main)`,
+    })
   }
 
   // Optional local proxy for explicit avatar/multimodal dev testing only.
@@ -229,12 +270,10 @@ export function selectLlmConfig(task: LlmTaskKind): LlmConfig {
     }
   }
 
-  // apple_report → deepseek-v4-pro with max output tokens (DeepSeek V4 output limit)
+  // apple_report → deepseek-v4-pro. Complexity mode supplies thinking/max token limits.
   if (task === 'apple_report') {
     const model = process.env.DEEPSEEK_V4_PRO_MODEL || 'deepseek-v4-pro'
     return deepseekV4Config({
-      reasoningEffort: 'max',
-      maxTokens: readPositiveInt('DEEPSEEK_V4_REPORT_MAX_TOKENS', 384000),
       label: `${model} @ DeepSeek (report)`,
     })
   }
@@ -292,6 +331,58 @@ function normalizeReasoningParams(body: any) {
   if (body.thinking?.type !== 'disabled') return
   delete body.reasoning_effort
   delete body.reasoning
+}
+
+function normalizeAssistantText(content: any): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map((part: any) => {
+        if (typeof part === 'string') return part
+        if (typeof part?.text === 'string') return part.text
+        return ''
+      })
+      .join('')
+  }
+  return ''
+}
+
+function normalizeToolArgumentText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value === undefined || value === null) return ''
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function normalizeToolCalls(message: any): LlmToolCall[] {
+  if (Array.isArray(message?.tool_calls)) {
+    return message.tool_calls
+      .filter((call: any) => call?.function?.name)
+      .map((call: any, index: number) => ({
+        id: String(call.id || `tool_call_${index}`),
+        type: 'function' as const,
+        function: {
+          name: String(call.function.name),
+          arguments: normalizeToolArgumentText(call.function.arguments),
+        },
+      }))
+  }
+
+  if (message?.function_call?.name) {
+    return [{
+      id: 'function_call_0',
+      type: 'function',
+      function: {
+        name: String(message.function_call.name),
+        arguments: normalizeToolArgumentText(message.function_call.arguments),
+      },
+    }]
+  }
+
+  return []
 }
 
 // ==================== Caller ====================
@@ -379,6 +470,109 @@ export async function callLLMText(
   return result.text
 }
 
+export async function callLLMWithTools(
+  messagesWithSystem: any[],
+  task: LlmTaskKind,
+  opts: LlmToolRequestOptions,
+): Promise<{
+  content: string
+  toolCalls: LlmToolCall[]
+  rawMessage: any
+  config: LlmConfig
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+}> {
+  const config = selectLlmConfig(task)
+  const inputTokens = estimateTokensForMessages(messagesWithSystem)
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${config.apiKey}`,
+  }
+  if (config.isOpenRouter) {
+    headers['HTTP-Referer'] =
+      process.env.NEXT_PUBLIC_SITE_URL || 'https://www.xuzheran.cc'
+    headers['X-Title'] = 'BuBuXiang AI Fortune Teller'
+  }
+
+  const body: any = {
+    model: config.model,
+    messages: messagesWithSystem,
+    temperature: config.temperature,
+    max_tokens: config.maxTokens,
+    stream: false,
+    tools: opts.tools,
+  }
+  if (opts.toolChoice !== undefined) body.tool_choice = opts.toolChoice
+  if (opts.parallelToolCalls !== undefined) body.parallel_tool_calls = opts.parallelToolCalls
+  if (config.isOpenRouter && config.providerHint) {
+    body.provider = {
+      order: config.providerHint.order,
+      allow_fallbacks: false,
+    }
+  }
+  applyReasoningParams(body, config)
+  applyRequestOverrides(body, opts)
+  normalizeReasoningParams(body)
+
+  console.log(`[LLM] Calling ${config.label} tools (task=${task})`)
+  console.log('[LLM] tool request', JSON.stringify({
+    task,
+    model: config.model,
+    stream: false,
+    temperature: body.temperature,
+    maxTokens: body.max_tokens,
+    thinking: body.thinking,
+    reasoningEffort: body.reasoning_effort || body.reasoning?.effort,
+    toolChoice: body.tool_choice || 'auto',
+    tools: opts.tools.map(tool => tool.function.name),
+    estimatedInputTokens: inputTokens,
+    messages: summarizeMessagesForLog(messagesWithSystem),
+  }))
+
+  const response = await fetch(config.endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: opts.signal,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error(`[LLM] ${config.label} tools error:`, errorText.slice(0, 500))
+    throw new Error(
+      `LLM upstream error: ${response.status} (model=${config.model})`,
+    )
+  }
+
+  const json = await response.json()
+  const message = json?.choices?.[0]?.message || {}
+  const content = normalizeAssistantText(message.content)
+  const toolCalls = normalizeToolCalls(message)
+  const toolCallText = toolCalls
+    .map(call => `${call.function.name} ${call.function.arguments}`)
+    .join('\n')
+  const outputTokens = estimateTokensForText(`${content}\n${toolCallText}`.trim())
+
+  console.log('[LLM] tool response', JSON.stringify({
+    model: config.model,
+    contentLength: content.length,
+    toolCalls: toolCalls.map(call => call.function.name),
+    preview: truncateForLog(content || toolCallText, 900),
+  }))
+
+  return {
+    content,
+    toolCalls,
+    rawMessage: message,
+    config,
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  }
+}
+
 export async function callLLMTextWithUsage(
   messagesWithSystem: any[],
   task: LlmTaskKind,
@@ -449,22 +643,8 @@ export async function callLLMTextWithUsage(
 
   const json = await response.json()
   const content = json?.choices?.[0]?.message?.content
-  let text = ''
-  if (typeof content === 'string') {
-    text = content
-    console.log('[LLM] text response', JSON.stringify({
-      model: config.model,
-      length: text.length,
-      preview: truncateForLog(text, 900),
-    }))
-  } else if (Array.isArray(content)) {
-    text = content
-      .map((part: any) => {
-        if (typeof part === 'string') return part
-        if (typeof part?.text === 'string') return part.text
-        return ''
-      })
-      .join('')
+  const text = normalizeAssistantText(content)
+  if (text) {
     console.log('[LLM] text response', JSON.stringify({
       model: config.model,
       length: text.length,
@@ -508,6 +688,7 @@ interface StreamOptions {
   semanticDelayMs?: number
   semanticMinChars?: number
   semanticMaxChars?: number
+  logLabel?: string
 }
 
 /**
@@ -538,6 +719,9 @@ export function createUnifiedStreamProcessor(
       let dripping = false
       let semanticQueue = ''
       let semanticFlushing = false
+      let visibleChars = 0
+      let lastFinishReason: string | null = null
+      let loggedCompletion = false
 
       if (!reader) {
         controller.close()
@@ -551,6 +735,17 @@ export function createUnifiedStreamProcessor(
         } catch {
           /* stream already closed */
         }
+      }
+
+      const logCompletion = (status: string) => {
+        if (loggedCompletion || !opts.logLabel) return
+        loggedCompletion = true
+        console.log('[LLM] stream completed', JSON.stringify({
+          label: opts.logLabel,
+          status,
+          visibleChars,
+          finishReason: lastFinishReason,
+        }))
       }
 
       const dripChars = async () => {
@@ -640,10 +835,13 @@ export function createUnifiedStreamProcessor(
         if (data === '[DONE]') return 'done'
         try {
           const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content || ''
+          const choice = parsed.choices?.[0]
+          if (choice?.finish_reason) lastFinishReason = String(choice.finish_reason)
+          const content = choice?.delta?.content || ''
           if (!content) return 'continue'
           const visible = sanitizeReplacementChars(stripThinking(content))
           if (!visible) return 'continue'
+          visibleChars += visible.length
           if (mode === 'semantic') {
             semanticQueue += visible
             await flushSemantic(false)
@@ -675,6 +873,7 @@ export function createUnifiedStreamProcessor(
             }
             if (drip) await drainQueue()
             if (mode === 'semantic') await flushSemantic(true)
+            logCompletion('reader_done')
             controller.close()
             break
           }
@@ -690,6 +889,7 @@ export function createUnifiedStreamProcessor(
             if (result === 'done') {
               if (drip) await drainQueue()
               if (mode === 'semantic') await flushSemantic(true)
+              logCompletion('done')
               controller.close()
               return
             }

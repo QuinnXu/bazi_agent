@@ -53,7 +53,7 @@ export function ChatSessionsDialog({
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     
-    if (!confirm('确定要删除这个会话吗？')) return
+    if (!confirm('真的要删掉这段和小象的对话吗？')) return
 
     try {
       // 删除会话的所有消息
@@ -97,8 +97,8 @@ export function ChatSessionsDialog({
         </button>
 
         <div className="mb-6">
-          <h2 className="text-2xl font-light text-foreground mb-2">聊天记录</h2>
-          <p className="text-sm text-muted-foreground">查看和管理您的聊天会话</p>
+          <h2 className="text-2xl font-light text-foreground mb-2">小象聊天足迹</h2>
+          <p className="text-sm text-muted-foreground">查看和管理你与卜卜象的对话</p>
         </div>
 
         <button
@@ -106,16 +106,16 @@ export function ChatSessionsDialog({
           className="mb-4 w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2"
         >
           <Plus className="w-4 h-4" />
-          新建会话
+          找小象开新聊
         </button>
 
         <div className="flex-1 overflow-y-auto space-y-2">
           {loading ? (
-            <div className="text-center py-8 text-muted-foreground">加载中...</div>
+            <div className="text-center py-8 text-muted-foreground">小象在翻记录...</div>
           ) : sessions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <MessageSquare className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
-              <p>暂无聊天记录</p>
+              <p>还没有和小象聊过</p>
             </div>
           ) : (
             sessions.map((session) => (

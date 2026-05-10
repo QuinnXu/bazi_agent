@@ -217,7 +217,7 @@ export function AppSidebar({
             </div>
             <div className="min-w-0">
               <p className="text-sm font-medium text-sidebar-foreground truncate">卜卜象</p>
-              <p className="hidden text-[11px] text-muted-foreground truncate sm:block md:block">AI 命理工作台</p>
+              <p className="hidden text-[11px] text-muted-foreground truncate sm:block md:block">小象命理小站</p>
             </div>
           </div>
           <button
@@ -234,7 +234,7 @@ export function AppSidebar({
           className="mt-1.5 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border bg-card/70 text-sm text-sidebar-foreground hover:bg-card transition-colors md:mt-2 md:h-9"
         >
           <Plus className="w-4 h-4" />
-          新建对话
+          找小象聊聊
         </button>
       </SidebarHeader>
 
@@ -280,7 +280,7 @@ export function AppSidebar({
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <Sparkles className="h-3.5 w-3.5" />
-                  <span>能力</span>
+                  <span>小象会什么</span>
                 </span>
                 <span className="flex items-center gap-1.5">
                   <span className="text-[10px] md:hidden">{abilitiesOpen ? '收起' : `${featureItems.length} 项`}</span>
@@ -327,11 +327,11 @@ export function AppSidebar({
           </SidebarGroupLabel>
           <SidebarGroupContent className="min-h-0 flex-1 overflow-y-auto pr-1">
             {!user ? (
-              <p className="px-3 py-6 text-xs text-muted-foreground text-center">登录后查看聊天记录</p>
+              <p className="px-3 py-6 text-xs text-muted-foreground text-center">登录后，小象才会记得你的足迹</p>
             ) : loadingSessions ? (
-              <p className="px-3 py-6 text-xs text-muted-foreground text-center">加载中...</p>
+              <p className="px-3 py-6 text-xs text-muted-foreground text-center">小象在翻记录...</p>
             ) : sessions.length === 0 ? (
-              <p className="px-3 py-6 text-xs text-muted-foreground text-center">暂无聊天记录</p>
+              <p className="px-3 py-6 text-xs text-muted-foreground text-center">还没有和小象聊过</p>
             ) : (
               <div className="space-y-3">
                 {groupedSessions.map(group => (
@@ -350,7 +350,7 @@ export function AppSidebar({
                               >
                                 <div className="min-w-0 flex-1">
                                   <p className="truncate text-xs font-medium text-destructive">
-                                    删除这个对话？
+                                    真的删掉这段对话？
                                   </p>
                                   <p className="truncate text-[10px] text-muted-foreground">
                                     {session.title || '新对话'}
@@ -427,7 +427,7 @@ export function AppSidebar({
             <div className="flex items-center gap-2">
               <span className="text-sm">🍎</span>
               <span className="text-xs font-light text-sidebar-foreground">
-                今日苹果 {appleQuota.remaining}/{appleQuota.dailyLimit}
+                今日苹果篮 {appleQuota.remaining}/{appleQuota.dailyLimit}
               </span>
             </div>
             {appleQuota.isPaid && (

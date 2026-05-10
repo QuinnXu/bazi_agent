@@ -3,6 +3,7 @@ import type {
   AgentParticipant,
   AgentResolvedPerson,
 } from '@/lib/agent-workflow-types'
+import { isPartnerArchetypeQuestion } from '@/lib/agent-slot-extractor'
 
 const SELF_NAMES = new Set(['我', '本人', '自己', '当前命主', '用户', '命主'])
 
@@ -111,6 +112,7 @@ export function resolveSlots(input: {
   const current = resolveCurrentProfile(input)
   const mentionedNames = input.slots.mentionedNames || []
   const category = slots.matter?.category || 'general'
+  const partnerArchetype = isPartnerArchetypeQuestion(slots.matter?.raw || input.latestText)
 
   const selfProfile = referencesSelf(input.latestText)
     ? findSelfProfile(profiles, current)
@@ -129,7 +131,7 @@ export function resolveSlots(input: {
     }
   }
 
-  if (category === 'relationship') {
+  if (category === 'relationship' && !partnerArchetype) {
     if (slots.people.length === 0 && current && hasBaziInfo(current)) {
       addUnique(slots.people, asResolved(current, 'current'))
     }
@@ -138,6 +140,11 @@ export function resolveSlots(input: {
         addUnique(slots.people, asResolved(profile, profile.id === current?.id ? 'current' : 'selected'))
         if (slots.people.length >= 2) break
       }
+    }
+  } else if (category === 'relationship' && partnerArchetype) {
+    if (slots.people.length === 0) {
+      const profile = current && hasBaziInfo(current) ? current : profiles[0]
+      if (profile) addUnique(slots.people, asResolved(profile, profile.id === current?.id ? 'current' : 'selected'))
     }
   } else if (category !== 'avatar') {
     if (slots.people.length === 0) {

@@ -13,7 +13,6 @@ import {
 } from '@/lib/feature-prompts'
 import {
   getAgentReportPreferenceInstruction,
-  getAgentReportPreferenceMaxTokens,
   getAgentComplexityProfile,
   getFeatureComplexityInstruction,
   normalizeAgentReportPreference,
@@ -283,13 +282,13 @@ export function validateFeatureParams(
     } else if (!p.participants.every(hasParticipant)) {
       missing.push('participants.name')
     } else if (!p.participants.every(hasBaziInfo)) {
-      missing.push('participants.baziText 或 pillars（请先使用 Bazi Analysis Results 创建人物）')
+      missing.push('participants.baziText 或 pillars（请先在人物册里让小象排盘）')
     }
     if (p.subtype === 'event' && !p.eventDesc) missing.push('eventDesc')
   } else if (kind === 'fortune') {
     const p = params as FortuneParams
     if (!hasParticipant(p.profile)) missing.push('profile')
-    else if (!hasBaziInfo(p.profile)) missing.push('profile.baziText 或 pillars（请先使用 Bazi Analysis Results 创建人物）')
+    else if (!hasBaziInfo(p.profile)) missing.push('profile.baziText 或 pillars（请先在人物册里让小象排盘）')
     if (!isDateString(p.start)) missing.push('start')
     if (!isDateString(p.end)) missing.push('end')
     if (!['day', 'month'].includes(p.granularity)) missing.push('granularity')
@@ -302,7 +301,7 @@ export function validateFeatureParams(
   } else if (kind === 'lifepath') {
     const p = params as LifePathParams
     if (!hasParticipant(p.profile)) missing.push('profile')
-    else if (!hasBaziInfo(p.profile)) missing.push('profile.baziText 或 pillars（请先使用 Bazi Analysis Results 创建人物）')
+    else if (!hasBaziInfo(p.profile)) missing.push('profile.baziText 或 pillars（请先在人物册里让小象排盘）')
   }
 
   return missing
@@ -485,14 +484,6 @@ async function prepareFeatureInvocation(
   }
 }
 
-function resolveFeatureMaxTokens(
-  complexityMaxTokens?: number,
-  reportPreference?: AgentReportPreference | null,
-): number | undefined {
-  const preferenceMaxTokens = getAgentReportPreferenceMaxTokens(reportPreference)
-  return preferenceMaxTokens ?? complexityMaxTokens
-}
-
 async function refundFeatureInvocation(invocation: FeatureInvocation) {
   try {
     await refundApples(invocation.userId, invocation.cost)
@@ -518,19 +509,12 @@ export async function runFeatureAnalysisStream(
   let model = ''
   let inputTokens = 0
   try {
-    const complexityProfile = invocation.complexity
-      ? getAgentComplexityProfile(invocation.complexity)
-      : null
+    const complexityProfile = getAgentComplexityProfile(invocation.complexity)
     const result = await callLLM(invocation.messagesWithSystem, invocation.task, {
       signal: opts.signal,
-      maxTokens:
-        opts.maxTokens ??
-        resolveFeatureMaxTokens(
-          complexityProfile?.featureMaxTokens,
-          invocation.reportPreference,
-        ),
-      thinking: opts.thinking ?? complexityProfile?.thinking,
-      reasoningEffort: opts.reasoningEffort ?? complexityProfile?.reasoningEffort,
+      maxTokens: opts.maxTokens ?? complexityProfile.featureMaxTokens,
+      thinking: opts.thinking ?? complexityProfile.thinking,
+      reasoningEffort: opts.reasoningEffort ?? complexityProfile.reasoningEffort,
     })
     upstreamResponse = result.response
     model = result.config.model
@@ -577,20 +561,15 @@ export async function runFeatureAnalysisText(
   const invocation = await prepareFeatureInvocation(input)
 
   try {
-    const complexityProfile = invocation.complexity
-      ? getAgentComplexityProfile(invocation.complexity)
-      : null
+    const complexityProfile = getAgentComplexityProfile(invocation.complexity)
     const result = await callLLMTextWithUsage(
       invocation.messagesWithSystem,
       invocation.task,
       {
         signal: opts.signal,
-        maxTokens: resolveFeatureMaxTokens(
-          complexityProfile?.featureMaxTokens,
-          invocation.reportPreference,
-        ),
-        thinking: complexityProfile?.thinking,
-        reasoningEffort: complexityProfile?.reasoningEffort,
+        maxTokens: complexityProfile.featureMaxTokens,
+        thinking: complexityProfile.thinking,
+        reasoningEffort: complexityProfile.reasoningEffort,
       },
     )
     const content = result.text

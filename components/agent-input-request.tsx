@@ -1,7 +1,8 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from "react"
-import { Check, ChevronDown, Loader2, MapPin, UserPlus } from "lucide-react"
+import Image from "next/image"
+import { Check, ChevronDown, Loader2, MapPin } from "lucide-react"
 import { OptimizedSelect } from "@/components/optimized-select"
 
 export type AgentInputFieldType =
@@ -93,14 +94,14 @@ function validateInputValues(
 
   fields.forEach(field => {
     if (field.required && !hasInputValue(values[field.name])) {
-      errors[field.name] = `请填写${field.label}`
+      errors[field.name] = `小象还缺：${field.label}`
     }
   })
 
   const hasTimePreset = fields.some(field => field.name === 'timeRangePreset')
   if (hasTimePreset && String(values.timeRangePreset ?? '') === 'custom') {
-    if (!hasInputValue(values.customStart)) errors.customStart = '请选择自定义开始日期'
-    if (!hasInputValue(values.customEnd)) errors.customEnd = '请选择自定义结束日期'
+    if (!hasInputValue(values.customStart)) errors.customStart = '小象还缺自定义开始日期'
+    if (!hasInputValue(values.customEnd)) errors.customEnd = '小象还缺自定义结束日期'
   }
 
   return errors
@@ -253,8 +254,8 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
       className="mt-4 rounded-xl border border-border/70 bg-background/70 p-4 shadow-sm"
     >
       <div className="flex items-start gap-3">
-        <div className="w-8 h-8 rounded-lg bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
-          <UserPlus className="w-4 h-4" />
+        <div className="w-8 h-8 rounded-lg border border-primary/20 bg-card flex items-center justify-center flex-shrink-0 overflow-hidden">
+          <Image src="/avatar.png" alt="卜卜象" width={32} height={32} className="h-full w-full object-contain" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">{request.title}</p>
@@ -284,7 +285,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
               value={String(values.profileName ?? '')}
               disabled={disabled || isSubmitting}
               required
-              placeholder="比如：小明、伴侣，或者写下你想看的人的名字 🐘"
+                  placeholder="比如：小明、伴侣，或者小象要看的那个人"
               onChange={event => updateValue('profileName', event.target.value)}
               className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
             />
@@ -532,7 +533,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
                   <input
                     type="text"
                     disabled={disabled || isSubmitting}
-                    placeholder={field.customPlaceholder || field.placeholder || '写下你的小想法，敬回车告诉卜卜象~'}
+                    placeholder={field.customPlaceholder || field.placeholder || '写下你的小想法，按回车告诉卜卜象~'}
                     onKeyDown={event => {
                       if (event.key !== 'Enter') return
                       event.preventDefault()
@@ -634,7 +635,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
         className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-        {request.submitLabel || '提交并继续'}
+        {request.submitLabel || '交给小象继续'}
       </button>
     </form>
   )

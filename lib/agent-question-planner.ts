@@ -9,7 +9,12 @@ import type {
   PendingAgentStep,
   PendingAgentStepKind,
 } from '@/lib/agent-workflow-types'
-import { extractPersonCorrection, parseAskedTime } from '@/lib/agent-slot-extractor'
+import {
+  extractPersonCorrection,
+  isLifetimeWealthQuestion,
+  isPartnerArchetypeQuestion,
+  parseAskedTime,
+} from '@/lib/agent-slot-extractor'
 
 const DEFAULT_BAZI_FORM_DATA: AgentBaziFormData = {
   profileName: '',
@@ -545,14 +550,19 @@ export interface PlannedAgentQuestion {
 
 export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string): PlannedAgentQuestion | null {
   const category = slots.matter?.category || 'general'
+  const intentText = slots.matter?.raw || latestText
+  const lifetimeWealth = isLifetimeWealthQuestion(intentText)
+  const partnerArchetype = isPartnerArchetypeQuestion(intentText)
+  const unresolvedNames = partnerArchetype ? [] : (slots.unresolvedNames || [])
   const needsPeople = slots.matter?.analysisMode === 'analysis' && category !== 'avatar'
-  if (needsPeople && (slots.unresolvedNames?.length || slots.people.length === 0 || (category === 'relationship' && slots.people.length < 2))) {
-    const profileName = slots.unresolvedNames?.[0] || (category === 'relationship' ? '对方' : '')
+  const needsConcreteCounterparty = category === 'relationship' && !partnerArchetype
+  if (needsPeople && (unresolvedNames.length || slots.people.length === 0 || (needsConcreteCounterparty && slots.people.length < 2))) {
+    const profileName = unresolvedNames[0] || (needsConcreteCounterparty ? '对方' : '')
     const content = profileName
-      ? `${profileName}还没有完整命盘，卜卜象不能凭空猜八字。先把这个人物补上，我再继续一步步帮你看。`
-      : '这个问题需要先有一个完整的八字人物。先新建命主资料，卜卜象就能继续帮你拆问题。'
+      ? `我先理解你说的对方是「${profileName}」。如果要看两个人适不适合，需要先有对方的八字资料；你也可以在卡片里把名字改准。`
+      : '我还没确定这次要看哪位命主。如果要做命盘分析，先补一个八字人物；如果只是想轻聊，也可以直接告诉我先简单聊。'
     const initialData = buildBaziFormDataFromText(latestText, profileName === '对方' ? '' : profileName)
-    const ui = buildBaziHumanInputRequest(content, initialData, `继续分析：${slots.matter?.raw || latestText}`)
+    const ui = buildBaziHumanInputRequest(content, initialData, `继续分析：${intentText}`)
     return {
       content,
       ui,
@@ -561,13 +571,13 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
         draftSlots: slots,
         field: ui.fields[0],
         resumeIntent: ui.resumeIntent || '补全八字人物后继续分析',
-        sourceIntent: slots.matter?.raw || latestText,
+        sourceIntent: intentText,
         taskKind: 'bazi_profile',
       },
     }
   }
 
-  if ((category === 'fortune' || category === 'event') && !slots.askedTime) {
+  if ((category === 'fortune' || category === 'event') && !slots.askedTime && !lifetimeWealth && !partnerArchetype) {
     const today = todayInShanghai()
     const todayText = formatDate(today)
     const content = '这个问题要先定一个大概的观察范围。你可以选一个卜卜象先看，也可以直接写你心里的「未来」是什么意思。'
@@ -635,13 +645,13 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
         draftSlots: slots,
         field,
         resumeIntent: content,
-        sourceIntent: slots.matter?.raw || latestText,
+        sourceIntent: intentText,
       },
     }
   }
 
-  if (slots.askedTime?.confidence === 'medium') {
-    const cue = extractTimeCue(slots.matter?.raw || latestText)
+  if (slots.askedTime?.confidence === 'medium' && !lifetimeWealth && !partnerArchetype) {
+    const cue = extractTimeCue(intentText)
     const content = `我先把这里的「${cue}」理解成「${readableTimeLabel(slots.askedTime)}」。你看贴近你的意思吗？`
     const field: AgentHumanInputField = {
       name: 'timeRangeChoice',
@@ -661,12 +671,12 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
         draftSlots: slots,
         field,
         resumeIntent: content,
-        sourceIntent: slots.matter?.raw || latestText,
+        sourceIntent: intentText,
       },
     }
   }
 
-  if (slots.matter?.analysisMode === 'analysis' && slots.matter.focus.length === 0 && category !== 'avatar') {
+  if (slots.matter?.analysisMode === 'analysis' && slots.matter.focus.length === 0 && category !== 'avatar' && !lifetimeWealth && !partnerArchetype) {
     const content = '这次分析可以先抓一两个重点，会更清楚。你想让卜卜象优先看哪些话题？'
     const field: AgentHumanInputField = {
       name: 'focusChoice',
@@ -687,7 +697,7 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
         draftSlots: slots,
         field,
         resumeIntent: content,
-        sourceIntent: slots.matter.raw || latestText,
+        sourceIntent: intentText,
       },
     }
   }
@@ -710,7 +720,7 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
         draftSlots: slots,
         field,
         resumeIntent: content,
-        sourceIntent: slots.matter.raw || latestText,
+        sourceIntent: intentText,
       },
     }
   }
@@ -761,6 +771,9 @@ export function applyPendingAnswer(
       }
     }
   }
+
+  const pendingDraftSlots = pending.params?.draftSlots as AgentAnalysisSlots | undefined
+  if (pendingDraftSlots) return pendingDraftSlots
 
   const selectedOptions = options.filter(option => {
     const label = String(option.label || '')

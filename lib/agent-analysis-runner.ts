@@ -3,6 +3,10 @@ import { callLLM, createUnifiedStreamProcessor, type LlmTaskKind } from '@/lib/l
 import { consumeApples, refundApples } from '@/lib/quota'
 import { createUsageTrackedStream } from '@/lib/token-usage'
 import { buildAgentAnalysisMessages } from '@/lib/agent-prompt-builder'
+import {
+  getAgentComplexityProfile,
+  type AgentComplexityMode,
+} from '@/lib/agent-complexity'
 import type { AgentAnalysisRequest, AgentOutputDepth } from '@/lib/agent-workflow-types'
 
 export interface AgentAnalysisStreamResult {
@@ -24,11 +28,24 @@ export function getAgentAnalysisMaxTokens(
   request: AgentAnalysisRequest,
 ): number {
   if (depth === 'concise') return 6_000
-  if (depth === 'detailed') {
-    const text = `${request.userQuestion}\n${request.slots.matter?.raw || ''}`
-    return /超长|很长|完整研究|研究报告|deep research/i.test(text) ? 128_000 : 64_000
-  }
+  if (depth === 'detailed') return 128_000
   return 24_000
+}
+
+export function getAgentAnalysisGenerationOptions(
+  request: AgentAnalysisRequest,
+  complexity?: AgentComplexityMode | null,
+): {
+  maxTokens: number
+  thinking: ReturnType<typeof getAgentComplexityProfile>['thinking']
+  reasoningEffort: ReturnType<typeof getAgentComplexityProfile>['reasoningEffort']
+} {
+  const complexityProfile = getAgentComplexityProfile(complexity)
+  return {
+    maxTokens: getAgentAnalysisMaxTokens(request.depth, request),
+    thinking: complexityProfile.thinking,
+    reasoningEffort: complexityProfile.reasoningEffort,
+  }
 }
 
 function createRefundableAgentStream(
@@ -76,6 +93,7 @@ export async function runAgentAnalysisStream(
   input: {
     userId: string
     request: AgentAnalysisRequest
+    complexity?: AgentComplexityMode | null
   },
   opts: {
     signal?: AbortSignal
@@ -96,13 +114,14 @@ export async function runAgentAnalysisStream(
 
   const messages = buildAgentAnalysisMessages(input.request)
   const task: LlmTaskKind = 'apple_report'
+  const generationOptions = getAgentAnalysisGenerationOptions(input.request, input.complexity)
   let llmResult: Awaited<ReturnType<typeof callLLM>>
   try {
     llmResult = await callLLM(messages, task, {
       signal: opts.signal,
-      maxTokens: getAgentAnalysisMaxTokens(depth, input.request),
-      thinking: depth === 'concise' ? 'disabled' : 'enabled',
-      reasoningEffort: depth === 'concise' ? 'none' : depth === 'detailed' ? 'max' : 'high',
+      maxTokens: generationOptions.maxTokens,
+      thinking: generationOptions.thinking,
+      reasoningEffort: generationOptions.reasoningEffort,
     })
   } catch (error) {
     await refundApples(input.userId, appleCost)
@@ -111,6 +130,7 @@ export async function runAgentAnalysisStream(
 
   const baseStream = createUnifiedStreamProcessor(llmResult.response, {
     chunking: 'immediate',
+    logLabel: `agent_analysis:${depth}`,
   })
   const refundableStream = createRefundableAgentStream(
     baseStream,

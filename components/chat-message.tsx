@@ -20,6 +20,11 @@ import {
 import type { FeatureKind } from "@/lib/feature-types"
 import { sanitizeReplacementChars } from "@/lib/text-sanitize"
 import {
+  BUBU_FOLLOW_UP_DEFAULTS,
+  BUBU_FOLLOW_UP_LOADING,
+  getBubuStreamLabel,
+} from "@/lib/bubu-copy"
+import {
   AgentInputRequest,
   type AgentInlineInputRequest,
   type AgentInputValues,
@@ -42,6 +47,8 @@ interface Message {
   streamState?: MessageStreamState
   agentUi?: AgentInlineInputRequest
   agentUiStatus?: "pending" | "submitted"
+  suggestedFollowUps?: string[]
+  followUpStatus?: "idle" | "loading" | "ready" | "error"
 }
 
 interface ChatMessageProps {
@@ -86,7 +93,7 @@ const FEATURE_META: Record<
   },
 }
 
-const DEFAULT_FOLLOW_UPS = ["继续展开上面的重点", "整理成行动清单", "下一步怎么做？"]
+const DEFAULT_FOLLOW_UPS = BUBU_FOLLOW_UP_DEFAULTS
 const FOLLOW_UP_LIMIT = 3
 const SMOOTH_REVEAL_MS = 16
 const SMOOTH_REVEAL_FAST_MS = 8
@@ -539,16 +546,29 @@ function ReportHeader({ kind }: { kind: FeatureKind }) {
 
 function FollowUp({
   suggestions,
+  status,
   onFollowUp,
 }: {
   suggestions: string[]
+  status?: Message["followUpStatus"]
   onFollowUp?: (text: string) => void
 }) {
   if (!onFollowUp) return null
-  const suggests = suggestions.length > 0 ? suggestions : DEFAULT_FOLLOW_UPS
+  if (status === "loading") {
+    return (
+      <div className="mt-4 pt-3 border-t border-border/50">
+        <p className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
+          <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+          {BUBU_FOLLOW_UP_LOADING}
+        </p>
+      </div>
+    )
+  }
+  if (suggestions.length === 0) return null
+  const suggests = suggestions
   return (
     <div className="mt-4 pt-3 border-t border-border/50">
-      <p className="text-[11px] text-muted-foreground/70 mb-2">想继续追问：</p>
+      <p className="text-[11px] text-muted-foreground/70 mb-2">卜卜象猜你还想问：</p>
       <div className="flex flex-wrap gap-2">
         {suggests.map(text => (
           <button
@@ -832,13 +852,13 @@ function AssistantActions({
 function streamLabel(message: Message, isStreaming: boolean, reportType?: FeatureKind): string {
   if (message.streamState?.label) return message.streamState.label
   if (isStreaming && !message.content) {
-    if (reportType) return "正在整理报告"
-    return "正在生成回复"
+    if (reportType) return getBubuStreamLabel("feature", "queued")
+    return getBubuStreamLabel("classic", "streaming")
   }
-  if (isStreaming) return "正在生成"
-  if (message.streamState?.status === "stopped") return "已停止"
-  if (message.streamState?.status === "error") return "生成失败"
-  return "已完成"
+  if (isStreaming) return getBubuStreamLabel(reportType ? "feature" : "classic", "streaming")
+  if (message.streamState?.status === "stopped") return getBubuStreamLabel(message.streamState.runKind, "stopped")
+  if (message.streamState?.status === "error") return getBubuStreamLabel(message.streamState.runKind, "error")
+  return getBubuStreamLabel(message.streamState?.runKind || (reportType ? "feature" : "classic"), "complete")
 }
 
 const ChatMessage = memo(function ChatMessage({
@@ -863,14 +883,28 @@ const ChatMessage = memo(function ChatMessage({
     [isUser, displayContent],
   )
   const followUpSuggestions = useMemo(
-    () => isStreaming
-      ? []
-      : buildContextualFollowUps({
-          content: displayContent,
-          previousUserContent,
-          reportType,
-        }),
-    [displayContent, isStreaming, previousUserContent, reportType],
+    () => {
+      if (isStreaming) return []
+      if (message.agentUi && message.agentUiStatus !== "submitted") return []
+      if (message.suggestedFollowUps?.length) return message.suggestedFollowUps
+      if (message.followUpStatus === "loading") return []
+      if (message.followUpStatus === "ready") return []
+      return buildContextualFollowUps({
+        content: displayContent,
+        previousUserContent,
+        reportType,
+      })
+    },
+    [
+      displayContent,
+      isStreaming,
+      message.agentUi,
+      message.agentUiStatus,
+      message.followUpStatus,
+      message.suggestedFollowUps,
+      previousUserContent,
+      reportType,
+    ],
   )
 
   const hasStoppedWithContent = message.streamState?.status === "stopped" && Boolean(displayContent.trim())
@@ -949,7 +983,11 @@ const ChatMessage = memo(function ChatMessage({
           />
 
           {!isStreaming && displayContent && (
-            <FollowUp suggestions={followUpSuggestions} onFollowUp={onFollowUp} />
+            <FollowUp
+              suggestions={followUpSuggestions}
+              status={message.followUpStatus}
+              onFollowUp={onFollowUp}
+            />
           )}
 
           {message.agentUi && onAgentUiSubmit && (

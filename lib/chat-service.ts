@@ -4,6 +4,10 @@ const { paipan: PaipanClass } = require('@/tool/paipan')
 
 import { consumeApples, getOrResetQuota } from '@/lib/quota'
 import {
+  getAgentComplexityProfile,
+  type AgentComplexityMode,
+} from '@/lib/agent-complexity'
+import {
   callLLM,
   createUnifiedStreamProcessor,
   pickLlmTask,
@@ -34,6 +38,7 @@ export interface ClassicChatInput {
   useUltraMode?: boolean
   participants?: ChatParticipant[]
   featureContext?: ChatFeatureContext
+  complexity?: AgentComplexityMode | null
 }
 
 export interface ClassicChatOptions {
@@ -194,10 +199,14 @@ export async function runClassicChatStream(
     preUsedToday,
     isAvatar: false,
   })
+  const complexityProfile = getAgentComplexityProfile(input.complexity)
 
   const messagesWithSystem = buildClassicMessages(input)
   const { response, config, inputTokens } = await callLLM(messagesWithSystem, task, {
     signal: opts.signal,
+    maxTokens: complexityProfile.answerMaxTokens,
+    thinking: complexityProfile.thinking,
+    reasoningEffort: complexityProfile.reasoningEffort,
   })
   const baseStream = createUnifiedStreamProcessor(response, {
     chunking: 'immediate',

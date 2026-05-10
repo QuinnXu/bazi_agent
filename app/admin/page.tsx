@@ -94,7 +94,7 @@ function modelDisplayName(model: string): string {
 
 function modelCategoryLabel(model: string): string {
   const m = model.toLowerCase()
-  if (m.includes('flash')) return 'DeepSeek · Flash'
+  if (m.includes('deepseek') && m.includes('flash')) return 'DeepSeek · Flash'
   if (m.includes('deepseek') && m.includes('pro')) return 'DeepSeek · Pro'
   if (m.includes('deepseek')) return 'DeepSeek'
   if (m.includes('gemini')) return 'Google · Gemini'

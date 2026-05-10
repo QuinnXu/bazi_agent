@@ -63,7 +63,7 @@ export function FortunePage({
   }, [start, end])
 
   const rangeError = useMemo(() => {
-    if (!start || !end) return '卜卜象需要明确的时间范围才能看清趋势哦 🐘'
+    if (!start || !end) return '小象还缺明确的时间范围，才能看清趋势哦'
     if (new Date(end) < new Date(start)) return '结束时间跑到开始时间前面去啦，稍微调整一下吧~'
     if (rangeDays > MAX_RANGE_DAYS) return `卜卜象的鼻子不够长，一次最多只能看约 ${MAX_RANGE_DAYS} 天的风景喔 🐘（当前 ${rangeDays} 天）`
     return null
@@ -114,7 +114,7 @@ export function FortunePage({
   return (
     <FeaturePageShell
       title="近期运势推演"
-      subtitle="逐日 / 逐月看清这段时间的能量起伏"
+      subtitle="小象帮你逐日 / 逐月看清这段时间的能量起伏"
       step={step}
       totalSteps={3}
       stepLabels={stepLabels}
@@ -131,12 +131,12 @@ export function FortunePage({
     >
       {step === 1 && (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">先选一位想推演的人物</p>
+          <p className="text-sm text-muted-foreground">先让小象看看哪位命主</p>
           <ProfilePicker
             selectedIds={profile?.id ? [profile.id] : []}
             onChange={list => setProfile(list[0] || null)}
             onOpenManager={onOpenProfilesManager}
-            emptyHint="先添加一位人物，才能推演运势"
+            emptyHint="先给小象添加一位人物，才能推演运势"
           />
         </div>
       )}
@@ -200,7 +200,7 @@ export function FortunePage({
               })}
             </div>
             <p className="text-[11px] text-muted-foreground/70 mt-2">
-              逐日适合 30 天内的精细分析；超过 30 天建议使用逐月概览。
+              30 天内小象可以逐日细看；超过 30 天建议让小象按月概览。
             </p>
           </div>
         </div>
@@ -276,7 +276,7 @@ export function FortunePage({
           </div>
 
           {focus.length === 0 && (
-            <p className="text-xs text-destructive">至少选择一个关注方向</p>
+            <p className="text-xs text-destructive">小象至少需要一个关注方向喔</p>
           )}
 
           <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed space-y-1">

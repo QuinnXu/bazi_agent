@@ -173,7 +173,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
     
     // 验证必填字段
     if (!baziData.year || !baziData.month || !baziData.day || !baziData.hour) {
-      alert('请填写完整的出生日期和时间信息');
+      alert('小象还缺完整的出生日期和时间喔');
       return;
     }
     
@@ -205,7 +205,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
           <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
             <Calendar className="w-4 h-4 text-primary-foreground" />
           </div>
-          <h2 className="text-xl font-light text-foreground">八字排盘</h2>
+          <h2 className="text-xl font-light text-foreground">给小象补八字资料</h2>
         </div>
 
         {/* 表单 */}
@@ -322,7 +322,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                 }`}
               >
                 <MapPin className="w-3 h-3" />
-                自定义经纬度
+                自己填经纬度
               </button>
             </div>
 
@@ -438,20 +438,20 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
               }}
               className="px-4 py-2 rounded-full bg-accent/20 text-accent text-sm font-light hover:bg-accent/30 transition-all duration-300"
             >
-              示例
+              小象示例
             </button>
             <button
               type="button"
               onClick={onClose}
               className="px-4 py-2 rounded-full bg-muted text-muted-foreground text-sm font-light hover:bg-muted/80 transition-all duration-300"
             >
-              取消
+              先不填
             </button>
             <button
               type="submit"
               className="px-4 py-2 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
             >
-              确认
+              交给小象
             </button>
           </div>
         </form>

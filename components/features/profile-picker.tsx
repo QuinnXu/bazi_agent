@@ -41,7 +41,7 @@ export function ProfilePicker({
   selectedIds,
   onChange,
   onOpenManager,
-  emptyHint = '还没有人物档案，先去添加一位吧',
+  emptyHint = '人物册还是空的，先给小象添加一位吧',
 }: ProfilePickerProps) {
   const [profiles, setProfiles] = useState<BaziProfileRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -110,7 +110,7 @@ export function ProfilePicker({
   if (!user) {
     return (
       <div className="rounded-lg border border-dashed border-border/60 p-6 text-center text-sm text-muted-foreground">
-        登录后才能选择人物
+        登录后，小象才能读取你的人物册
       </div>
     )
   }
@@ -119,7 +119,7 @@ export function ProfilePicker({
     <div className="space-y-2">
       {loading ? (
         <div className="rounded-xl bg-card/40 border border-border/40 p-4 text-center text-xs text-muted-foreground">
-          加载中…
+          小象在翻人物册…
         </div>
       ) : profiles.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/60 p-6 text-center space-y-3">
@@ -130,7 +130,7 @@ export function ProfilePicker({
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all"
           >
             <Plus className="w-4 h-4" />
-            添加人物
+            添加给小象看
           </button>
         </div>
       ) : (
@@ -175,7 +175,7 @@ export function ProfilePicker({
             className="w-full py-2.5 rounded-lg border border-dashed border-border/60 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all flex items-center justify-center gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
-            管理 / 新增人物档案
+            管理 / 新增小象人物册
           </button>
         </>
       )}

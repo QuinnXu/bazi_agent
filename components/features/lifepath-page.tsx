@@ -38,7 +38,7 @@ export function LifePathPage({
   return (
     <FeaturePageShell
       title="人生脉络与总体分析"
-      subtitle="从第一步大运到晚年，看清整段人生节奏"
+      subtitle="小象陪你从第一步大运看到晚年节奏"
       step={1}
       totalSteps={1}
       stepLabels={['选择人物']}
@@ -52,13 +52,13 @@ export function LifePathPage({
     >
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          选好人物，卜卜象就会带你从第一步大运一直走到晚年大运，逐段看趋势、关键节点与建议。
+          选好人物，小象就会从第一步大运一路看到晚年大运，逐段整理趋势、关键节点与建议。
         </p>
         <ProfilePicker
           selectedIds={profile?.id ? [profile.id] : []}
           onChange={list => setProfile(list[0] || null)}
           onOpenManager={onOpenProfilesManager}
-          emptyHint="先添加一位人物，才能解读人生脉络"
+          emptyHint="先给小象添加一位人物，才能解读人生脉络"
         />
       </div>
     </FeaturePageShell>

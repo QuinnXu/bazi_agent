@@ -107,7 +107,7 @@ export function HepanPage({
   return (
     <FeaturePageShell
       title="合盘 · 应事分析"
-      subtitle="看清两人或多人之间的缘分倾向与互动模式"
+      subtitle="小象帮你看清彼此的缘分倾向与互动模式"
       step={step}
       totalSteps={3}
       stepLabels={stepLabels}
@@ -124,7 +124,7 @@ export function HepanPage({
     >
       {step === 1 && (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">想做哪种合盘呢？</p>
+          <p className="text-sm text-muted-foreground">想让小象看哪种关系呢？</p>
           {SUBTYPE_OPTIONS.map(opt => {
             const Icon = opt.icon
             const active = subtype === opt.id
@@ -185,15 +185,15 @@ export function HepanPage({
             selectedIds={participants.map(p => p.id || '').filter(Boolean)}
             onChange={setParticipants}
             onOpenManager={onOpenProfilesManager}
-            emptyHint="先添加几位人物，才能进行合盘"
+            emptyHint="先给小象添加几位人物，才能进行合盘"
           />
           {participants.length >= minPeople ? (
             <p className="text-[11px] text-muted-foreground/70">
-              选好了就点下一步
+              选好啦，小象可以继续看
             </p>
           ) : (
             <p className="text-[11px] text-muted-foreground/70">
-              至少需要选择 {minPeople} 位人物
+              小象至少需要 {minPeople} 位人物
             </p>
           )}
         </div>
@@ -261,7 +261,7 @@ export function HepanPage({
           </div>
 
           <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
-            点击「开始分析」后，卜卜象会带着 {participants.length} 位人物的命盘来给你做合盘解读。
+            点击「让小象开看」后，卜卜象会带着 {participants.length} 位人物的命盘来给你做合盘解读。
           </div>
         </div>
       )}

@@ -57,7 +57,7 @@ export function FeaturePageShell({
               className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all disabled:opacity-40"
             >
               <ArrowLeft className="w-4 h-4" />
-              返回
+              回聊天
             </button>
 
             <div className="flex-1 text-center min-w-0">
@@ -126,7 +126,7 @@ export function FeaturePageShell({
               </span>
             ) : isLastStep && cost !== undefined ? (
               <span>
-                需消耗 <span className="text-primary">苹果 × {cost}</span>
+                小象会吃 <span className="text-primary">苹果 × {cost}</span>
               </span>
             ) : null}
           </div>
@@ -138,7 +138,7 @@ export function FeaturePageShell({
               className="flex h-9 items-center gap-2 rounded-lg bg-primary px-5 text-sm font-light text-primary-foreground hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              开始分析
+              让小象开看
             </button>
           ) : (
             <button

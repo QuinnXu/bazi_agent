@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import Image from 'next/image'
 import { X, Mail, Lock, ArrowLeft } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 
@@ -16,11 +17,11 @@ function authErrorMessage(err: { message?: string } | null): string {
   if (!err?.message) return '哎呀，网络好像打了个小盹，稍后再试一次喔 🐘'
   const msg = err.message.toLowerCase()
   if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('already been registered'))
-    return '这个邮筱已经是卜卜象的好朋友啊，直接登录吧 🐘'
+    return '这个邮箱已经是卜卜象的好朋友啦，直接登录吧 🐘'
   if (msg.includes('invalid login') || msg.includes('invalid_credentials'))
-    return '哎呀，密码好像有点小脘气，要不再试一次？ 🐾'
+    return '哎呀，密码好像有点小脾气，要不再试一次？ 🐾'
   if (msg.includes('email not confirmed'))
-    return '需要去邮筱找找卜卜象发给你的验证小信封哦 ✉️'
+    return '需要去邮箱找找卜卜象寄给你的验证小信封哦 ✉️'
   if (msg.includes('token has expired') || msg.includes('otp_expired'))
     return '验证码已经在风中走散啊，让卜卜象再发一个吧 🌬️'
   if (msg.includes('otp_disabled'))
@@ -83,7 +84,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
           // 注册成功 → 进入验证码输入步骤
           setMode('verify_otp')
           setResendCountdown(60)
-          setSuccessMessage(`验证码已发送到 ${email}`)
+          setSuccessMessage(`卜卜象已经把验证码寄到 ${email}`)
         }
       }
     } catch {
@@ -131,7 +132,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
     clearMessages()
     const token = otpDigits.join('')
     if (token.length !== 6) {
-      setError('请输入完整的 6 位验证码')
+      setError('小象还缺完整的 6 位验证码')
       return
     }
 
@@ -144,7 +145,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
         onClose()
       }
     } catch {
-      setError('验证失败，请稍后重试')
+      setError('小象没有核对成功，稍后再试一次喔')
     } finally {
       setLoading(false)
     }
@@ -167,12 +168,12 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
         setError(authErrorMessage(err))
       } else {
         setResendCountdown(60)
-        setSuccessMessage('验证码已重新发送，请查收邮箱')
+        setSuccessMessage('小象重新寄出验证码啦，请查收邮箱')
         setOtpDigits(['', '', '', '', '', ''])
         otpRefs.current[0]?.focus()
       }
     } catch {
-      setError('发送失败，请稍后重试')
+      setError('小象暂时没寄出去，稍后再试一次喔')
     } finally {
       setLoading(false)
     }
@@ -183,7 +184,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
     e.preventDefault()
     clearMessages()
     if (!email) {
-      setError('请输入邮箱地址')
+      setError('小象还需要你的邮箱地址')
       return
     }
     setLoading(true)
@@ -192,10 +193,10 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
       if (err) {
         setError(authErrorMessage(err))
       } else {
-        setSuccessMessage('重置密码邮件已发送，请查收邮箱并点击链接重置密码。')
+        setSuccessMessage('小象已经寄出重置密码邮件，请去邮箱点开链接。')
       }
     } catch {
-      setError('发送失败，请稍后重试')
+      setError('小象暂时没寄出去，稍后再试一次喔')
     } finally {
       setLoading(false)
     }
@@ -210,10 +211,10 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
 
   // ── 标题文案 ──
   const titles: Record<AuthMode, { title: string; subtitle: string }> = {
-    signin: { title: '登录', subtitle: '欢迎回来' },
-    signup: { title: '注册', subtitle: '创建您的账户' },
-    verify_otp: { title: '邮箱验证', subtitle: `验证码已发送到 ${email}` },
-    forgot_password: { title: '重置密码', subtitle: '输入注册邮箱以接收重置链接' },
+    signin: { title: '欢迎回来找小象', subtitle: '登录后，卜卜象会记得你的聊天和人物档案' },
+    signup: { title: '和小象打个招呼', subtitle: '创建账户后，就能保存你的命理小资料' },
+    verify_otp: { title: '拆开验证小信封', subtitle: `验证码已发送到 ${email}` },
+    forgot_password: { title: '让小象帮你找回密码', subtitle: '输入注册邮箱，小象会寄出重置链接' },
   }
 
   return (
@@ -240,13 +241,18 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
         )}
 
         {/* 标题 */}
-        <div className="mb-6">
-          <h2 className="text-2xl font-light text-foreground mb-2">
-            {titles[mode].title}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {titles[mode].subtitle}
-          </p>
+        <div className="mb-6 flex items-start gap-3 pr-8">
+          <span className="h-11 w-11 flex-shrink-0 overflow-hidden rounded-xl border border-primary/20 bg-card shadow-sm">
+            <Image src="/avatar.png" alt="卜卜象" width={44} height={44} className="h-full w-full object-contain" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-2xl font-light text-foreground mb-2">
+              {titles[mode].title}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {titles[mode].subtitle}
+            </p>
+          </div>
         </div>
 
         {/* ═══ 登录 / 注册 表单 ═══ */}
@@ -300,7 +306,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 disabled={loading}
                 className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
               >
-                {loading ? '处理中...' : mode === 'signin' ? '登录' : '注册'}
+                {loading ? '小象处理中...' : mode === 'signin' ? '登录找小象' : '加入小象小站'}
               </button>
             </form>
 
@@ -310,14 +316,14 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 onClick={mode === 'signin' ? goToSignUp : goToSignIn}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
-                {mode === 'signin' ? '还没有账户？立即注册' : '已有账户？立即登录'}
+                {mode === 'signin' ? '还没有账户？和小象打个招呼' : '已有账户？回到小象这里'}
               </button>
               {mode === 'signin' && (
                 <button
                   onClick={goToForgotPassword}
                   className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  忘记密码？
+                  忘记密码？让小象寄封信
                 </button>
               )}
             </div>
@@ -362,7 +368,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
               disabled={loading || otpDigits.some(d => d === '')}
               className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
             >
-              {loading ? '验证中...' : '验证'}
+              {loading ? '小象核对中...' : '交给小象验证'}
             </button>
 
             {/* 重发验证码 */}
@@ -373,8 +379,8 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {resendCountdown > 0
-                  ? `重新发送验证码 (${resendCountdown}s)`
-                  : '重新发送验证码'}
+                  ? `小象稍等 ${resendCountdown}s`
+                  : '让小象重寄验证码'}
               </button>
             </div>
           </div>
@@ -415,7 +421,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 disabled={loading}
                 className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
               >
-                {loading ? '发送中...' : '发送重置邮件'}
+                {loading ? '小象寄信中...' : '让小象寄重置邮件'}
               </button>
             </form>
 
@@ -424,7 +430,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 onClick={goToSignIn}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
-                返回登录
+                回到登录
               </button>
             </div>
           </>

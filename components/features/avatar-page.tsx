@@ -100,11 +100,11 @@ export function AvatarPage({
   const handleFile = async (file: File) => {
     setErrorMsg('')
     if (!ACCEPTED_TYPES.includes(file.type)) {
-      setErrorMsg('请上传 JPG / PNG / WEBP 格式的图片')
+      setErrorMsg('小象只能看 JPG / PNG / WEBP 格式的图片喔')
       return
     }
     if (file.size > MAX_FILE_SIZE) {
-      setErrorMsg('图片过大（>10MB），请压缩后再试')
+      setErrorMsg('图片有点太大啦（>10MB），压缩后再给小象看')
       return
     }
     setIsProcessing(true)
@@ -119,7 +119,7 @@ export function AvatarPage({
       setPreviewSizeKb(sizeKb)
     } catch (e) {
       console.error('[avatar] read file failed', e)
-      setErrorMsg('图片读取失败，请重试')
+      setErrorMsg('小象暂时没读到这张图，请重试')
     } finally {
       setIsProcessing(false)
     }
@@ -166,7 +166,7 @@ export function AvatarPage({
   return (
     <FeaturePageShell
       title="头像分析推荐"
-      subtitle="上传头像，结合气质与五行给出风格建议"
+      subtitle="小象看头像，再结合气质与五行给出风格建议"
       step={step}
       totalSteps={2}
       stepLabels={stepLabels}
@@ -179,13 +179,13 @@ export function AvatarPage({
       canSubmit={canSubmit}
       isLastStep={step === 2}
       loading={loading || isProcessing}
-      loadingText={isProcessing ? '正在处理图片…' : '小象正在认真看图…'}
+      loadingText={isProcessing ? '小象正在接住图片…' : '小象正在认真看图…'}
       cost={3}
     >
       {step === 1 && (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            支持 JPG / PNG / WEBP，最大 10MB。建议头像清晰、主体居中。
+            给小象一张 JPG / PNG / WEBP，最大 10MB。头像清晰、主体居中会更准。
           </p>
 
           {!imageDataUrl ? (
@@ -205,7 +205,7 @@ export function AvatarPage({
             >
               <ImagePlus className="w-12 h-12 text-muted-foreground/60 mx-auto mb-3" />
               <p className="text-sm text-foreground font-light">
-                点击或拖拽上传头像
+                点击或拖拽，把头像交给小象
               </p>
               <p className="text-[11px] text-muted-foreground/70 mt-1">
                 JPG / PNG / WEBP · ≤ 10MB
@@ -240,7 +240,7 @@ export function AvatarPage({
                   className="mt-3 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                 >
                   <Trash2 className="w-3 h-3" />
-                  重新上传
+                  换一张给小象
                 </button>
               </div>
             </div>
@@ -290,14 +290,14 @@ export function AvatarPage({
               />
               {!profile && (
                 <p className="text-[11px] text-muted-foreground/70">
-                  没有合适的人物？可以先关掉「结合八字」开关，依然能给纯气质分析。
+                  没有合适的人物？先关掉「结合八字」，小象也能做纯气质分析。
                 </p>
               )}
             </div>
           )}
 
           <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
-            点击「开始分析」后，卜卜象会用多模态模型看图，再结合
+            点击「让小象开看」后，卜卜象会用多模态模型看图，再结合
             {combineBazi ? '命主五行' : '气质特征'}给出建议。
           </div>
         </div>

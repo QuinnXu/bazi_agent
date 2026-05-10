@@ -23,12 +23,12 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
     setSuccessMessage(null)
 
     if (newPassword.length < 6) {
-      setError('密码长度至少为 6 位')
+      setError('小象需要至少 6 位新密码喔')
       return
     }
 
     if (newPassword !== confirmPassword) {
-      setError('两次输入的密码不一致')
+      setError('两次密码没有对齐，小象再帮你核一下')
       return
     }
 
@@ -36,16 +36,16 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
     try {
       const { error: err } = await updatePassword(newPassword)
       if (err) {
-        setError(err.message || '修改密码失败，请稍后重试')
+        setError(err.message || '小象暂时改不了密码，稍后再试一次喔')
       } else {
-        setSuccessMessage('密码修改成功！')
+        setSuccessMessage('密码改好啦，小象已经记住新钥匙')
         setNewPassword('')
         setConfirmPassword('')
         // 2 秒后自动关闭
         setTimeout(() => onClose(), 2000)
       }
     } catch {
-      setError('操作失败，请稍后重试')
+      setError('小象暂时没处理成功，稍后再试一次喔')
     } finally {
       setLoading(false)
     }
@@ -71,8 +71,8 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
 
         {/* 标题 */}
         <div className="mb-6">
-          <h2 className="text-2xl font-light text-foreground mb-2">修改密码</h2>
-          <p className="text-sm text-muted-foreground">请输入新密码</p>
+          <h2 className="text-2xl font-light text-foreground mb-2">给小象换一把新钥匙</h2>
+          <p className="text-sm text-muted-foreground">输入新密码，小象会帮你锁好账户</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -129,7 +129,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
             disabled={loading}
             className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
           >
-            {loading ? '处理中...' : '确认修改'}
+            {loading ? '小象处理中...' : '交给小象修改'}
           </button>
         </form>
       </div>
