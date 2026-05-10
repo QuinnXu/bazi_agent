@@ -30,6 +30,7 @@ export async function POST(req: Request) {
       kind: FeatureKind
       params: any
       useUltraMode?: boolean
+      chatMode?: 'classic' | 'agent'
       complexity?: AgentComplexityMode
     }
 
@@ -38,7 +39,8 @@ export async function POST(req: Request) {
         userId: user.id,
         kind: body.kind,
         params: body.params,
-        source: 'feature_page',
+        source: body.chatMode === 'agent' ? 'agent_tool' : 'feature_page',
+        chargeApples: true,
         complexity: body.complexity
           ? normalizeAgentComplexityMode(body.complexity)
           : undefined,

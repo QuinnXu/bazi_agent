@@ -6,11 +6,11 @@ import {
   getOrResetQuota,
 } from '@/lib/quota'
 import {
-  FEATURE_COSTS,
   FEATURE_SENTINELS,
   getFeaturePrompt,
   type FeatureKind,
 } from '@/lib/feature-prompts'
+import { FEATURE_APPLE_COSTS, getFeatureAppleCost } from '@/lib/apple-costs'
 import {
   getAgentReportPreferenceInstruction,
   getAgentComplexityProfile,
@@ -87,6 +87,7 @@ export interface FeatureAnalyzeInput {
   source?: LlmUsageSource
   complexity?: AgentComplexityMode
   reportPreference?: AgentReportPreference | null
+  chargeApples?: boolean
 }
 
 export interface FeatureInvocation {
@@ -410,7 +411,7 @@ function createRefundableStream(
 async function prepareFeatureInvocation(
   input: FeatureAnalyzeInput,
 ): Promise<FeatureInvocation> {
-  if (!input.kind || !FEATURE_COSTS[input.kind]) {
+  if (!input.kind || !(input.kind in FEATURE_APPLE_COSTS)) {
     throw new ServiceHttpError(400, {
       error: 'invalid_request',
       message: '功能类型无效',
@@ -430,19 +431,24 @@ async function prepareFeatureInvocation(
     })
   }
 
-  const cost = FEATURE_COSTS[input.kind]
-  const preQuota = await getOrResetQuota(input.userId)
-  const preUsedToday = preQuota.usedToday
+  const chargeApples = input.chargeApples !== false
+  const cost = chargeApples ? getFeatureAppleCost(input.kind) : 0
+  let preUsedToday = 0
 
-  const { success, quota } = await consumeApples(input.userId, cost)
-  if (!success) {
-    throw new ServiceHttpError(403, {
-      error: 'quota_exceeded',
-      message: `这个功能需要 ${cost} 个苹果🍎，今天的库存不太够啦~ 明天再来或者给卜卜象投喂一下吧`,
-      required: cost,
-      remaining: quota.remaining,
-      dailyLimit: quota.dailyLimit,
-    })
+  if (chargeApples && cost > 0) {
+    const preQuota = await getOrResetQuota(input.userId)
+    preUsedToday = preQuota.usedToday
+
+    const { success, quota } = await consumeApples(input.userId, cost)
+    if (!success) {
+      throw new ServiceHttpError(403, {
+        error: 'quota_exceeded',
+        message: `这个功能需要 ${cost} 个苹果🍎，今天的库存不太够啦~ 明天再来或者给卜卜象投喂一下吧`,
+        required: cost,
+        remaining: quota.remaining,
+        dailyLimit: quota.dailyLimit,
+      })
+    }
   }
 
   const isReportKind = input.kind === 'fortune' || input.kind === 'hepan' || input.kind === 'lifepath'
@@ -468,7 +474,7 @@ async function prepareFeatureInvocation(
       reportPreference,
     )
   } catch (err) {
-    await refundApples(input.userId, cost)
+    if (cost > 0) await refundApples(input.userId, cost)
     throw err
   }
 
@@ -485,6 +491,7 @@ async function prepareFeatureInvocation(
 }
 
 async function refundFeatureInvocation(invocation: FeatureInvocation) {
+  if (invocation.cost <= 0) return
   try {
     await refundApples(invocation.userId, invocation.cost)
   } catch (e) {

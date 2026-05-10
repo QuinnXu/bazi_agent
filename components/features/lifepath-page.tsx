@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
 import { useAuth } from '@/contexts/auth-context'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 import type { FeatureParticipant, LifePathParams } from '@/lib/feature-types'
 
 interface LifePathPageProps {
@@ -12,6 +13,7 @@ interface LifePathPageProps {
   onOpenProfilesManager: () => void
   onRequireAuth: () => void
   loading?: boolean
+  showCost?: boolean
 }
 
 export function LifePathPage({
@@ -20,6 +22,7 @@ export function LifePathPage({
   onOpenProfilesManager,
   onRequireAuth,
   loading = false,
+  showCost = true,
 }: LifePathPageProps) {
   const { user } = useAuth()
   const [profile, setProfile] = useState<FeatureParticipant | null>(null)
@@ -48,7 +51,7 @@ export function LifePathPage({
       canSubmit={canSubmit}
       isLastStep
       loading={loading}
-      cost={2}
+      cost={showCost ? FEATURE_APPLE_COSTS.lifepath : undefined}
     >
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">

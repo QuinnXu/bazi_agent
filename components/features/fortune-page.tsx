@@ -5,6 +5,7 @@ import { X, Plus } from 'lucide-react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
 import { useAuth } from '@/contexts/auth-context'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 import type {
   FeatureParticipant,
   FortuneParams,
@@ -17,6 +18,7 @@ interface FortunePageProps {
   onOpenProfilesManager: () => void
   onRequireAuth: () => void
   loading?: boolean
+  showCost?: boolean
 }
 
 const FOCUS_PRESETS = ['事业突破', '感情缘分', '财富能量', '学业成长', '身心状态', '人际磁场']
@@ -44,6 +46,7 @@ export function FortunePage({
   onOpenProfilesManager,
   onRequireAuth,
   loading = false,
+  showCost = true,
 }: FortunePageProps) {
   const { user } = useAuth()
   const [step, setStep] = useState(1)
@@ -127,7 +130,7 @@ export function FortunePage({
       canSubmit={canSubmit}
       isLastStep={step === 3}
       loading={loading}
-      cost={1}
+      cost={showCost ? FEATURE_APPLE_COSTS.fortune : undefined}
     >
       {step === 1 && (
         <div className="space-y-3">

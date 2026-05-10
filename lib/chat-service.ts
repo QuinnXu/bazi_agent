@@ -3,6 +3,7 @@
 const { paipan: PaipanClass } = require('@/tool/paipan')
 
 import { consumeApples, getOrResetQuota } from '@/lib/quota'
+import { CLASSIC_CHAT_APPLE_COST } from '@/lib/apple-costs'
 import {
   getAgentComplexityProfile,
   type AgentComplexityMode,
@@ -182,12 +183,13 @@ export async function runClassicChatStream(
   const preQuota = await getOrResetQuota(input.userId)
   const preUsedToday = preQuota.usedToday
 
-  if (useUltraMode) {
-    const { success, quota } = await consumeApples(input.userId, 1)
+  if (useUltraMode && CLASSIC_CHAT_APPLE_COST > 0) {
+    const { success, quota } = await consumeApples(input.userId, CLASSIC_CHAT_APPLE_COST)
     if (!success) {
       throw new ServiceHttpError(403, {
         error: 'quota_exceeded',
-        message: '今天的苹果已经吃完啦🍎 明天卜卜象会带来新的苹果~',
+        message: `这次经典投喂需要 ${CLASSIC_CHAT_APPLE_COST} 个苹果🍎，今天的库存不太够啦。`,
+        required: CLASSIC_CHAT_APPLE_COST,
         remaining: quota.remaining,
         dailyLimit: quota.dailyLimit,
       })

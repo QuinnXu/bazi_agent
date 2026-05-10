@@ -5,6 +5,16 @@ import { X, User, Plus, Trash2, Edit2, ArrowLeft } from 'lucide-react'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
 import { BaziDialog } from './bazi-dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 interface BaziProfile {
   id: string
@@ -67,6 +77,8 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
   const [editingProfile, setEditingProfile] = useState<BaziProfile | null>(null)
   const [viewingProfile, setViewingProfile] = useState<BaziProfile | null>(null)
   const [profileName, setProfileName] = useState('')
+  const [notice, setNotice] = useState('')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const { user } = useAuth()
   const supabase = createBrowserClient()
 
@@ -83,6 +95,8 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       setEditingProfile(null)
       setViewingProfile(null)
       setProfileName('')
+      setNotice('')
+      setDeleteTargetId(null)
     }
   }, [isOpen])
 
@@ -133,9 +147,10 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
 
   const handleNextToBazi = () => {
     if (!profileName.trim()) {
-      alert('小象还不知道这个人物叫什么喔')
+      setNotice('卜卜象还不知道这位是谁，先给 TA 起个好认的名字吧。')
       return
     }
+    setNotice('')
     setDialogStep('bazi')
   }
 
@@ -157,31 +172,35 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
   }
 
   const handleDeleteProfile = async (profileId: string) => {
-    if (!confirm('真的要把这个人物从小象资料里移除吗？')) return
+    setDeleteTargetId(profileId)
+  }
 
+  const confirmDeleteProfile = async () => {
+    if (!deleteTargetId) return
     try {
       // @ts-ignore - Database types will be generated after schema deployment
       const { error } = await supabase
         .from('bazi_profiles')
         .delete()
-        .eq('id', profileId)
+        .eq('id', deleteTargetId)
 
       if (error) throw error
-      setProfiles(profiles.filter(p => p.id !== profileId))
+      setProfiles(profiles.filter(p => p.id !== deleteTargetId))
       // 如果正在查看被删除的人物，返回列表
-      if (viewingProfile?.id === profileId) {
+      if (viewingProfile?.id === deleteTargetId) {
         handleBackToList()
       }
+      setDeleteTargetId(null)
     } catch (error) {
       console.error('删除人物失败:', error)
-      alert('小象暂时删不掉这个人物，稍后再试一次喔')
+      setNotice('卜卜象这次没能移除人物资料，稍后再轻轻试一次喔。')
     }
   }
 
   const handleBaziSubmit = async (data: BaziData) => {
     if (!user) return
     if (!profileName.trim()) {
-      alert('小象还不知道这个人物叫什么喔')
+      setNotice('卜卜象还不知道这位是谁，先给 TA 起个好认的名字吧。')
       return
     }
 
@@ -262,7 +281,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       }
     } catch (error) {
       console.error('保存人物失败:', error)
-      alert('小象暂时保存不了这个人物，稍后再试一次喔')
+      setNotice('卜卜象暂时没把这份人物资料收稳，稍后再试一次喔。')
     }
   }
 
@@ -290,6 +309,12 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
               <h2 className="text-2xl font-light text-foreground mb-2">小象人物册</h2>
               <p className="text-sm text-muted-foreground">把常看的命主放在这里，小象会记得他们的命盘</p>
             </div>
+
+            {notice && (
+              <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm font-light text-foreground">
+                {notice}
+              </div>
+            )}
 
             <button
               onClick={handleAddProfile}
@@ -493,6 +518,12 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
             <h3 className="text-lg font-light text-foreground mb-4">
               {editingProfile ? '帮小象更新人物' : '给小象添加人物'}
             </h3>
+
+            {notice && (
+              <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm font-light text-foreground">
+                {notice}
+              </div>
+            )}
             
             <div className="mb-4">
               <label className="block text-sm font-light text-foreground mb-2">
@@ -550,6 +581,25 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
           } : undefined}
         />
       )}
+      <AlertDialog open={Boolean(deleteTargetId)} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <AlertDialogContent className="glass-minimal bg-card/95">
+          <AlertDialogHeader>
+            <AlertDialogTitle>要从人物册里移除吗？</AlertDialogTitle>
+            <AlertDialogDescription>
+              卜卜象会忘掉这位人物的命盘资料，之后需要再看就要重新补一次啦。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>先留着</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDeleteProfile}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              确认移除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

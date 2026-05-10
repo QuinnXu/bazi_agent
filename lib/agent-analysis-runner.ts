@@ -3,6 +3,7 @@ import { callLLM, createUnifiedStreamProcessor, type LlmTaskKind } from '@/lib/l
 import { consumeApples, refundApples } from '@/lib/quota'
 import { createUsageTrackedStream } from '@/lib/token-usage'
 import { buildAgentAnalysisMessages } from '@/lib/agent-prompt-builder'
+import { getAgentReportAppleCost } from '@/lib/apple-costs'
 import {
   getAgentComplexityProfile,
   type AgentComplexityMode,
@@ -18,9 +19,7 @@ export interface AgentAnalysisStreamResult {
 }
 
 export function getAgentAnalysisDepthCost(depth: Exclude<AgentOutputDepth, 'chat'>): number {
-  if (depth === 'concise') return 1
-  if (depth === 'detailed') return 4
-  return 2
+  return getAgentReportAppleCost(depth)
 }
 
 export function getAgentAnalysisMaxTokens(
@@ -101,15 +100,18 @@ export async function runAgentAnalysisStream(
 ): Promise<AgentAnalysisStreamResult> {
   const depth = input.request.depth
   const appleCost = getAgentAnalysisDepthCost(depth)
-  const preQuota = await consumeApples(input.userId, appleCost)
-  if (!preQuota.success) {
-    throw new ServiceHttpError(403, {
-      error: 'quota_exceeded',
-      message: `这次分析需要 ${appleCost} 个苹果🍎，今天的库存不太够啦。可以选简洁版，或者明天再来。`,
-      required: appleCost,
-      remaining: preQuota.quota.remaining,
-      dailyLimit: preQuota.quota.dailyLimit,
-    })
+
+  if (appleCost > 0) {
+    const preQuota = await consumeApples(input.userId, appleCost)
+    if (!preQuota.success) {
+      throw new ServiceHttpError(403, {
+        error: 'quota_exceeded',
+        message: `这次分析需要 ${appleCost} 个苹果🍎，今天的库存不太够啦。`,
+        required: appleCost,
+        remaining: preQuota.quota.remaining,
+        dailyLimit: preQuota.quota.dailyLimit,
+      })
+    }
   }
 
   const messages = buildAgentAnalysisMessages(input.request)
@@ -124,7 +126,7 @@ export async function runAgentAnalysisStream(
       reasoningEffort: generationOptions.reasoningEffort,
     })
   } catch (error) {
-    await refundApples(input.userId, appleCost)
+    if (appleCost > 0) await refundApples(input.userId, appleCost)
     throw error
   }
 
@@ -132,13 +134,12 @@ export async function runAgentAnalysisStream(
     chunking: 'immediate',
     logLabel: `agent_analysis:${depth}`,
   })
-  const refundableStream = createRefundableAgentStream(
-    baseStream,
-    async () => {
-      await refundApples(input.userId, appleCost)
-    },
-  )
-  const trackedStream = createUsageTrackedStream(refundableStream, {
+  const billableStream = appleCost > 0
+    ? createRefundableAgentStream(baseStream, async () => {
+        await refundApples(input.userId, appleCost)
+      })
+    : baseStream
+  const trackedStream = createUsageTrackedStream(billableStream, {
     userId: input.userId,
     source: 'agent_analysis',
     mode: 'agent',

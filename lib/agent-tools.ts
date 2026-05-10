@@ -145,7 +145,7 @@ export const AGENT_TOOL_DEFINITIONS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'agent_select_depth',
-      description: '当请求明确要报告/深度/完整分析，或属于长期、宏观、多维、较长需求，且人物、时间、重点基本齐全但还没选择报告长度/消耗苹果档位时调用。调用后后端会发报告深度选择卡片。',
+      description: '当请求明确要报告/深度/完整分析，或属于长期、宏观、多维、较长需求，且人物、时间、重点基本齐全但还没选择报告长度时调用。调用后后端会发报告深度选择卡片。',
       parameters: objectSchema({
         ...commonProperties,
       }, ['reason']),
@@ -264,7 +264,7 @@ function toolPlannerMessages(input: AgentToolPlanningInput) {
 5. 缺当前命主或被提到人物的八字资料，调用 agent_request_bazi_profile。
 6. 只有时间缺失或时间词含糊时，才调用 agent_confirm_time_range，例如“最近/未来/以后/这段时间/什么时候/哪段时间”。如果用户说的是今天/明天/后天/本周X/周末/具体日期，或已经添加时间段，不要为了确认时间再调用时间卡。
 7. 分析重点太宽且用户没说重点，调用 agent_confirm_focus。用户已说财运/财富/暴富/发财/搞钱/赚钱/事业/感情等明确重点时，不要调用 agent_confirm_focus。
-8. 只剩报告长度/消耗档位未定，且这是报告型需求时，调用 agent_select_depth。
+8. 只剩报告长度未定，且这是报告型需求时，调用 agent_select_depth。
 9. 报告型需求的人物、时间、重点、深度都足够时，调用 agent_run_bazi_analysis。
 10. 不要把用户询问的运势时间误当出生日期；出生资料只能在用户明确提供出生年月日时用于资料卡预填。
 11. “此生/这一生/什么时候能暴富/发财”是人生财富窗口，不要要求用户改选未来 30 天/3 个月/今年；如果当前命主已存在，通常只需要选择深度或直接分析。

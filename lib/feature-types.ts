@@ -5,6 +5,7 @@
  */
 
 import type { FeatureType } from '@/components/app-sidebar'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 
 // ==================== Participant ====================
 
@@ -70,10 +71,7 @@ export const FEATURE_LABELS: Record<FeatureKind, string> = {
 }
 
 export const FEATURE_COSTS_UI: Record<FeatureKind, number> = {
-  hepan: 2,
-  fortune: 1,
-  avatar: 3,
-  lifepath: 2,
+  ...FEATURE_APPLE_COSTS,
 }
 
 // Mapping from FeatureType (sidebar) to FeatureKind (payload)

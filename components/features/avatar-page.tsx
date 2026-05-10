@@ -5,6 +5,7 @@ import { ImagePlus, Trash2 } from 'lucide-react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
 import { useAuth } from '@/contexts/auth-context'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 import type { AvatarParams, FeatureParticipant } from '@/lib/feature-types'
 
 interface AvatarPageProps {
@@ -13,6 +14,7 @@ interface AvatarPageProps {
   onOpenProfilesManager: () => void
   onRequireAuth: () => void
   loading?: boolean
+  showCost?: boolean
 }
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
@@ -78,6 +80,7 @@ export function AvatarPage({
   onOpenProfilesManager,
   onRequireAuth,
   loading = false,
+  showCost = true,
 }: AvatarPageProps) {
   const { user } = useAuth()
   const [step, setStep] = useState(1)
@@ -180,7 +183,7 @@ export function AvatarPage({
       isLastStep={step === 2}
       loading={loading || isProcessing}
       loadingText={isProcessing ? '小象正在接住图片…' : '小象正在认真看图…'}
-      cost={3}
+      cost={showCost ? FEATURE_APPLE_COSTS.avatar : undefined}
     >
       {step === 1 && (
         <div className="space-y-4">

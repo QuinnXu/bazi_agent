@@ -702,7 +702,7 @@ export default function AdminPage() {
 
       if (!res.ok) {
         const data = await res.json()
-        alert('保存失败: ' + (data.error || '未知错误'))
+        setError(`卜卜象没能保存这次调整：${data.error || '原因还没露面'}`)
         return
       }
 
@@ -732,7 +732,7 @@ export default function AdminPage() {
         setSaveSuccess(prev => ({ ...prev, [userId]: false }))
       }, 2000)
     } catch {
-      alert('网络错误')
+      setError('卜卜象碰到一点网络风浪，稍后再保存一次喔')
     } finally {
       setSaving(prev => ({ ...prev, [userId]: false }))
     }

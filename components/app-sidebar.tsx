@@ -44,6 +44,7 @@ import {
 import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
 import type { ChatSession } from '@/types/database_v2'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 
 export type FeatureType = 'chat' | 'hepan' | 'fortune' | 'avatar' | 'lifepath'
 export type ChatMode = 'classic' | 'agent'
@@ -63,10 +64,10 @@ interface AppSidebarProps {
 }
 
 const featureItems: { id: Exclude<FeatureType, 'chat'>; label: string; cost: number; icon: React.ElementType }[] = [
-  { id: 'hepan', label: '合盘 / 应事', cost: 2, icon: Users },
-  { id: 'fortune', label: '近期运势', cost: 1, icon: CalendarRange },
-  { id: 'avatar', label: '头像分析', cost: 3, icon: ImageIcon },
-  { id: 'lifepath', label: '人生脉络', cost: 2, icon: Compass },
+  { id: 'hepan', label: '合盘 / 应事', cost: FEATURE_APPLE_COSTS.hepan, icon: Users },
+  { id: 'fortune', label: '近期运势', cost: FEATURE_APPLE_COSTS.fortune, icon: CalendarRange },
+  { id: 'avatar', label: '头像分析', cost: FEATURE_APPLE_COSTS.avatar, icon: ImageIcon },
+  { id: 'lifepath', label: '人生脉络', cost: FEATURE_APPLE_COSTS.lifepath, icon: Compass },
 ]
 
 function groupSessionsByDate(sessions: ChatSession[]) {
@@ -245,18 +246,6 @@ export function AppSidebar({
             <div className="grid grid-cols-2 gap-1 rounded-lg bg-sidebar-accent/55 p-1">
               <button
                 type="button"
-                onClick={() => handleModeSelect('classic')}
-                className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
-                  activeFeature === 'chat' && activeChatMode === 'classic'
-                    ? 'bg-card text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <MessageCircle className="w-3.5 h-3.5" />
-                经典
-              </button>
-              <button
-                type="button"
                 onClick={() => handleModeSelect('agent')}
                 className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
                   activeFeature === 'chat' && activeChatMode === 'agent'
@@ -266,6 +255,18 @@ export function AppSidebar({
               >
                 <Bot className="w-3.5 h-3.5" />
                 Agent
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeSelect('classic')}
+                className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
+                  activeFeature === 'chat' && activeChatMode === 'classic'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                经典
               </button>
             </div>
           </SidebarGroupContent>

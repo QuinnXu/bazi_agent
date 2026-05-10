@@ -3,6 +3,7 @@
 import React from 'react'
 import { Users, CalendarRange, ImageIcon, Compass } from 'lucide-react'
 import type { FeatureType } from '@/components/app-sidebar'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 
 interface FeatureCardItem {
   id: Exclude<FeatureType, 'chat'>
@@ -18,7 +19,7 @@ const ITEMS: FeatureCardItem[] = [
     id: 'hepan',
     title: '合盘',
     description: '两人或多人缘分碰撞，看看彼此的能量如何流动 🌹',
-    cost: 2,
+    cost: FEATURE_APPLE_COSTS.hepan,
     icon: Users,
     accent: 'rose',
   },
@@ -26,7 +27,7 @@ const ITEMS: FeatureCardItem[] = [
     id: 'fortune',
     title: '运势',
     description: '近期能量起伏与行事天气预报，提前看清风向 🌤️',
-    cost: 1,
+    cost: FEATURE_APPLE_COSTS.fortune,
     icon: CalendarRange,
     accent: 'gold',
   },
@@ -34,7 +35,7 @@ const ITEMS: FeatureCardItem[] = [
     id: 'avatar',
     title: '头像',
     description: '用色彩和风格滋养你的面相，让气场更顺 🌸',
-    cost: 3,
+    cost: FEATURE_APPLE_COSTS.avatar,
     icon: ImageIcon,
     accent: 'violet',
   },
@@ -42,7 +43,7 @@ const ITEMS: FeatureCardItem[] = [
     id: 'lifepath',
     title: '人生脉络',
     description: '铺展你的专属大运长卷，看见属于你的人生风景 📜',
-    cost: 2,
+    cost: FEATURE_APPLE_COSTS.lifepath,
     icon: Compass,
     accent: 'teal',
   },
@@ -57,9 +58,10 @@ const ACCENT_BG: Record<FeatureCardItem['accent'], string> = {
 
 interface FeatureCardsProps {
   onPick: (feature: Exclude<FeatureType, 'chat'>) => void
+  showCost?: boolean
 }
 
-export function FeatureCards({ onPick }: FeatureCardsProps) {
+export function FeatureCards({ onPick, showCost = true }: FeatureCardsProps) {
   return (
     <div className="w-full max-w-3xl mx-auto">
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -78,9 +80,11 @@ export function FeatureCards({ onPick }: FeatureCardsProps) {
                   >
                     <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   </div>
-                  <span className="whitespace-nowrap rounded-md border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-light text-primary/80">
-                    苹果 ×{item.cost}
-                  </span>
+                  {showCost && (
+                    <span className="whitespace-nowrap rounded-md border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-light text-primary/80">
+                      苹果 ×{item.cost}
+                    </span>
+                  )}
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-sm font-medium text-foreground leading-snug truncate">

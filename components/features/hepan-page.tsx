@@ -5,6 +5,7 @@ import { Heart, Users, Sparkles } from 'lucide-react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
 import { useAuth } from '@/contexts/auth-context'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 import type {
   FeatureParticipant,
   HepanParams,
@@ -17,6 +18,7 @@ interface HepanPageProps {
   onOpenProfilesManager: () => void
   onRequireAuth: () => void
   loading?: boolean
+  showCost?: boolean
 }
 
 const SUBTYPE_OPTIONS: {
@@ -60,6 +62,7 @@ export function HepanPage({
   onOpenProfilesManager,
   onRequireAuth,
   loading = false,
+  showCost = true,
 }: HepanPageProps) {
   const { user } = useAuth()
   const [step, setStep] = useState(1)
@@ -120,7 +123,7 @@ export function HepanPage({
       canSubmit={canSubmit}
       isLastStep={step === 3}
       loading={loading}
-      cost={2}
+      cost={showCost ? FEATURE_APPLE_COSTS.hepan : undefined}
     >
       {step === 1 && (
         <div className="space-y-3">

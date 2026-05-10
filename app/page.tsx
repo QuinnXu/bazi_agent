@@ -38,6 +38,7 @@ import { createBrowserClient } from "@/lib/supabase/client"
 import { ProfilesManagementDialog } from "@/components/profiles-management-dialog"
 import { ChangePasswordDialog } from "@/components/change-password-dialog"
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar"
+import { toast } from "@/hooks/use-toast"
 import { AppSidebar, type ChatMode, type FeatureType } from "@/components/app-sidebar"
 import { FeatureCards } from "@/components/feature-cards"
 import { FeatureLauncherButton } from "@/components/feature-launcher-button"
@@ -64,6 +65,7 @@ import type {
 } from "@/lib/feature-types"
 import { estimateTokensForText } from "@/lib/token-estimator"
 import type { AgentComplexityMode, AgentReportPreference } from "@/lib/agent-complexity"
+import { CLASSIC_CHAT_APPLE_COST } from "@/lib/apple-costs"
 
 interface Message {
   id: string;
@@ -563,8 +565,8 @@ function HomeContent() {
   const [showProfilesDialog, setShowProfilesDialog] = useState(false)
   const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-  const [currentSessionMode, setCurrentSessionMode] = useState<ChatMode>('classic')
-  const [activeChatMode, setActiveChatMode] = useState<ChatMode>('classic')
+  const [currentSessionMode, setCurrentSessionMode] = useState<ChatMode>('agent')
+  const [activeChatMode, setActiveChatMode] = useState<ChatMode>('agent')
   const [agentComplexity, setAgentComplexity] = useState<AgentComplexityMode>('instant')
   const [messages, setMessages] = useState<Message[]>([])
   const [activeStreamingMessageId, setActiveStreamingMessageId] = useState<string | null>(null)
@@ -1268,7 +1270,7 @@ function HomeContent() {
         : false
 
     // 投喂模式前端预检查：苹果不够直接拦截，不发请求不添加消息
-    if (requestConsumesApple && appleQuota && appleQuota.remaining <= 0) {
+    if (requestConsumesApple && CLASSIC_CHAT_APPLE_COST > 0 && appleQuota && appleQuota.remaining < CLASSIC_CHAT_APPLE_COST) {
       setShowQuotaExhausted(true)
       setTimeout(() => setShowQuotaExhausted(false), 8000)
       return
@@ -1433,7 +1435,7 @@ function HomeContent() {
 
       // 投喂模式：立即本地扣减苹果，再异步刷新真实值
       if (requestConsumesApple) {
-        setAppleQuota(prev => prev ? { ...prev, remaining: Math.max(0, prev.remaining - 1), } : null)
+        setAppleQuota(prev => prev ? { ...prev, remaining: Math.max(0, prev.remaining - CLASSIC_CHAT_APPLE_COST), } : null)
         fetchQuota()
       }
 
@@ -1871,7 +1873,7 @@ function HomeContent() {
         body: JSON.stringify({
           kind: payload.kind,
           params: payload.params,
-          useUltraMode: isUltraMode,
+          chatMode: activeChatMode,
           complexity: activeChatMode === 'agent' ? agentComplexity : undefined,
         }),
         signal: requestController.signal,
@@ -1895,7 +1897,6 @@ function HomeContent() {
 
       const llmMeta = getLlmResponseMeta(res)
 
-      // Refresh quota optimistically (server will have consumed N apples)
       fetchQuota()
 
       const reader = res.body?.getReader()
@@ -2056,7 +2057,7 @@ function HomeContent() {
       streamHadOutputRef.current = false
       if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
     }
-  }, [user, isLoading, isAnalyzing, currentSessionId, ensureSession, saveMessage, supabase, isUltraMode, fetchQuota, activeChatMode, agentComplexity, setStreamingMessageId, requestFollowUpSuggestions, messages])
+  }, [user, isLoading, isAnalyzing, currentSessionId, ensureSession, saveMessage, supabase, fetchQuota, activeChatMode, agentComplexity, setStreamingMessageId, requestFollowUpSuggestions, messages])
 
   // Helper used by chat-message follow-up buttons & launcher button.
   const fillAndSubmit = useCallback((text: string) => {
@@ -2175,7 +2176,13 @@ function HomeContent() {
       setMessages(prev => [...prev, infoMessage]);
     } catch (error) {
       console.error('Error validating Bazi data:', error);
-      alert(error instanceof Error ? error.message : '八字信息验证失败，请检查输入的数据是否正确。');
+      toast({
+        title: '卜卜象没排稳这份盘',
+        description: error instanceof Error
+          ? error.message
+          : '出生信息里可能有一处没对上，帮我再核一下就好。',
+        variant: 'destructive',
+      });
     }
   }
 
@@ -2407,7 +2414,13 @@ function HomeContent() {
         )
       )
       console.error('Agent inline input failed:', error)
-      alert(error instanceof Error ? error.message : '提交失败，请检查输入后再试。')
+      toast({
+        title: '卜卜象没接住这次提交',
+        description: error instanceof Error
+          ? error.message
+          : '先检查一下刚填的内容，等我把这一步重新接起来。',
+        variant: 'destructive',
+      })
     }
   }, [agentParticipants, agentPendingConfirmation, createAndSaveBaziProfile, handleSubmit, selectedProfile, user])
 
@@ -2440,7 +2453,7 @@ function HomeContent() {
         ? 'Agent Instant，快速编排'
         : `Agent ${composerModeLabel}，提高规划和报告上限`
       : isUltraMode
-      ? '经典投喂模式，每次消耗 1 个苹果'
+      ? `经典投喂模式，每次消耗 ${CLASSIC_CHAT_APPLE_COST} 个苹果`
       : '经典聊天，不消耗苹果'
 
   const visibleAgentParticipants =
@@ -2499,7 +2512,7 @@ function HomeContent() {
                 >
                   <MessageCircle className="h-4 w-4 text-primary" />
                   <span className="flex-1">经典投喂</span>
-                  <span className="text-xs text-muted-foreground">苹果 ×1</span>
+                  <span className="text-xs text-muted-foreground">苹果 ×{CLASSIC_CHAT_APPLE_COST}</span>
                   {isUltraMode && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
                 </button>
               </>
@@ -2542,19 +2555,6 @@ function HomeContent() {
     <div className="inline-grid h-8 grid-cols-2 rounded-full border border-border/70 bg-muted/45 p-0.5 shadow-sm">
       <button
         type="button"
-        onClick={() => handleChatModeChange('classic')}
-        className={`h-7 px-3 rounded-full text-xs font-light flex items-center justify-center gap-1.5 transition-all ${
-          activeChatMode === 'classic'
-            ? 'bg-primary text-primary-foreground'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
-        title="经典聊天"
-      >
-        <MessageCircle className="w-3.5 h-3.5" />
-        经典
-      </button>
-      <button
-        type="button"
         onClick={() => handleChatModeChange('agent')}
         className={`h-7 px-3 rounded-full text-xs font-light flex items-center justify-center gap-1.5 transition-all ${
           activeChatMode === 'agent'
@@ -2565,6 +2565,19 @@ function HomeContent() {
       >
         <Bot className="w-3.5 h-3.5" />
         Agent
+      </button>
+      <button
+        type="button"
+        onClick={() => handleChatModeChange('classic')}
+        className={`h-7 px-3 rounded-full text-xs font-light flex items-center justify-center gap-1.5 transition-all ${
+          activeChatMode === 'classic'
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+        title="经典聊天"
+      >
+        <MessageCircle className="w-3.5 h-3.5" />
+        经典
       </button>
     </div>
   )

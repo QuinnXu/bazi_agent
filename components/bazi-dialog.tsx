@@ -51,6 +51,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
   const [selectedProvince, setSelectedProvince] = useState<string>('');
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [isCustomLocation, setIsCustomLocation] = useState(false);
+  const [formNotice, setFormNotice] = useState('');
 
   // 当 initialData 变化时更新 baziData
   useEffect(() => {
@@ -170,10 +171,11 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
+    setFormNotice('');
     
     // 验证必填字段
     if (!baziData.year || !baziData.month || !baziData.day || !baziData.hour) {
-      alert('小象还缺完整的出生日期和时间喔');
+      setFormNotice('卜卜象还差一点点出生日期和时间，补齐后我就能稳稳排盘啦。');
       return;
     }
     
@@ -210,6 +212,12 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
 
         {/* 表单 */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {formNotice && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm font-light text-foreground">
+              {formNotice}
+            </div>
+          )}
+
           {/* 日期选择 */}
           <div className="space-y-3">
             <label className="block text-sm font-light text-foreground">

@@ -91,10 +91,7 @@ export async function getOrResetQuota(userId: string): Promise<QuotaInfo> {
 
 /**
  * Try to consume N apples atomically. Returns success=false if quota insufficient.
- * - 1 question (chat投喂) = 1 apple
- * - 近期运势 = 1 apple
- * - 合盘 / 人生脉络 = 2 apples
- * - 头像分析 = 3 apples
+ * Feature/report costs are configured in config/apple-costs.json.
  */
 export async function consumeApples(
   userId: string,

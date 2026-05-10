@@ -9,6 +9,8 @@
  *   - 多轮：不重复已说过的内容；自然衔接
  */
 
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
+
 // ==================== 公共片段 ====================
 
 export const BBX_PERSONA =
@@ -202,8 +204,5 @@ export function getFeaturePrompt(
 // ==================== 苹果消耗表 ====================
 
 export const FEATURE_COSTS: Record<FeatureKind, number> = {
-  hepan: 2,
-  fortune: 1,
-  avatar: 3,
-  lifepath: 2,
+  ...FEATURE_APPLE_COSTS,
 }

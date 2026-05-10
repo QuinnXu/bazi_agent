@@ -10,6 +10,7 @@ import type {
   PendingAgentStepKind,
 } from '@/lib/agent-workflow-types'
 import type { AgentCardFamily, AgentCardPlan } from '@/lib/agent-card-planner'
+import { getAgentReportAppleCost } from '@/lib/apple-costs'
 import {
   extractPersonCorrection,
   isDateChoiceQuestion,
@@ -718,19 +719,19 @@ function depthOptions(slots: AgentAnalysisSlots, plan?: AgentCardPlan | null): A
     {
       label: '简洁结论',
       value: 'concise',
-      description: '1 个苹果，先给结论、依据和行动提醒。',
+      description: `${getAgentReportAppleCost('concise')} 个苹果，先给结论、依据和行动提醒。`,
       params: { draftSlots: withDepth(slots, 'concise') },
     },
     {
       label: '均衡分析',
       value: 'balanced',
-      description: '2 个苹果，适合多数问题，结构完整但不冗长。',
+      description: `${getAgentReportAppleCost('balanced')} 个苹果，适合多数问题，结构完整但不冗长。`,
       params: { draftSlots: withDepth(slots, 'balanced') },
     },
     {
       label: '深度报告',
       value: 'detailed',
-      description: '4 个苹果，展开大运、时间窗口和行动地图。',
+      description: `${getAgentReportAppleCost('detailed')} 个苹果，展开大运、时间窗口和行动地图。`,
       params: { draftSlots: withDepth(slots, 'detailed') },
     },
   ], plan)

@@ -1,0 +1,14 @@
+{
+  "classicChat": 0,
+  "agentReports": {
+    "concise": 0,
+    "balanced": 1,
+    "detailed": 1
+  },
+  "featureCards": {
+    "hepan": 1,
+    "fortune": 1,
+    "avatar": 1,
+    "lifepath": 1
+  }
+}

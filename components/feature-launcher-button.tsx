@@ -14,6 +14,7 @@ import {
 import type { FeatureKind } from '@/lib/feature-types'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 
 interface LauncherItem {
   id: FeatureKind
@@ -23,10 +24,10 @@ interface LauncherItem {
 }
 
 const ITEMS: LauncherItem[] = [
-  { id: 'hepan', title: '合盘 / 应事', cost: 2, icon: Users },
-  { id: 'fortune', title: '近期运势', cost: 1, icon: CalendarRange },
-  { id: 'avatar', title: '头像分析推荐', cost: 3, icon: ImageIcon },
-  { id: 'lifepath', title: '人生脉络', cost: 2, icon: Compass },
+  { id: 'hepan', title: '合盘 / 应事', cost: FEATURE_APPLE_COSTS.hepan, icon: Users },
+  { id: 'fortune', title: '近期运势', cost: FEATURE_APPLE_COSTS.fortune, icon: CalendarRange },
+  { id: 'avatar', title: '头像分析推荐', cost: FEATURE_APPLE_COSTS.avatar, icon: ImageIcon },
+  { id: 'lifepath', title: '人生脉络', cost: FEATURE_APPLE_COSTS.lifepath, icon: Compass },
 ]
 
 interface BaziProfileRow {
