@@ -193,7 +193,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
       if (err) {
         setError(authErrorMessage(err))
       } else {
-        setSuccessMessage('小象已经寄出重置密码邮件，请去邮箱点开链接。')
+        setSuccessMessage('小象已经寄出重置邮件，点开邮件里的链接就能去修改密码喔。')
       }
     } catch {
       setError('小象暂时没寄出去，稍后再试一次喔')

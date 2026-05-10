@@ -182,6 +182,93 @@ function coerceDate(year: string, month?: string, day?: string, boundary: 'start
   return formatDate(new Date(y, m - 1, d, 12, 0, 0))
 }
 
+function buildDayTime(label: string, date: Date, source: AgentAskedTime['source'] = 'relative_default'): AgentAskedTime {
+  const dateText = formatDate(date)
+  return {
+    start: dateText,
+    end: dateText,
+    label,
+    granularity: 'day',
+    confidence: 'high',
+    source,
+  }
+}
+
+function parseWeekdayTime(text: string, today: Date): AgentAskedTime | null {
+  const weekendMatch = text.match(/(?:本周|这周|这个)?周末|(?:本|这)个周末/)
+  if (weekendMatch) {
+    const day = today.getDay()
+    const startOffset = day === 0 ? 0 : day === 6 ? 0 : 6 - day
+    const endOffset = day === 0 ? 0 : day === 6 ? 1 : 7 - day
+    const start = formatDate(addDays(today, startOffset))
+    const end = formatDate(addDays(today, endOffset))
+    return {
+      start,
+      end,
+      label: '本周末',
+      granularity: 'day',
+      confidence: 'high',
+      source: 'relative_default',
+    }
+  }
+
+  const match = text.match(/(下周|下星期|本周|这周|这星期|周|星期)([一二三四五六日天])/)
+  if (!match) return null
+  const weekdayMap: Record<string, number> = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    日: 7,
+    天: 7,
+  }
+  const target = weekdayMap[match[2]]
+  if (!target) return null
+  const current = today.getDay() === 0 ? 7 : today.getDay()
+  const baseOffset = target - current
+  const offset = /^下/.test(match[1]) ? baseOffset + 7 : baseOffset
+  const label = `${match[1].startsWith('下') ? '下周' : '本周'}${match[2]}`
+  return buildDayTime(label, addDays(today, offset))
+}
+
+function parseExplicitDay(text: string): AgentAskedTime | null {
+  const today = todayInShanghai()
+
+  const isoDay = text.match(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?/)
+  if (isoDay) {
+    return buildDayTime(
+      `${isoDay[1]}年${Number(isoDay[2])}月${Number(isoDay[3])}日`,
+      new Date(Number(isoDay[1]), Number(isoDay[2]) - 1, Number(isoDay[3]), 12, 0, 0),
+      'explicit',
+    )
+  }
+
+  const monthDay = text.match(/(?:^|[^\d])(\d{1,2})月(\d{1,2})日/)
+  if (monthDay) {
+    const month = Number(monthDay[1])
+    const day = Number(monthDay[2])
+    return buildDayTime(
+      `${month}月${day}日`,
+      new Date(today.getFullYear(), month - 1, day, 12, 0, 0),
+      'explicit',
+    )
+  }
+
+  if (/今天|今日|今早|今晚|今天上午|今天下午|今天晚上|今儿/.test(text)) {
+    return buildDayTime(/今晚|今天晚上/.test(text) ? '今晚' : '今天', today)
+  }
+  if (/明天|明日|明早|明晚|明天上午|明天下午|明天晚上/.test(text)) {
+    return buildDayTime(/明晚|明天晚上/.test(text) ? '明晚' : '明天', addDays(today, 1))
+  }
+  if (/后天|后日/.test(text)) {
+    return buildDayTime('后天', addDays(today, 2))
+  }
+
+  return parseWeekdayTime(text, today)
+}
+
 function parseExplicitRange(text: string): AgentAskedTime | null {
   const isoRange = text.match(/(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?\s*(?:到|至|~|～|-|—)\s*(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})日?/)
   if (isoRange) {
@@ -196,6 +283,9 @@ function parseExplicitRange(text: string): AgentAskedTime | null {
       source: 'explicit',
     }
   }
+
+  const explicitDay = parseExplicitDay(text)
+  if (explicitDay) return explicitDay
 
   const yearRange = text.match(/(20\d{2})\s*(?:到|至|~|～|-|—)\s*(20\d{2})\s*年?/)
   if (yearRange) {
@@ -408,6 +498,25 @@ export function parseAskedTime(
   return parseRelativeRange(text, category)
 }
 
+export function hasExplicitDayReference(text: string): boolean {
+  return !!parseExplicitDay(text)
+}
+
+export function isDetailedAnalysisRequest(text: string): boolean {
+  return /报告|分析|详细|深度|推演|完整|展开|研究|长一点|细一点|全面/.test(text)
+}
+
+export function isDateChoiceQuestion(text: string): boolean {
+  const compact = text.replace(/\s+/g, '')
+  const decisionCue = /适合|合适|要不要|能不能|可不可以|行不行|好不好|宜不宜|择日|哪天|哪一天|什么时候|何时/.test(compact)
+  const eventCue = /出门|出行|远行|旅行|动身|搬家|签约|签合同|开业|开张|面试|见客户|谈判|表白|约会|考试|提交|发布|上线|买房|卖房|投资|动工|开工|手术|复诊/.test(compact)
+  return decisionCue && eventCue
+}
+
+export function isLightweightDailyDecisionQuestion(text: string): boolean {
+  return isDateChoiceQuestion(text) && hasExplicitDayReference(text) && !isDetailedAnalysisRequest(text)
+}
+
 export function inferFocus(text: string): string[] {
   const focus: string[] = []
   if (/事业|工作|职业|项目|职场|创业|升职|跳槽/.test(text)) focus.push('事业')
@@ -416,6 +525,8 @@ export function inferFocus(text: string): string[] {
   if (/感情|恋爱|婚姻|桃花|关系|伴侣|对象/.test(text)) focus.push('感情')
   if (/健康|身体|睡眠|压力|情绪|状态/.test(text)) focus.push('身心状态')
   if (/学业|学习|考试|成长/.test(text)) focus.push('学习成长')
+  if (/出门|出行|远行|旅行|动身/.test(text)) focus.push('出行')
+  if (/搬家|签约|签合同|开业|开张|面试|见客户|谈判|表白|约会|考试|提交|发布|上线|买房|卖房|投资|动工|开工|手术|复诊/.test(text)) focus.push('应事择日')
   return uniqueFocus(focus)
 }
 

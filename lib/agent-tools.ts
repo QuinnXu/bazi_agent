@@ -1,4 +1,5 @@
 import { callLLMWithTools, type LlmToolCall, type LlmToolDefinition } from '@/lib/llm'
+import { recordLlmUsage } from '@/lib/token-usage'
 import { hasClearFocusIntent, isLifetimeWealthQuestion, isPartnerArchetypeQuestion, parseAskedTime } from '@/lib/agent-slot-extractor'
 import type { ChatFeatureContext, ChatParticipant } from '@/lib/chat-service'
 import type {
@@ -28,6 +29,7 @@ export interface AgentToolDecision {
 }
 
 export interface AgentToolPlanningInput {
+  userId?: string
   latestText: string
   messages: AgentMessage[]
   pendingConfirmation?: PendingAgentStep | null
@@ -95,7 +97,7 @@ export const AGENT_TOOL_DEFINITIONS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'agent_direct_chat',
-      description: '用于普通闲聊、解释已有结论、用户明确要求不要报告/不要推演/像聊天一样说的情况。不会发卡片，也不会执行命盘分析。',
+      description: '用于普通闲聊、解释已有结论、用户明确要求不要报告/不要推演/像聊天一样说，或人物上下文已足够且问题具体、边界清楚、适合几段话直接回答的情况。不会发卡片，也不会执行报告分析。',
       parameters: objectSchema({
         reason: commonProperties.reason,
       }, ['reason']),
@@ -119,7 +121,7 @@ export const AGENT_TOOL_DEFINITIONS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'agent_confirm_time_range',
-      description: '当结构化分析需要先确认观察时间范围，或用户说了“最近/未来/今年”等需要确认语义的时间词时调用。调用后后端会发时间范围选项卡。',
+      description: '仅当结构化分析缺少时间范围，或用户说了“最近/未来/以后/这段时间/什么时候”等需要确认语义的时间词时调用。今天、明天、后天、具体日期、用户已添加时间段都不需要用这个工具确认。',
       parameters: objectSchema({
         ...commonProperties,
         timeText: {
@@ -143,7 +145,7 @@ export const AGENT_TOOL_DEFINITIONS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'agent_select_depth',
-      description: '当人物、时间、重点基本齐全，但用户还没选择报告长度/消耗苹果档位时调用。调用后后端会发报告深度选择卡片。',
+      description: '当请求明确要报告/深度/完整分析，或属于长期、宏观、多维、较长需求，且人物、时间、重点基本齐全但还没选择报告长度/消耗苹果档位时调用。调用后后端会发报告深度选择卡片。',
       parameters: objectSchema({
         ...commonProperties,
       }, ['reason']),
@@ -153,7 +155,7 @@ export const AGENT_TOOL_DEFINITIONS: LlmToolDefinition[] = [
     type: 'function',
     function: {
       name: 'agent_run_bazi_analysis',
-      description: '当结构化命盘分析所需的人物、时间、重点、报告深度都已具备时调用。后端会进入现有 Agent 分析生成流程。',
+      description: '当结构化报告所需的人物、时间、重点、报告深度都已具备时调用。后端会进入现有 Agent 分析生成流程。',
       parameters: objectSchema({
         ...commonProperties,
         timeText: {
@@ -256,16 +258,19 @@ function toolPlannerMessages(input: AgentToolPlanningInput) {
 
 决策规则：
 1. 用户明确要闲聊、简单说、不要报告、不要推演、解释已有内容时，调用 agent_direct_chat。
-2. 用户要做八字/命盘/合盘/运势/事业财运/感情/人生脉络等结构化分析时，不要直聊；先检查缺什么。
-3. 缺当前命主或被提到人物的八字资料，调用 agent_request_bazi_profile。
-4. 时间词含糊，或 fortune/event/relationship 分析需要观察范围，调用 agent_confirm_time_range。
-5. 分析重点太宽且用户没说重点，调用 agent_confirm_focus。用户已说财运/财富/暴富/发财/搞钱/赚钱/事业/感情等明确重点时，不要调用 agent_confirm_focus。
-6. 只剩报告长度/消耗档位未定时，调用 agent_select_depth。
-7. 人物、时间、重点、深度都足够时，调用 agent_run_bazi_analysis。
-8. 不要把用户询问的运势时间误当出生日期；出生资料只能在用户明确提供出生年月日时用于资料卡预填。
-9. “此生/这一生/什么时候能暴富/发财”是人生财富窗口，不要要求用户改选未来 30 天/3 个月/今年；如果当前命主已存在，通常只需要选择深度或直接分析。
-10. “适合和谁/哪类人一起搞钱/合伙赚钱”是合作对象画像，不是缺少具体第二个人；不要调用 agent_request_bazi_profile 补“谁”的八字。
-11. pendingConfirmation 不为空时，优先让既有 workflow 处理，除非用户明显改成闲聊。`,
+2. 用户的问题具体、边界清楚、人物上下文已足够，且几段话就能有效回答时，调用 agent_direct_chat，例如某天适不适合行动、近期状态提醒、单个选择建议。
+3. 用户明确要报告/详细/深度/完整/全面/展开/研究，或问题较长、多段、多主题、长期/宏观/需要结构化章节时，不要直聊；先检查缺什么并进入报告流程。
+4. 用户要做八字/命盘/合盘/运势/事业财运/感情/人生脉络等结构化分析时，如果属于宏观或报告型需求，不要直聊；先检查缺什么。
+5. 缺当前命主或被提到人物的八字资料，调用 agent_request_bazi_profile。
+6. 只有时间缺失或时间词含糊时，才调用 agent_confirm_time_range，例如“最近/未来/以后/这段时间/什么时候/哪段时间”。如果用户说的是今天/明天/后天/本周X/周末/具体日期，或已经添加时间段，不要为了确认时间再调用时间卡。
+7. 分析重点太宽且用户没说重点，调用 agent_confirm_focus。用户已说财运/财富/暴富/发财/搞钱/赚钱/事业/感情等明确重点时，不要调用 agent_confirm_focus。
+8. 只剩报告长度/消耗档位未定，且这是报告型需求时，调用 agent_select_depth。
+9. 报告型需求的人物、时间、重点、深度都足够时，调用 agent_run_bazi_analysis。
+10. 不要把用户询问的运势时间误当出生日期；出生资料只能在用户明确提供出生年月日时用于资料卡预填。
+11. “此生/这一生/什么时候能暴富/发财”是人生财富窗口，不要要求用户改选未来 30 天/3 个月/今年；如果当前命主已存在，通常只需要选择深度或直接分析。
+12. “适合和谁/哪类人一起搞钱/合伙赚钱”是合作对象画像，不是缺少具体第二个人；不要调用 agent_request_bazi_profile 补“谁”的八字。
+13. 轻量日常择日问题，例如“我今天适合出门吗/明天适合签约吗”，且没有要求报告、详细分析、深度推演时，调用 agent_direct_chat，让主聊天结合已有命盘直接回答。
+14. pendingConfirmation 不为空时，优先让既有 workflow 处理，除非用户明显改成闲聊。`,
     },
     {
       role: 'user',
@@ -340,6 +345,18 @@ export async function selectAgentToolWithLLM(
         reasoningEffort: 'none',
       },
     )
+    if (input.userId) {
+      // Fire-and-forget; recordLlmUsage swallows its own errors.
+      void recordLlmUsage({
+        userId: input.userId,
+        source: 'agent_planner',
+        mode: 'agent',
+        model: response.config.model,
+        task: 'agent_planner',
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+      })
+    }
     const call = response.toolCalls[0]
     if (!call || !isAgentToolName(call.function.name)) return null
     return {
@@ -409,7 +426,9 @@ export function applyAgentToolDecisionToSlots(
     if (askedTime) {
       next.askedTime = {
         ...askedTime,
-        confidence: decision.name === 'agent_confirm_time_range' ? 'medium' : askedTime.confidence,
+        confidence: decision.name === 'agent_confirm_time_range' && askedTime.confidence !== 'high'
+          ? 'medium'
+          : askedTime.confidence,
       }
       next.confidence.time = next.askedTime.confidence
     }

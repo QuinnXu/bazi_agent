@@ -31,10 +31,26 @@ function safeTokenCount(value: number): number {
   return Math.max(0, Math.floor(value))
 }
 
+// Canonical "feature page" identifiers. Anything else (e.g. agent internal
+// stages, follow-up report types) is normalised to NULL so the row passes
+// the historical CHECK constraint and stays semantically clean.
+const FEATURE_KIND_WHITELIST = new Set<string>([
+  'fortune',
+  'hepan',
+  'avatar',
+  'lifepath',
+])
+
+function normaliseFeatureKind(value?: string | null): string | null {
+  if (!value) return null
+  return FEATURE_KIND_WHITELIST.has(value) ? value : null
+}
+
 export async function recordLlmUsage(record: LlmUsageRecord): Promise<void> {
   const inputTokens = safeTokenCount(record.inputTokens)
   const outputTokens = safeTokenCount(record.outputTokens)
   const totalTokens = inputTokens + outputTokens
+  const featureKind = normaliseFeatureKind(record.featureKind)
 
   try {
     const supabase = createServiceClient()
@@ -44,7 +60,7 @@ export async function recordLlmUsage(record: LlmUsageRecord): Promise<void> {
         user_id: record.userId,
         source: record.source,
         mode: record.mode,
-        feature_kind: record.featureKind || null,
+        feature_kind: featureKind,
         model: record.model,
         task: record.task,
         input_tokens: inputTokens,

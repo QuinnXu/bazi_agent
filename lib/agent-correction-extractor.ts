@@ -1,4 +1,5 @@
-import { callLLMText } from '@/lib/llm'
+import { callLLMTextWithUsage } from '@/lib/llm'
+import { recordLlmUsage } from '@/lib/token-usage'
 import type {
   AgentParticipant,
   AgentWorkflowCorrection,
@@ -111,6 +112,7 @@ function participantSnapshot(participants?: AgentParticipant[]): Array<{ id?: st
 }
 
 export async function extractAgentCorrectionWithLLM(input: {
+  userId?: string
   latestText: string
   pendingConfirmation: PendingAgentStep
   selectedProfile?: AgentParticipant | null
@@ -168,14 +170,25 @@ ${compactJson({
 
   const timeout = createTimeoutSignal(input.signal)
   try {
-    const text = await callLLMText(messages, 'agent_extractor', {
+    const result = await callLLMTextWithUsage(messages, 'agent_extractor', {
       signal: timeout.signal,
       maxTokens: 700,
       temperature: 0,
       thinking: 'disabled',
       reasoningEffort: 'none',
     })
-    return normalizeCorrection(extractJsonObject(text))
+    if (input.userId) {
+      void recordLlmUsage({
+        userId: input.userId,
+        source: 'agent_planner',
+        mode: 'agent',
+        model: result.config.model,
+        task: 'agent_extractor',
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+      })
+    }
+    return normalizeCorrection(extractJsonObject(result.text))
   } catch (error) {
     console.warn('[agent-correction-extractor] fallback to deterministic path', error)
     return null

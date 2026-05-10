@@ -146,9 +146,12 @@ CREATE TABLE IF NOT EXISTS public.llm_usage_events (
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
 
     -- Request source and context
-    source TEXT NOT NULL CHECK (source IN ('classic_chat', 'agent_planner', 'feature_page', 'agent_tool')),
+    source TEXT NOT NULL CHECK (source IN ('classic_chat', 'agent_planner', 'agent_analysis', 'feature_page', 'agent_tool')),
     mode TEXT NOT NULL CHECK (mode IN ('classic', 'agent', 'feature')),
-    feature_kind TEXT CHECK (feature_kind IS NULL OR feature_kind IN ('fortune', 'hepan', 'avatar', 'lifepath')),
+    -- feature_kind is intentionally free-form; the application normalises
+    -- it before insert (see lib/token-usage.ts), but new feature tags
+    -- shouldn't require a schema migration.
+    feature_kind TEXT,
 
     -- Model routing metadata
     model TEXT NOT NULL,

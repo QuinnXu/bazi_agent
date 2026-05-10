@@ -229,6 +229,251 @@ async function main() {
     throw new Error(`tool missing profile failed: text=${toolMissingProfile.text}, ui=${JSON.stringify(toolMissingProfile.ui)}`)
   }
 
+  const dailyDirectFromBadTool = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '我今天适合出门吗？' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => ({
+        name: 'agent_confirm_time_range',
+        arguments: {
+          reason: '故意模拟 LLM 误以为今天还要确认时间卡',
+          category: 'fortune',
+          focus: ['出行', '日常'],
+          timeText: '今天',
+        },
+      }),
+      directChat: async () => '今天可以出门，但更适合轻装、少绕路，重要沟通留一点余地。',
+      runAnalysisStream: async () => {
+        throw new Error('explicit daily decision should not run paid analysis')
+      },
+    },
+  )
+  if (
+    !dailyDirectFromBadTool.text.includes('今天可以出门') ||
+    dailyDirectFromBadTool.ui ||
+    dailyDirectFromBadTool.done?.pendingConfirmation ||
+    !dailyDirectFromBadTool.events.some(event => event.type === 'trace' && event.trace?.action === 'tool_call:agent_direct_chat')
+  ) {
+    throw new Error(`daily direct normalization failed: text=${dailyDirectFromBadTool.text}, ui=${JSON.stringify(dailyDirectFromBadTool.ui)}, done=${JSON.stringify(dailyDirectFromBadTool.done)}`)
+  }
+
+  const tomorrowSigningCaptured: { request?: AgentAnalysisRequest } = {}
+  const tomorrowSigningFinal = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '详细分析我明天适合签约吗？' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => null,
+      runAnalysisStream: async ({ request }) => {
+        tomorrowSigningCaptured.request = request
+        return '明天签约分析已生成。'
+      },
+    },
+  )
+  const tomorrowVisibleText = `${tomorrowSigningFinal.text}\n${visibleUiText(tomorrowSigningFinal.ui)}`
+  if (
+    !tomorrowSigningFinal.text.includes('明天签约分析') ||
+    tomorrowSigningFinal.done?.pendingConfirmation ||
+    tomorrowSigningCaptured.request?.slots.askedTime?.label !== '明天' ||
+    tomorrowSigningCaptured.request?.slots.matter?.focus?.[0] !== '应事择日' ||
+    tomorrowSigningCaptured.request?.depth !== 'detailed' ||
+    /未来 30 天|未来 3 个月|今年剩余时间/.test(tomorrowVisibleText)
+  ) {
+    throw new Error(`tomorrow explicit date policy failed: text=${tomorrowSigningFinal.text}, ui=${JSON.stringify(tomorrowSigningFinal.ui)}, done=${JSON.stringify(tomorrowSigningFinal.done)}, request=${JSON.stringify(tomorrowSigningCaptured.request)}`)
+  }
+
+  const recentOutingCard = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '我最近适合出门吗？' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => null,
+      runAnalysisStream: async () => {
+        throw new Error('recent outing should ask a contextual date card')
+      },
+    },
+  )
+  const recentOutingField = recentOutingCard.ui?.fields?.[0]
+  const recentOptionValues = (recentOutingField?.options || []).map((option: any) => option.value)
+  const recentVisibleText = `${recentOutingCard.text}\n${visibleUiText(recentOutingCard.ui)}`
+  if (
+    recentOutingCard.done?.pendingConfirmation?.kind !== 'confirm_time' ||
+    recentOutingField?.name !== 'timeRangeChoice' ||
+    !recentOptionValues.includes('today') ||
+    !recentOptionValues.includes('tomorrow') ||
+    /未来 3 个月|今年剩余时间/.test(recentVisibleText)
+  ) {
+    throw new Error(`recent outing contextual card failed: text=${recentOutingCard.text}, ui=${JSON.stringify(recentOutingCard.ui)}`)
+  }
+
+  const recentStateDirect = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '我最近状态怎么样？' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => ({
+        name: 'agent_select_depth',
+        arguments: {
+          reason: '故意模拟 LLM 把一个短问题误判成报告深度选择',
+          category: 'fortune',
+          focus: ['身心状态'],
+        },
+      }),
+      directChat: async () => '最近状态短答：先稳住节奏，少做高消耗决定。',
+      runAnalysisStream: async () => {
+        throw new Error('bounded recent-state question should not run report analysis')
+      },
+    },
+  )
+  if (
+    !recentStateDirect.text.includes('最近状态短答') ||
+    recentStateDirect.ui ||
+    recentStateDirect.done?.pendingConfirmation ||
+    !recentStateDirect.events.some(event => event.type === 'trace' && event.trace?.action === 'tool_call:agent_direct_chat')
+  ) {
+    throw new Error(`recent state direct routing failed: text=${recentStateDirect.text}, ui=${JSON.stringify(recentStateDirect.ui)}, done=${JSON.stringify(recentStateDirect.done)}`)
+  }
+
+  const explicitReportFromBadDirect = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '给我一份2026年事业财运报告' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => ({
+        name: 'agent_direct_chat',
+        arguments: { reason: '故意模拟 LLM 想短答报告型需求' },
+      }),
+      directChat: async () => {
+        throw new Error('explicit report request should be upgraded out of direct chat')
+      },
+      runAnalysisStream: async () => {
+        throw new Error('explicit report request should ask depth before analysis')
+      },
+    },
+  )
+  const explicitReportField = explicitReportFromBadDirect.ui?.fields?.[0]
+  if (
+    explicitReportFromBadDirect.done?.pendingConfirmation?.kind !== 'select_depth' ||
+    explicitReportField?.name !== 'depthChoice' ||
+    !explicitReportFromBadDirect.events.some(event => event.type === 'trace' && event.trace?.action === 'tool_call:agent_select_depth') ||
+    !explicitReportFromBadDirect.events.some(event => event.type === 'trace' && event.trace?.action === 'response_mode:report')
+  ) {
+    throw new Error(`explicit report upgrade failed: text=${explicitReportFromBadDirect.text}, ui=${JSON.stringify(explicitReportFromBadDirect.ui)}, events=${JSON.stringify(explicitReportFromBadDirect.events)}`)
+  }
+
+  const longRequestFromBadDirect = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '我想看2026年事业、财富和感情的整体节奏，分别有哪些机会、风险和行动建议？' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => ({
+        name: 'agent_direct_chat',
+        arguments: { reason: '故意模拟 LLM 想短答较长的多主题需求' },
+      }),
+      directChat: async () => {
+        throw new Error('long multi-topic request should be upgraded out of direct chat')
+      },
+      runAnalysisStream: async () => {
+        throw new Error('long multi-topic request should ask depth before analysis')
+      },
+    },
+  )
+  const longRequestField = longRequestFromBadDirect.ui?.fields?.[0]
+  if (
+    longRequestFromBadDirect.done?.pendingConfirmation?.kind !== 'select_depth' ||
+    longRequestField?.name !== 'depthChoice' ||
+    !longRequestFromBadDirect.events.some(event => event.type === 'trace' && event.trace?.action === 'response_mode:report')
+  ) {
+    throw new Error(`long request report recommendation failed: text=${longRequestFromBadDirect.text}, ui=${JSON.stringify(longRequestFromBadDirect.ui)}, events=${JSON.stringify(longRequestFromBadDirect.events)}`)
+  }
+
+  const llmPlannedCard = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '我最近适合出门吗？' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => null,
+      planCard: async () => ({
+        family: 'daily_decision',
+        title: '小象帮你定个出门日',
+        message: '选一个你最可能出门的日子，小象按那天细看。',
+        submitLabel: '就看这天',
+        optionHints: [
+          { key: 'tomorrow', label: '明天出门', description: '适合想稍微缓一缓再出发。' },
+          { key: 'today', label: '今天出门', description: '适合马上要动身。' },
+        ],
+      }),
+      runAnalysisStream: async () => {
+        throw new Error('planned card should still wait for user selection')
+      },
+    },
+  )
+  const plannedField = llmPlannedCard.ui?.fields?.[0]
+  const plannedOptions = plannedField?.options || []
+  if (
+    llmPlannedCard.ui?.title !== '小象帮你定个出门日' ||
+    !llmPlannedCard.text.includes('选一个你最可能出门的日子') ||
+    plannedOptions[0]?.value !== 'tomorrow' ||
+    plannedOptions[0]?.label !== '明天出门' ||
+    !plannedOptions[0]?.params?.draftSlots?.askedTime ||
+    !llmPlannedCard.events.some(event => event.type === 'trace' && event.trace?.action === 'card_plan:daily_decision')
+  ) {
+    throw new Error(`llm planned card failed: text=${llmPlannedCard.text}, ui=${JSON.stringify(llmPlannedCard.ui)}`)
+  }
+
+  const invalidPlannedCard = await collect(
+    {
+      userId: 'smoke-user',
+      messages: [{ role: 'user', content: '我最近适合出门吗？' }],
+      selectedProfile: selfProfile,
+      participants: [selfProfile],
+      timeoutMs: 10_000,
+    },
+    {
+      selectTool: async () => null,
+      planCard: async () => ({ family: 'made_up', title: '不该出现的卡片' } as any),
+      runAnalysisStream: async () => {
+        throw new Error('invalid planned card should still wait for user selection')
+      },
+    },
+  )
+  if (
+    visibleUiText(invalidPlannedCard.ui).includes('不该出现') ||
+    invalidPlannedCard.events.some(event => event.type === 'trace' && String(event.trace?.action || '').startsWith('card_plan:')) ||
+    invalidPlannedCard.done?.pendingConfirmation?.kind !== 'confirm_time'
+  ) {
+    throw new Error(`invalid planned card fallback failed: text=${invalidPlannedCard.text}, ui=${JSON.stringify(invalidPlannedCard.ui)}, events=${JSON.stringify(invalidPlannedCard.events)}`)
+  }
+
   const lifetimeWealthDepthAsk = await collect(
     {
       userId: 'smoke-user',

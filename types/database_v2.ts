@@ -203,9 +203,9 @@ export interface Database {
         Row: {
           id: string
           user_id: string
-          source: 'classic_chat' | 'agent_planner' | 'feature_page' | 'agent_tool'
+          source: 'classic_chat' | 'agent_planner' | 'agent_analysis' | 'feature_page' | 'agent_tool'
           mode: 'classic' | 'agent' | 'feature'
-          feature_kind: 'fortune' | 'hepan' | 'avatar' | 'lifepath' | null
+          feature_kind: string | null
           model: string
           task: string
           status: 'completed' | 'empty' | 'aborted' | 'failed'
@@ -217,9 +217,9 @@ export interface Database {
         Insert: {
           id?: string
           user_id: string
-          source: 'classic_chat' | 'agent_planner' | 'feature_page' | 'agent_tool'
+          source: 'classic_chat' | 'agent_planner' | 'agent_analysis' | 'feature_page' | 'agent_tool'
           mode: 'classic' | 'agent' | 'feature'
-          feature_kind?: 'fortune' | 'hepan' | 'avatar' | 'lifepath' | null
+          feature_kind?: string | null
           model: string
           task: string
           status?: 'completed' | 'empty' | 'aborted' | 'failed'
@@ -229,9 +229,9 @@ export interface Database {
           created_at?: string
         }
         Update: {
-          source?: 'classic_chat' | 'agent_planner' | 'feature_page' | 'agent_tool'
+          source?: 'classic_chat' | 'agent_planner' | 'agent_analysis' | 'feature_page' | 'agent_tool'
           mode?: 'classic' | 'agent' | 'feature'
-          feature_kind?: 'fortune' | 'hepan' | 'avatar' | 'lifepath' | null
+          feature_kind?: string | null
           model?: string
           task?: string
           status?: 'completed' | 'empty' | 'aborted' | 'failed'

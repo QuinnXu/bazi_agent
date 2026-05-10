@@ -11,6 +11,12 @@ import {
   type AgentReportPreference,
 } from '@/lib/agent-complexity'
 import { runAgentAnalysisStream } from '@/lib/agent-analysis-runner'
+import {
+  normalizeAgentCardPlan,
+  planAgentCardWithLLM,
+  type AgentCardPlan,
+  type AgentCardPlanningInput,
+} from '@/lib/agent-card-planner'
 import { extractAgentCorrectionWithLLM } from '@/lib/agent-correction-extractor'
 import { buildCalendarContext } from '@/lib/agent-prompt-builder'
 import {
@@ -22,12 +28,17 @@ import {
 import {
   applyPendingAnswer,
   planNextQuestion,
+  type AgentQuestionResponseMode,
 } from '@/lib/agent-question-planner'
 import {
   buildInitialSlots,
   extractPersonCorrection,
   hasAgentCorrectionSignal,
   hasAnalysisIntent,
+  isDateChoiceQuestion,
+  isLightweightDailyDecisionQuestion,
+  isLifetimeWealthQuestion,
+  isPartnerArchetypeQuestion,
   isPlainChatRequest,
   latestUserText,
 } from '@/lib/agent-slot-extractor'
@@ -60,6 +71,20 @@ const AGENT_STREAM_DELAY_MS = 0
 const AGENT_STREAM_MIN_CHARS = 4
 const AGENT_STREAM_MAX_CHARS = 24
 const MAX_MESSAGE_CHARS = 1600
+
+type AgentResponseReason =
+  | 'plain_chat'
+  | 'specific_answer'
+  | 'needs_clarifying_card'
+  | 'explicit_report'
+  | 'macro_report'
+  | 'report_recommended'
+  | 'active_report_workflow'
+
+interface AgentResponsePolicy {
+  mode: AgentQuestionResponseMode
+  reason: AgentResponseReason
+}
 
 export interface AgentChatInput {
   userId: string
@@ -134,6 +159,7 @@ export interface AgentRuntimeDeps {
   ) => Promise<ReadableStream | string>
   extractCorrection?: (
     input: {
+      userId?: string
       latestText: string
       pendingConfirmation: AgentPendingConfirmation
       selectedProfile?: AgentParticipant | null
@@ -145,6 +171,10 @@ export interface AgentRuntimeDeps {
     input: AgentToolPlanningInput,
     opts: { signal?: AbortSignal },
   ) => Promise<AgentToolDecision | null>
+  planCard?: (
+    input: AgentCardPlanningInput,
+    opts: { signal?: AbortSignal },
+  ) => Promise<AgentCardPlan | unknown | null>
 }
 
 function truncateText(text: string | null | undefined, max: number): string {
@@ -431,10 +461,182 @@ function shouldDirectChat(input: AgentChatInput, latest: string): boolean {
   if (!latest.trim()) return true
   if (input.pendingConfirmation && isPendingOptionTurn(input.pendingConfirmation, latest)) return false
   if (isPlainChatRequest(latest)) return true
+  if (textSuggestsReportFlow(input, latest)) return false
+  const canAnswerDirectly = isLightweightDailyDecisionQuestion(latest) || (
+    isBoundedDirectAnswerText(latest) && !isDateChoiceQuestion(latest)
+  )
+  if (canAnswerDirectly && !hasRelationshipCounterpartyCue(latest) && hasDirectChatProfileContext(input)) return true
   if (input.featureContext && /(继续|展开|详细说|第[一二三四五六七八九十0-9]+点|行动清单|怎么做|什么意思|总结|接着|那.*呢)/.test(latest)) {
     return true
   }
   return !hasAnalysisIntent(latest)
+}
+
+function hasDirectChatProfileContext(input: AgentChatInput): boolean {
+  const currentProfile = resolveCurrentProfile(input)
+  if (currentProfile?.baziText?.trim() || currentProfile?.pillars?.trim()) return true
+  if (input.baziAnalysisResult?.trim()) return true
+  return (input.participants || []).some(profile => !!(profile.baziText?.trim() || profile.pillars?.trim()))
+}
+
+function compactIntentText(text: string): string {
+  return text.replace(/\s+/g, '')
+}
+
+function hasExplicitReportRequest(text: string): boolean {
+  const compact = compactIntentText(text)
+  return /报告|深度|详细|完整|全面|展开|研究|长一点|细一点|长报告|系统性|结构化|推演/.test(compact)
+}
+
+function hasLongHorizonCue(text: string): boolean {
+  const compact = compactIntentText(text)
+  return /未来几年|接下来几年|近几年|后面几年|未来[一二两三四五六七八九十\d]+年|接下来[一二两三四五六七八九十\d]+年|今年|全年|长期|大运|流年|人生|此生|一生|这一生|这辈子|阶段|窗口|整体|综合|全局/.test(compact)
+}
+
+function countMonths(start?: string, end?: string): number {
+  if (!start || !end) return 0
+  const startDate = new Date(start)
+  const endDate = new Date(end)
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return 0
+  return (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth()) + 1
+}
+
+function hasLongHorizonSlots(slots: AgentAnalysisSlots): boolean {
+  const label = slots.askedTime?.label || ''
+  if (/未来\s*[三四五六七八九十\d]+\s*年|未来几年|接下来几年|今年全年|全年|长期|大运|人生/.test(label)) return true
+  return countMonths(slots.askedTime?.start, slots.askedTime?.end) >= 10
+}
+
+function hasMacroReportShape(text: string, slots?: AgentAnalysisSlots): boolean {
+  if (isLifetimeWealthQuestion(text) || isPartnerArchetypeQuestion(text)) return true
+  if (hasLongHorizonCue(text)) return true
+  if (slots?.matter?.category === 'lifepath') return true
+  if (slots?.matter?.category === 'relationship' && /合盘|关系|相处|缘分|婚姻|长期|今年|未来|如何|怎么样/.test(text)) return true
+  if (slots && hasLongHorizonSlots(slots)) return true
+  return false
+}
+
+function hasMultiPartReportShape(text: string, slots?: AgentAnalysisSlots): boolean {
+  const compact = compactIntentText(text)
+  const focusCount = slots?.matter?.focus?.length || 0
+  if (compact.length >= 90) return true
+  if (focusCount >= 3) return true
+  if (compact.length >= 52 && /(同时|另外|再看|顺便|以及|并且|分别|还想|也想|多个|几个|第一|第二)/.test(compact)) return true
+  if (focusCount >= 2 && /(整体|综合|分别|对比|规划|策略|行动|时间线|窗口|路线|地图)/.test(compact)) return true
+  return false
+}
+
+function textSuggestsReportFlow(input: AgentChatInput, text: string): boolean {
+  return !!effectiveReportPreference(input) ||
+    hasExplicitReportRequest(text) ||
+    hasMacroReportShape(text) ||
+    hasMultiPartReportShape(text)
+}
+
+function isBoundedDirectAnswerText(text: string): boolean {
+  const compact = compactIntentText(text)
+  if (hasExplicitReportRequest(compact) || hasLongHorizonCue(compact)) return false
+  if (isDateChoiceQuestion(compact)) return true
+  if (/(今天|明天|后天|本周|这周|周末|最近|近期|这几天|这个月|本月|下个月|未来30天|未来一个月).{0,20}(状态|怎么样|如何|注意|提醒|建议|适合|要不要|能不能|可不可以|好不好|怎么办|怎么做)/.test(compact)) {
+    return true
+  }
+  return /(要不要|适不适合|适合吗|合适吗|能不能|可不可以|行不行|好不好|注意什么|怎么做|怎么办|选哪个|哪一个)/.test(compact)
+}
+
+function hasRelationshipCounterpartyCue(text: string): boolean {
+  const compact = compactIntentText(text)
+  return /合盘|(?:我|本人|自己|当前命主).{0,4}(?:和|跟|与)|(?:和|跟|与).{1,18}(?:关系|相处|缘分|适合|合适|匹配|合不合|配不配)/.test(compact)
+}
+
+function shouldAskClarifyingCardBeforeDirect(
+  slots: AgentAnalysisSlots,
+  sourceText: string,
+  toolDecision?: AgentToolDecision | null,
+): boolean {
+  const category = slots.matter?.category
+  if ((category === 'fortune' || category === 'event') && !slots.askedTime && isDateChoiceQuestion(sourceText)) return true
+  if (slots.askedTime?.confidence === 'medium' && isDateChoiceQuestion(sourceText)) return true
+  return toolDecision?.name === 'agent_confirm_time_range' && isDateChoiceQuestion(sourceText)
+}
+
+function chooseAgentResponseMode(
+  input: AgentChatInput,
+  slots: AgentAnalysisSlots,
+  sourceText: string,
+  latest: string,
+  toolDecision?: AgentToolDecision | null,
+): AgentResponsePolicy {
+  const intentText = sourceText || latest
+  if (slots.matter?.analysisMode !== 'analysis') {
+    return { mode: 'direct_answer', reason: 'plain_chat' }
+  }
+  if (input.pendingConfirmation?.kind === 'select_depth' || effectiveReportPreference(input)) {
+    return { mode: 'report', reason: 'active_report_workflow' }
+  }
+  if (hasExplicitReportRequest(intentText)) {
+    return { mode: 'report', reason: 'explicit_report' }
+  }
+  if (hasMacroReportShape(intentText, slots)) {
+    return { mode: 'report', reason: 'macro_report' }
+  }
+  if (hasMultiPartReportShape(intentText, slots)) {
+    return { mode: 'report', reason: 'report_recommended' }
+  }
+  if (shouldAskClarifyingCardBeforeDirect(slots, intentText, toolDecision)) {
+    return { mode: 'ask_more', reason: 'needs_clarifying_card' }
+  }
+  return { mode: 'direct_answer', reason: 'specific_answer' }
+}
+
+function buildDirectAnswerInput(
+  input: AgentChatInput,
+  slots: AgentAnalysisSlots,
+  sourceText: string,
+  policy: AgentResponsePolicy,
+): AgentChatInput {
+  const people = slots.people.map(person => person.name).filter(Boolean).join('、') || '当前上下文人物'
+  const time = slots.askedTime?.label || '用户问题里的自然时间语境'
+  const focus = slots.matter?.focus?.join('、') || slots.matter?.category || '当前问题'
+  const guidance: AgentMessage = {
+    role: 'system',
+    content: `【Agent 直接回答模式】这次不要写成长报告，也不要展示报告结构。请围绕用户的具体问题直接回答，结合可用八字/人物/时间上下文给出结论、原因和行动提醒。若信息有不确定处，简短说明假设即可。\n判定原因：${policy.reason}\n原始问题：${sourceText}\n人物：${people}\n时间：${time}\n重点：${focus}`,
+  }
+  return {
+    ...input,
+    pendingConfirmation: null,
+    messages: [guidance, ...input.messages],
+  }
+}
+
+function normalizeToolDecisionForQuestion(
+  input: AgentChatInput,
+  latest: string,
+  decision: AgentToolDecision | null,
+): AgentToolDecision | null {
+  if (!decision) return null
+  if (decision.name === 'agent_direct_chat' && textSuggestsReportFlow(input, latest)) {
+    return {
+      ...decision,
+      name: 'agent_select_depth',
+      arguments: {
+        ...decision.arguments,
+        reason: '用户需求更适合作为结构化报告处理；改走表单和报告流程。',
+      },
+    }
+  }
+  if (decision.name === 'agent_direct_chat') return decision
+  const canAnswerDirectly = isLightweightDailyDecisionQuestion(latest) || (
+    isBoundedDirectAnswerText(latest) && !isDateChoiceQuestion(latest)
+  )
+  if (!canAnswerDirectly || hasRelationshipCounterpartyCue(latest) || !hasDirectChatProfileContext(input)) return decision
+  if (decision.name === 'agent_request_bazi_profile') return decision
+  return {
+    ...decision,
+    name: 'agent_direct_chat',
+    arguments: {
+      reason: '用户问的是具体、边界清楚的问题，且未要求深度报告；改为结合命盘直接回答，避免不必要卡片。',
+    },
+  }
 }
 
 async function maybeExtractLiveCorrection(
@@ -448,6 +650,7 @@ async function maybeExtractLiveCorrection(
   if (deps.extractCorrection) {
     return deps.extractCorrection(
       {
+        userId: input.userId,
         latestText: latest,
         pendingConfirmation: input.pendingConfirmation,
         selectedProfile: input.selectedProfile,
@@ -457,6 +660,7 @@ async function maybeExtractLiveCorrection(
     )
   }
   return extractAgentCorrectionWithLLM({
+    userId: input.userId,
     latestText: latest,
     pendingConfirmation: input.pendingConfirmation,
     selectedProfile: input.selectedProfile,
@@ -473,6 +677,7 @@ async function maybeSelectAgentTool(
   if (input.pendingConfirmation) return null
   if (!deps.selectTool && !process.env.DEEPSEEK_API_KEY) return null
   const planningInput: AgentToolPlanningInput = {
+    userId: input.userId,
     latestText: latest,
     messages: input.messages,
     pendingConfirmation: input.pendingConfirmation,
@@ -484,9 +689,39 @@ async function maybeSelectAgentTool(
     baziAnalysisResult: input.baziAnalysisResult,
   }
   if (deps.selectTool) {
-    return deps.selectTool(planningInput, { signal: input.signal })
+    return normalizeToolDecisionForQuestion(
+      input,
+      latest,
+      await deps.selectTool(planningInput, { signal: input.signal }),
+    )
   }
-  return selectAgentToolWithLLM(planningInput, { signal: input.signal })
+  return normalizeToolDecisionForQuestion(
+    input,
+    latest,
+    await selectAgentToolWithLLM(planningInput, { signal: input.signal }),
+  )
+}
+
+async function maybePlanAgentCard(
+  input: AgentChatInput,
+  deps: AgentRuntimeDeps,
+  question: NonNullable<ReturnType<typeof planNextQuestion>>,
+  slots: AgentAnalysisSlots,
+  sourceText: string,
+): Promise<AgentCardPlan | null> {
+  if (question.pending.kind === 'create_profile') return null
+  const planningInput: AgentCardPlanningInput = {
+    userId: input.userId,
+    latestText: sourceText,
+    slots,
+    pendingKind: question.pending.kind,
+    deterministicTitle: question.ui.title,
+    deterministicMessage: question.content,
+  }
+  if (deps.planCard) {
+    return normalizeAgentCardPlan(await deps.planCard(planningInput, { signal: input.signal }))
+  }
+  return planAgentCardWithLLM(planningInput, { signal: input.signal })
 }
 
 export async function* runAgentChatEvents(
@@ -670,8 +905,28 @@ export async function* runAgentChatEvents(
     return
   }
 
-  const question = planNextQuestion(resolved, sourceText)
+  const responsePolicy = chooseAgentResponseMode(input, resolved, sourceText, latest, toolDecision)
+  yield traceEvent(trace, {
+    step: 1,
+    action: `response_mode:${responsePolicy.mode}`,
+    ok: true,
+    detail: responsePolicy.reason,
+    elapsedMs: Date.now() - startedAt,
+  })
+
+  let question = planNextQuestion(resolved, sourceText, null, { responseMode: responsePolicy.mode })
   if (question) {
+    const cardPlan = await maybePlanAgentCard(input, deps, question, resolved, sourceText)
+    if (cardPlan) {
+      yield traceEvent(trace, {
+        step: 2,
+        action: `card_plan:${cardPlan.family}`,
+        ok: true,
+        detail: cardPlan.title || cardPlan.message || undefined,
+        elapsedMs: Date.now() - startedAt,
+      })
+      question = planNextQuestion(resolved, sourceText, cardPlan, { responseMode: responsePolicy.mode }) || question
+    }
     yield traceEvent(trace, {
       step: 2,
       action: `ask:${question.pending.kind}`,
@@ -697,6 +952,36 @@ export async function* runAgentChatEvents(
       trace,
       pendingConfirmation: question.pending,
     }
+    return
+  }
+
+  if (responsePolicy.mode !== 'report') {
+    yield traceEvent(trace, {
+      step: 2,
+      action: 'direct_answer',
+      ok: true,
+      detail: responsePolicy.reason,
+      elapsedMs: Date.now() - startedAt,
+    })
+    yield progressEvent(startedAt, {
+      step: 2,
+      phase: 'final',
+      status: 'running',
+      title: '小象直接回答',
+    })
+    const directStream = await openDirectChatStream(
+      buildDirectAnswerInput(input, resolved, sourceText, responsePolicy),
+      deps,
+      input.signal,
+    )
+    yield* streamReadableEvents(directStream)
+    yield progressEvent(startedAt, {
+      step: 2,
+      phase: 'final',
+      status: 'completed',
+      title: '小象答完啦',
+    })
+    yield { type: 'done', trace, pendingConfirmation: null }
     return
   }
 

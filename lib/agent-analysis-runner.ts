@@ -145,7 +145,7 @@ export async function runAgentAnalysisStream(
     model: llmResult.config.model,
     task,
     inputTokens: llmResult.inputTokens,
-    featureKind: 'agent_analysis',
+    featureKind: null,
   })
 
   return {

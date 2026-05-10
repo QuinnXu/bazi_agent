@@ -9,12 +9,16 @@ import type {
   PendingAgentStep,
   PendingAgentStepKind,
 } from '@/lib/agent-workflow-types'
+import type { AgentCardFamily, AgentCardPlan } from '@/lib/agent-card-planner'
 import {
   extractPersonCorrection,
+  isDateChoiceQuestion,
   isLifetimeWealthQuestion,
   isPartnerArchetypeQuestion,
   parseAskedTime,
 } from '@/lib/agent-slot-extractor'
+
+type AgentFieldOptions = NonNullable<AgentHumanInputField['options']>
 
 const DEFAULT_BAZI_FORM_DATA: AgentBaziFormData = {
   profileName: '',
@@ -253,6 +257,196 @@ function customTimePlaceholder(slots: AgentAnalysisSlots): string {
   return '比如：先看三个月内 / 到年底前 / 接下来一个阶段'
 }
 
+function cardPlanMatches(plan: AgentCardPlan | null | undefined, families: AgentCardFamily[]): boolean {
+  return !!plan && families.includes(plan.family)
+}
+
+function plannedText(
+  plan: AgentCardPlan | null | undefined,
+  families: AgentCardFamily[],
+  field: 'title' | 'message' | 'submitLabel',
+  fallback: string,
+): string {
+  if (!cardPlanMatches(plan, families)) return fallback
+  return plan?.[field] || fallback
+}
+
+function optionHintMap(plan: AgentCardPlan | null | undefined): Map<string, { label?: string; description?: string; order: number }> {
+  const map = new Map<string, { label?: string; description?: string; order: number }>()
+  ;(plan?.optionHints || []).forEach((hint, order) => {
+    map.set(hint.key, { label: hint.label, description: hint.description, order })
+  })
+  return map
+}
+
+function applyOptionHints(options: AgentFieldOptions, plan: AgentCardPlan | null | undefined): AgentFieldOptions {
+  const hints = optionHintMap(plan)
+  if (hints.size === 0) return options
+  return options
+    .map(option => {
+      const hint = hints.get(String(option.value))
+      if (!hint) return option
+      return {
+        ...option,
+        label: hint.label || option.label,
+        description: hint.description || option.description,
+      }
+    })
+    .sort((left, right) => {
+      const leftOrder = hints.get(String(left.value))?.order
+      const rightOrder = hints.get(String(right.value))?.order
+      if (leftOrder === undefined && rightOrder === undefined) return 0
+      if (leftOrder === undefined) return 1
+      if (rightOrder === undefined) return -1
+      return leftOrder - rightOrder
+    })
+}
+
+function optionFromTime(
+  slots: AgentAnalysisSlots,
+  value: string,
+  label: string,
+  description: string,
+  askedTime: AgentAskedTime,
+): AgentFieldOptions[number] {
+  return {
+    label,
+    value,
+    description,
+    params: { draftSlots: withTime(slots, askedTime) },
+  }
+}
+
+function weekendTime(today: Date): AgentAskedTime {
+  const day = today.getDay()
+  const startOffset = day === 0 ? 0 : day === 6 ? 0 : 6 - day
+  const endOffset = day === 0 ? 0 : day === 6 ? 1 : 7 - day
+  return {
+    start: formatDate(addDays(today, startOffset)),
+    end: formatDate(addDays(today, endOffset)),
+    label: '本周末',
+    granularity: 'day',
+    confidence: 'high',
+    source: 'relative_default',
+  }
+}
+
+function singleDayTime(label: string, date: Date): AgentAskedTime {
+  const dateText = formatDate(date)
+  return {
+    start: dateText,
+    end: dateText,
+    label,
+    granularity: 'day',
+    confidence: 'high',
+    source: 'relative_default',
+  }
+}
+
+function trendTime(label: string, start: string, end: string, granularity: AgentAskedTime['granularity']): AgentAskedTime {
+  return {
+    start,
+    end,
+    label,
+    granularity,
+    confidence: 'high',
+    source: 'relative_default',
+  }
+}
+
+function inferTimeCardFamily(
+  slots: AgentAnalysisSlots,
+  latestText: string,
+  plan?: AgentCardPlan | null,
+): Extract<AgentCardFamily, 'daily_decision' | 'short_trend' | 'long_trend'> {
+  if (cardPlanMatches(plan, ['daily_decision', 'short_trend', 'long_trend'])) {
+    return plan!.family as Extract<AgentCardFamily, 'daily_decision' | 'short_trend' | 'long_trend'>
+  }
+  const text = `${slots.matter?.raw || ''}\n${latestText}`
+  if (isDateChoiceQuestion(text)) return 'daily_decision'
+  if (/未来几年|接下来几年|长期|大运|人生|此生|一生|哪几年|几年|未来\s*[三四五六七八九十\d]+\s*年/.test(text)) {
+    return 'long_trend'
+  }
+  return 'short_trend'
+}
+
+function timeOptionsForQuestion(
+  slots: AgentAnalysisSlots,
+  latestText: string,
+  plan?: AgentCardPlan | null,
+): AgentFieldOptions {
+  const today = todayInShanghai()
+  const todayText = formatDate(today)
+  const family = inferTimeCardFamily(slots, latestText, plan)
+
+  if (family === 'daily_decision') {
+    return applyOptionHints([
+      optionFromTime(slots, 'today', '就看今天', '适合马上要做决定，先看今天的宜忌和提醒。', singleDayTime('今天', today)),
+      optionFromTime(slots, 'tomorrow', '看明天', '适合把行动往后放一天，对比明天的状态。', singleDayTime('明天', addDays(today, 1))),
+      optionFromTime(slots, 'after_tomorrow', '看后天', '适合不急着定，先看后天是否更顺。', singleDayTime('后天', addDays(today, 2))),
+      optionFromTime(slots, 'weekend', '看本周末', '适合出行、见面、搬动类安排。', weekendTime(today)),
+    ], plan)
+  }
+
+  if (family === 'long_trend') {
+    const options: AgentFieldOptions = []
+    if (slots.askedTime) {
+      options.push(optionFromTime(
+        slots,
+        'current_time',
+        `就看「${readableTimeLabel(slots.askedTime)}」`,
+        timeDescriptionFor(slots, slots.askedTime.label),
+        { ...slots.askedTime, confidence: 'high' },
+      ))
+    }
+    options.push(
+      optionFromTime(slots, 'future_12_months', '看未来 12 个月', '适合看一个完整年度里的机会和波动。', trendTime('未来 12 个月', todayText, formatDate(addDays(addMonths(today, 12), -1)), 'month')),
+      optionFromTime(slots, 'future_3_years', '看未来 3 年', '适合看阶段主题、机会窗口和节奏变化。', trendTime('未来 3 年', todayText, `${today.getFullYear() + 2}-12-31`, 'month')),
+      optionFromTime(slots, 'future_5_years', '拉长看未来 5 年', '适合看更长线的大运和人生主题。', trendTime('未来 5 年', todayText, `${today.getFullYear() + 4}-12-31`, 'month')),
+    )
+    return applyOptionHints(options, plan)
+  }
+
+  return applyOptionHints([
+    optionFromTime(slots, 'future_7_days', '先看未来 7 天', '适合很快要做决定，先抓短期状态。', trendTime('未来 7 天', todayText, formatDate(addDays(today, 6)), 'day')),
+    optionFromTime(slots, 'future_30_days', '先看接下来 30 天', '适合看近期状态和短期行动。', trendTime('未来 30 天', todayText, formatDate(addDays(today, 29)), 'day')),
+    optionFromTime(slots, 'future_3_months', '先看未来 3 个月', '适合看阶段趋势和关键窗口。', trendTime('未来 3 个月', todayText, formatDate(addDays(addMonths(today, 3), -1)), 'month')),
+    optionFromTime(slots, 'rest_of_year', '看今年剩下的时间', '适合看今年后半程怎么收束。', trendTime('今年剩余时间', todayText, `${today.getFullYear()}-12-31`, 'month')),
+  ], plan)
+}
+
+function timeCardCopy(
+  slots: AgentAnalysisSlots,
+  latestText: string,
+  plan?: AgentCardPlan | null,
+): { title: string; message: string; submitLabel: string; family: AgentCardFamily } {
+  const family = inferTimeCardFamily(slots, latestText, plan)
+  const fallback = family === 'daily_decision'
+    ? {
+        title: '确认择日范围',
+        message: '这个问题更像在问哪一天更适合行动。你选一个日期，小象就按这一天来判断。',
+        submitLabel: '按这个日期继续',
+      }
+    : family === 'long_trend'
+      ? {
+          title: '确认趋势时间线',
+          message: '这个问题适合先定一个时间线宽度。你选长一点或短一点，小象就按这个范围展开。',
+          submitLabel: '按这个时间线继续',
+        }
+      : {
+          title: '确认时间范围',
+          message: '这个问题要先定一个大概的观察范围。你可以选一个卜卜象先看，也可以直接写你心里的时间段。',
+          submitLabel: '按这个范围继续',
+        }
+
+  return {
+    family,
+    title: plannedText(plan, [family], 'title', fallback.title),
+    message: plannedText(plan, [family], 'message', fallback.message),
+    submitLabel: plannedText(plan, [family], 'submitLabel', fallback.submitLabel),
+  }
+}
+
 function buildAskedTime(
   label: string,
   start: string,
@@ -419,7 +613,7 @@ function timeOptions(slots: AgentAnalysisSlots): AgentHumanInputField['options']
   return options
 }
 
-function focusOptions(slots: AgentAnalysisSlots): AgentHumanInputField['options'] {
+function focusOptions(slots: AgentAnalysisSlots, plan?: AgentCardPlan | null): AgentHumanInputField['options'] {
   const category = slots.matter?.category
   const base = category === 'relationship'
     ? [
@@ -440,12 +634,12 @@ function focusOptions(slots: AgentAnalysisSlots): AgentHumanInputField['options'
           ['整体', '综合看事业、财富、关系和身心状态。'],
         ]
 
-  return base.map(([label, description], index) => ({
+  return applyOptionHints(base.map(([label, description], index) => ({
     label,
     value: `focus_${index}`,
     description,
     params: { draftSlots: withFocus(slots, [label]) },
-  }))
+  })), plan)
 }
 
 function extractCreatedProfileName(text: string): string | null {
@@ -519,8 +713,8 @@ function applyWorkflowCorrection(
   return null
 }
 
-function depthOptions(slots: AgentAnalysisSlots): AgentHumanInputField['options'] {
-  return [
+function depthOptions(slots: AgentAnalysisSlots, plan?: AgentCardPlan | null): AgentHumanInputField['options'] {
+  return applyOptionHints([
     {
       label: '简洁结论',
       value: 'concise',
@@ -539,7 +733,7 @@ function depthOptions(slots: AgentAnalysisSlots): AgentHumanInputField['options'
       description: '4 个苹果，展开大运、时间窗口和行动地图。',
       params: { draftSlots: withDepth(slots, 'detailed') },
     },
-  ]
+  ], plan)
 }
 
 export interface PlannedAgentQuestion {
@@ -548,7 +742,21 @@ export interface PlannedAgentQuestion {
   pending: PendingAgentStep
 }
 
-export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string): PlannedAgentQuestion | null {
+export type AgentQuestionResponseMode = 'direct_answer' | 'report' | 'ask_more'
+
+interface PlanNextQuestionOptions {
+  responseMode?: AgentQuestionResponseMode
+}
+
+export function planNextQuestion(
+  slots: AgentAnalysisSlots,
+  latestText: string,
+  cardPlan?: AgentCardPlan | null,
+  options: PlanNextQuestionOptions = {},
+): PlannedAgentQuestion | null {
+  const responseMode = options.responseMode || 'report'
+  const shouldCollectClarifyingCards = responseMode !== 'direct_answer'
+  const shouldCollectReportCards = responseMode === 'report'
   const category = slots.matter?.category || 'general'
   const intentText = slots.matter?.raw || latestText
   const lifetimeWealth = isLifetimeWealthQuestion(intentText)
@@ -577,10 +785,8 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
     }
   }
 
-  if ((category === 'fortune' || category === 'event') && !slots.askedTime && !lifetimeWealth && !partnerArchetype) {
-    const today = todayInShanghai()
-    const todayText = formatDate(today)
-    const content = '这个问题要先定一个大概的观察范围。你可以选一个卜卜象先看，也可以直接写你心里的「未来」是什么意思。'
+  if (shouldCollectClarifyingCards && (category === 'fortune' || category === 'event') && !slots.askedTime && !lifetimeWealth && !partnerArchetype) {
+    const copy = timeCardCopy(slots, latestText, cardPlan)
     const field: AgentHumanInputField = {
       name: 'timeRangeChoice',
       label: '时间范围',
@@ -588,71 +794,50 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
       required: true,
       allowCustom: true,
       customPlaceholder: customTimePlaceholder(slots),
-      options: [
-        {
-          label: '先看接下来 30 天',
-          value: 'future_30_days',
-          description: '适合看近期状态和短期行动。',
-          params: {
-            draftSlots: withTime(slots, {
-              start: todayText,
-              end: formatDate(addDays(today, 29)),
-              label: '未来 30 天',
-              granularity: 'day',
-              confidence: 'high',
-              source: 'relative_default',
-            }),
-          },
-        },
-        {
-          label: '先看未来 3 个月',
-          value: 'future_3_months',
-          description: '适合看阶段趋势和关键窗口。',
-          params: {
-            draftSlots: withTime(slots, {
-              start: todayText,
-              end: formatDate(addDays(addMonths(today, 3), -1)),
-              label: '未来 3 个月',
-              granularity: 'month',
-              confidence: 'high',
-              source: 'relative_default',
-            }),
-          },
-        },
-        {
-          label: '看今年剩下的时间',
-          value: 'rest_of_year',
-          description: '适合看今年后半程怎么收束。',
-          params: {
-            draftSlots: withTime(slots, {
-              start: todayText,
-              end: `${today.getFullYear()}-12-31`,
-              label: '今年剩余时间',
-              granularity: 'month',
-              confidence: 'high',
-              source: 'relative_default',
-            }),
-          },
-        },
-      ],
+      options: timeOptionsForQuestion(slots, latestText, cardPlan),
     }
-    const ui = requestForField('confirm_time', '确认时间范围', content, field)
+    const ui = requestForField('confirm_time', copy.title, copy.message, field, copy.submitLabel)
     return {
-      content,
+      content: copy.message,
       ui,
       pending: {
         kind: 'confirm_time',
         draftSlots: slots,
         field,
-        resumeIntent: content,
+        resumeIntent: copy.message,
         sourceIntent: intentText,
       },
     }
   }
 
-  if (slots.askedTime?.confidence === 'medium' && !lifetimeWealth && !partnerArchetype) {
+  if (shouldCollectClarifyingCards && slots.askedTime?.confidence === 'medium' && !lifetimeWealth && !partnerArchetype) {
+    if (isDateChoiceQuestion(intentText)) {
+      const copy = timeCardCopy(slots, latestText, cardPlan)
+      const field: AgentHumanInputField = {
+        name: 'timeRangeChoice',
+        label: '时间范围',
+        inputType: 'choice',
+        required: true,
+        allowCustom: true,
+        customPlaceholder: customTimePlaceholder(slots),
+        options: timeOptionsForQuestion(slots, latestText, cardPlan),
+      }
+      const ui = requestForField('confirm_time', copy.title, copy.message, field, copy.submitLabel)
+      return {
+        content: copy.message,
+        ui,
+        pending: {
+          kind: 'confirm_time',
+          draftSlots: slots,
+          field,
+          resumeIntent: copy.message,
+          sourceIntent: intentText,
+        },
+      }
+    }
     const cue = extractTimeCue(intentText)
-    const content = `我先把这里的「${cue}」理解成「${readableTimeLabel(slots.askedTime)}」。你看贴近你的意思吗？`
+    const fallbackContent = `我先把这里的「${cue}」理解成「${readableTimeLabel(slots.askedTime)}」。你看贴近你的意思吗？`
+    const content = plannedText(cardPlan, ['short_trend', 'long_trend'], 'message', fallbackContent)
     const field: AgentHumanInputField = {
       name: 'timeRangeChoice',
       label: '时间范围',
@@ -660,9 +845,15 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
       required: true,
       allowCustom: true,
       customPlaceholder: customTimePlaceholder(slots),
-      options: timeOptions(slots),
+      options: applyOptionHints(timeOptions(slots) || [], cardPlan),
     }
-    const ui = requestForField('confirm_time', '确认时间范围', content, field)
+    const ui = requestForField(
+      'confirm_time',
+      plannedText(cardPlan, ['short_trend', 'long_trend'], 'title', '确认时间范围'),
+      content,
+      field,
+      plannedText(cardPlan, ['short_trend', 'long_trend'], 'submitLabel', '选好啦，继续'),
+    )
     return {
       content,
       ui,
@@ -676,8 +867,8 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
     }
   }
 
-  if (slots.matter?.analysisMode === 'analysis' && slots.matter.focus.length === 0 && category !== 'avatar' && !lifetimeWealth && !partnerArchetype) {
-    const content = '这次分析可以先抓一两个重点，会更清楚。你想让卜卜象优先看哪些话题？'
+  if (shouldCollectReportCards && slots.matter?.analysisMode === 'analysis' && slots.matter.focus.length === 0 && category !== 'avatar' && !lifetimeWealth && !partnerArchetype) {
+    const content = plannedText(cardPlan, ['focus'], 'message', '这次分析可以先抓一两个重点，会更清楚。你想让卜卜象优先看哪些话题？')
     const field: AgentHumanInputField = {
       name: 'focusChoice',
       label: '想看的话题',
@@ -686,9 +877,15 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
       multiple: true,
       allowCustom: true,
       customPlaceholder: '也可以写自己的重点',
-      options: focusOptions(slots),
+      options: focusOptions(slots, cardPlan),
     }
-    const ui = requestForField('confirm_focus', '确认分析重点', content, field)
+    const ui = requestForField(
+      'confirm_focus',
+      plannedText(cardPlan, ['focus'], 'title', '确认分析重点'),
+      content,
+      field,
+      plannedText(cardPlan, ['focus'], 'submitLabel', '选好啦，继续'),
+    )
     return {
       content,
       ui,
@@ -702,16 +899,22 @@ export function planNextQuestion(slots: AgentAnalysisSlots, latestText: string):
     }
   }
 
-  if (slots.matter?.analysisMode === 'analysis' && !slots.outputDepth) {
-    const content = '最后选一下这次分析的展开程度。轻一点还是深一点，卜卜象按你选的来。'
+  if (shouldCollectReportCards && slots.matter?.analysisMode === 'analysis' && !slots.outputDepth) {
+    const content = plannedText(cardPlan, ['depth'], 'message', '最后选一下这次分析的展开程度。轻一点还是深一点，卜卜象按你选的来。')
     const field: AgentHumanInputField = {
       name: 'depthChoice',
       label: '报告长度',
       inputType: 'choice',
       required: true,
-      options: depthOptions(slots),
+      options: depthOptions(slots, cardPlan),
     }
-    const ui = requestForField('select_depth', '选择分析深度', content, field)
+    const ui = requestForField(
+      'select_depth',
+      plannedText(cardPlan, ['depth'], 'title', '选择分析深度'),
+      content,
+      field,
+      plannedText(cardPlan, ['depth'], 'submitLabel', '选好啦，继续'),
+    )
     return {
       content,
       ui,

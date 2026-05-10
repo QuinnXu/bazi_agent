@@ -23,6 +23,11 @@ export async function GET(request: Request) {
             { onConflict: 'id' }
           )
       }
+    } else if (next.startsWith('/auth/reset-password')) {
+      // 链接过期或 code 已被使用：让 reset-password 页面给用户友好提示
+      const target = new URL(next, requestUrl.origin)
+      target.searchParams.set('error', 'invalid_link')
+      return NextResponse.redirect(target)
     }
   }
 
