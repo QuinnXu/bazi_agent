@@ -110,7 +110,11 @@ export function resolveSlots(input: {
     ],
   }).filter(hasBaziInfo)
   const current = resolveCurrentProfile(input)
-  const mentionedNames = input.slots.mentionedNames || []
+  const mentionedNames = Array.from(new Set(
+    (input.slots.mentionedNames || [])
+      .map(name => name.trim())
+      .filter(Boolean),
+  ))
   const category = slots.matter?.category || 'general'
   const partnerArchetype = isPartnerArchetypeQuestion(slots.matter?.raw || input.latestText)
 

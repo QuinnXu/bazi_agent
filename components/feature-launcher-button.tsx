@@ -14,7 +14,7 @@ import {
 import type { FeatureKind } from '@/lib/feature-types'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
-import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
+import { BUBU_COPY } from '@/lib/bubu-content'
 
 interface LauncherItem {
   id: FeatureKind
@@ -23,12 +23,19 @@ interface LauncherItem {
   icon: React.ElementType
 }
 
-const ITEMS: LauncherItem[] = [
-  { id: 'hepan', title: '合盘 / 应事', cost: FEATURE_APPLE_COSTS.hepan, icon: Users },
-  { id: 'fortune', title: '近期运势', cost: FEATURE_APPLE_COSTS.fortune, icon: CalendarRange },
-  { id: 'avatar', title: '头像分析推荐', cost: FEATURE_APPLE_COSTS.avatar, icon: ImageIcon },
-  { id: 'lifepath', title: '人生脉络', cost: FEATURE_APPLE_COSTS.lifepath, icon: Compass },
-]
+const ITEM_ICONS: Record<FeatureKind, React.ElementType> = {
+  hepan: Users,
+  fortune: CalendarRange,
+  avatar: ImageIcon,
+  lifepath: Compass,
+}
+
+const ITEMS: LauncherItem[] = BUBU_COPY.featureLauncher.items.map(item => ({
+  id: item.id,
+  title: item.title,
+  cost: item.cost,
+  icon: ITEM_ICONS[item.id],
+}))
 
 interface BaziProfileRow {
   id: string
@@ -111,8 +118,8 @@ export function FeatureLauncherButton({
   const selectedSummary = selected
     ? selected.profile_name
     : profiles.length === 0
-    ? '人物册空空'
-    : '还没选'
+    ? BUBU_COPY.featureLauncher.emptyProfileLabel
+    : BUBU_COPY.featureLauncher.fallbackProfileLabel
 
   const handlePickProfile = (row: BaziProfileRow | null) => {
     if (!onSelectProfile) return
@@ -137,7 +144,7 @@ export function FeatureLauncherButton({
         type="button"
         onClick={() => setOpen(o => !o)}
         disabled={disabled}
-        title="工具与人物"
+        title={BUBU_COPY.featureLauncher.title}
         className={`${sizeClass} ${shapeClass} border border-border bg-card/80 hover:bg-card transition-all flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed`}
       >
         <Plus
@@ -157,7 +164,7 @@ export function FeatureLauncherButton({
               <>
                 <div className="px-3 pt-2.5 pb-1.5 flex items-center justify-between border-b border-border/40">
                   <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                    小象当前看的命主
+                    {BUBU_COPY.featureLauncher.currentProfileLabel}
                   </p>
                   <span className="text-[11px] text-foreground/60 truncate max-w-[8rem]">
                     {selectedSummary}
@@ -166,7 +173,7 @@ export function FeatureLauncherButton({
                 <div className="py-1.5 max-h-44 overflow-y-auto">
                   {profiles.length === 0 ? (
                     <p className="px-3 py-2 text-xs text-muted-foreground/80 text-center">
-                      人物册还是空的，先给小象添加一位吧~
+                      {BUBU_COPY.featureLauncher.emptyProfileMessage}
                     </p>
                   ) : (
                     <>
@@ -182,7 +189,7 @@ export function FeatureLauncherButton({
                         <div className="w-7 h-7 rounded-md bg-muted/60 flex items-center justify-center flex-shrink-0">
                           <User className="w-3.5 h-3.5" />
                         </div>
-                        <span className="text-sm flex-1 truncate">先不选</span>
+                        <span className="text-sm flex-1 truncate">{BUBU_COPY.featureLauncher.noProfileButton}</span>
                         {selectedProfileId === null && (
                           <Check className="w-3.5 h-3.5 text-primary" />
                         )}
@@ -242,7 +249,7 @@ export function FeatureLauncherButton({
                     className="w-full px-3 py-2 flex items-center gap-2 text-xs text-primary hover:bg-muted/40 transition-colors border-t border-border/40"
                   >
                     <Settings2 className="w-3.5 h-3.5" />
-                    管理小象人物册
+                    {BUBU_COPY.featureLauncher.manageLabel}
                   </button>
                 )}
               </>
@@ -251,7 +258,7 @@ export function FeatureLauncherButton({
             {/* ---------- Section 2: Structured features ---------- */}
             <div className="px-3 pt-2.5 pb-1.5 border-t border-border/40">
               <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                小象专项能力
+                {BUBU_COPY.featureLauncher.capabilityLabel}
               </p>
             </div>
             <div className="py-1.5">

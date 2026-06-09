@@ -2,8 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
-import { Check, ChevronDown, Loader2, MapPin } from "lucide-react"
+import { Check, ChevronDown, Loader2, MapPin, Minus, Plus } from "lucide-react"
 import { OptimizedSelect } from "@/components/optimized-select"
+import { BAZI_HOUR_GROUPS, normalizeBaziHourValue } from "@/lib/bazi-time-options"
+import { loadGeodata, type LocationData } from "@/lib/geodata-client"
 
 export type AgentInputFieldType =
   | 'text'
@@ -35,13 +37,27 @@ export interface AgentInputField {
   customPlaceholder?: string
 }
 
+export interface AgentBaziProfileInputData {
+  profileName?: string
+  year?: string
+  month?: string
+  day?: string
+  hour?: string
+  minute?: string
+  isSolar?: boolean
+  isFemale?: boolean
+  longitude?: string
+  latitude?: string
+}
+
 export interface AgentInlineInputRequest {
   type: 'human_input_request'
   requestId: string
-  kind: 'bazi_profile' | 'profile_required' | 'feature_params'
+  kind: 'bazi_profile' | 'bazi_profiles' | 'profile_required' | 'feature_params'
   title: string
   message: string
   fields: AgentInputField[]
+  profiles?: AgentBaziProfileInputData[]
   submitLabel?: string
   resumeIntent?: string
 }
@@ -55,13 +71,10 @@ interface AgentInputRequestProps {
   onSubmit: (request: AgentInlineInputRequest, values: AgentInputValues) => void | Promise<void>
 }
 
-interface LocationData {
-  area: string
-  city: string
-  country: string
-  lat: string
-  lng: string
+interface BatchLocationSelection {
   province: string
+  city: string
+  isCustomLocation: boolean
 }
 
 function initialValueFor(field: AgentInputField): AgentInputValue {
@@ -75,10 +88,6 @@ const MONTH_OPTIONS = [
   '一月', '二月', '三月', '四月', '五月', '六月',
   '七月', '八月', '九月', '十月', '十一月', '十二月',
 ].map((label, index) => ({ value: String(index + 1), label }))
-
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) =>
-  i.toString().padStart(2, '0'),
-)
 
 function hasInputValue(value: AgentInputValue): boolean {
   if (Array.isArray(value)) return value.some(item => String(item).trim())
@@ -107,21 +116,150 @@ function validateInputValues(
   return errors
 }
 
+const BATCH_BAZI_FIELDS = [
+  'profileName',
+  'year',
+  'month',
+  'day',
+  'hour',
+  'minute',
+  'isSolar',
+  'gender',
+  'longitude',
+  'latitude',
+] as const
+
+const BATCH_PROFILE_COUNT_FIELD = 'profiles.__count'
+
+const DEFAULT_BATCH_LOCATION_SELECTION: BatchLocationSelection = {
+  province: '',
+  city: '',
+  isCustomLocation: false,
+}
+
+function batchFieldName(index: number, name: typeof BATCH_BAZI_FIELDS[number]) {
+  return `profiles.${index}.${name}`
+}
+
+function batchOriginalNameField(index: number) {
+  return `profiles.${index}.__originalName`
+}
+
+function batchProfileInitialEntries(profile: AgentBaziProfileInputData, index: number): Array<[string, AgentInputValue]> {
+  const profileName = profile.profileName || `人物${index + 1}`
+  return [
+    [batchOriginalNameField(index), profile.profileName || ''],
+    [batchFieldName(index, 'profileName'), profileName],
+    [batchFieldName(index, 'year'), profile.year || ''],
+    [batchFieldName(index, 'month'), profile.month || '1'],
+    [batchFieldName(index, 'day'), profile.day || '1'],
+    [batchFieldName(index, 'hour'), normalizeBaziHourValue(profile.hour || '')],
+    [batchFieldName(index, 'minute'), profile.minute || '0'],
+    [batchFieldName(index, 'isSolar'), profile.isSolar === false ? 'lunar' : 'solar'],
+    [batchFieldName(index, 'gender'), profile.isFemale ? 'female' : 'male'],
+    [batchFieldName(index, 'longitude'), profile.longitude || '121.5'],
+    [batchFieldName(index, 'latitude'), profile.latitude || '31.2'],
+  ]
+}
+
+function batchProfilesInitialValues(profiles: AgentBaziProfileInputData[]): AgentInputValues {
+  return Object.fromEntries([
+    [BATCH_PROFILE_COUNT_FIELD, profiles.length],
+    ...profiles.flatMap((profile, index) => batchProfileInitialEntries(profile, index)),
+  ]) as AgentInputValues
+}
+
+function reindexBatchValues(
+  currentValues: AgentInputValues,
+  removedIndex: number,
+  nextCount: number,
+): AgentInputValues {
+  const nextValues: AgentInputValues = {}
+  Object.entries(currentValues).forEach(([key, value]) => {
+    if (key === BATCH_PROFILE_COUNT_FIELD) return
+    const match = key.match(/^profiles\.(\d+)\.(.+)$/)
+    if (!match) {
+      nextValues[key] = value
+      return
+    }
+    const currentIndex = Number(match[1])
+    if (currentIndex === removedIndex) return
+    const nextIndex = currentIndex > removedIndex ? currentIndex - 1 : currentIndex
+    nextValues[`profiles.${nextIndex}.${match[2]}`] = value
+  })
+  nextValues[BATCH_PROFILE_COUNT_FIELD] = nextCount
+  return nextValues
+}
+
+function reindexBatchLocations(
+  currentLocations: Record<number, BatchLocationSelection>,
+  removedIndex: number,
+): Record<number, BatchLocationSelection> {
+  const nextLocations: Record<number, BatchLocationSelection> = {}
+  Object.entries(currentLocations).forEach(([key, value]) => {
+    const currentIndex = Number(key)
+    if (!Number.isFinite(currentIndex) || currentIndex === removedIndex) return
+    const nextIndex = currentIndex > removedIndex ? currentIndex - 1 : currentIndex
+    nextLocations[nextIndex] = value
+  })
+  return nextLocations
+}
+
+function validateBatchBaziProfiles(
+  profiles: AgentBaziProfileInputData[],
+  values: AgentInputValues,
+): Record<string, string> {
+  const errors: Record<string, string> = {}
+  profiles.forEach((profile, index) => {
+    const label = String(values[batchFieldName(index, 'profileName')] || profile.profileName || `人物${index + 1}`)
+    const requiredFields: Array<[typeof BATCH_BAZI_FIELDS[number], string]> = [
+      ['profileName', '人物名称'],
+      ['year', '出生年'],
+      ['month', '出生月'],
+      ['day', '出生日'],
+      ['hour', '出生时'],
+      ['isSolar', '历法'],
+      ['gender', '性别'],
+      ['longitude', '出生地经度'],
+      ['latitude', '出生地纬度'],
+    ]
+    requiredFields.forEach(([fieldName, fieldLabel]) => {
+      const key = batchFieldName(index, fieldName)
+      if (!hasInputValue(values[key])) {
+        errors[key] = `${label} 还缺：${fieldLabel}`
+      }
+    })
+  })
+  return errors
+}
+
 export function AgentInputRequest({ request, disabled = false, onSubmit }: AgentInputRequestProps) {
+  const requestBatchProfiles = useMemo(() => {
+    if (request.kind !== 'bazi_profiles') return []
+    return request.profiles && request.profiles.length > 0 ? request.profiles : [{}]
+  }, [request.kind, request.profiles])
+
   const initialValues = useMemo(() => {
+    if (request.kind === 'bazi_profiles') {
+      return batchProfilesInitialValues(requestBatchProfiles)
+    }
     return Object.fromEntries(request.fields.map(field => [field.name, initialValueFor(field)])) as AgentInputValues
-  }, [request.fields])
+  }, [request.fields, request.kind, requestBatchProfiles])
 
   const [values, setValues] = useState<AgentInputValues>(initialValues)
+  const [batchProfiles, setBatchProfiles] = useState<AgentBaziProfileInputData[]>(requestBatchProfiles)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [locationData, setLocationData] = useState<LocationData[]>([])
   const [selectedProvince, setSelectedProvince] = useState('')
   const [selectedCity, setSelectedCity] = useState('')
   const [isCustomLocation, setIsCustomLocation] = useState(false)
+  const [batchLocations, setBatchLocations] = useState<Record<number, BatchLocationSelection>>({})
 
   const isBaziProfileRequest =
     request.kind === 'bazi_profile' || request.kind === 'profile_required'
+  const isBatchBaziProfileRequest = request.kind === 'bazi_profiles'
+  const needsBaziLocation = isBaziProfileRequest || isBatchBaziProfileRequest
 
   const provinces = useMemo(() => {
     return Array.from(
@@ -144,13 +282,16 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
   useEffect(() => {
     setValues(initialValues)
     setFieldErrors({})
-  }, [initialValues])
+    if (request.kind === 'bazi_profiles') {
+      setBatchProfiles(requestBatchProfiles)
+      setBatchLocations({})
+    }
+  }, [initialValues, request.kind, requestBatchProfiles])
 
   useEffect(() => {
-    if (!isBaziProfileRequest || locationData.length > 0) return
+    if (!needsBaziLocation || locationData.length > 0) return
     let cancelled = false
-    fetch('/geodata/data.json')
-      .then(response => response.json())
+    loadGeodata()
       .then((data: LocationData[]) => {
         if (!cancelled) setLocationData(data)
       })
@@ -160,7 +301,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
     return () => {
       cancelled = true
     }
-  }, [isBaziProfileRequest, locationData.length])
+  }, [needsBaziLocation, locationData.length])
 
   useEffect(() => {
     if (!selectedProvince || !selectedCity || isCustomLocation) return
@@ -233,10 +374,311 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
     })
   }
 
+  const updateBatchLocation = (index: number, patch: Partial<BatchLocationSelection>) => {
+    setBatchLocations(prev => ({
+      ...prev,
+      [index]: {
+        ...(prev[index] || DEFAULT_BATCH_LOCATION_SELECTION),
+        ...patch,
+      },
+    }))
+  }
+
+  const handleBatchProvinceChange = (index: number, province: string) => {
+    updateBatchLocation(index, { province, city: '' })
+  }
+
+  const handleBatchCityChange = (index: number, city: string) => {
+    const province = batchLocations[index]?.province || ''
+    updateBatchLocation(index, { city })
+    const location = locationData.find(
+      item => item.province === province && item.city === city,
+    )
+    if (location) {
+      updateValue(batchFieldName(index, 'longitude'), location.lng)
+      updateValue(batchFieldName(index, 'latitude'), location.lat)
+    }
+  }
+
+  const toggleBatchCustomLocation = (index: number) => {
+    setBatchLocations(prev => {
+      const current = prev[index] || DEFAULT_BATCH_LOCATION_SELECTION
+      return {
+        ...prev,
+        [index]: current.isCustomLocation
+          ? { ...current, isCustomLocation: false }
+          : { province: '', city: '', isCustomLocation: true },
+      }
+    })
+  }
+
+  const addBatchProfile = () => {
+    const nextIndex = batchProfiles.length
+    const nextProfile: AgentBaziProfileInputData = { profileName: `人物${nextIndex + 1}` }
+    setBatchProfiles(prev => [...prev, nextProfile])
+    setValues(prev => ({
+      ...prev,
+      ...Object.fromEntries(batchProfileInitialEntries(nextProfile, nextIndex)),
+      [BATCH_PROFILE_COUNT_FIELD]: nextIndex + 1,
+    }))
+    setFieldErrors({})
+  }
+
+  const removeBatchProfile = (index: number) => {
+    if (batchProfiles.length <= 1) return
+    const nextProfiles = batchProfiles.filter((_, profileIndex) => profileIndex !== index)
+    setBatchProfiles(nextProfiles)
+    setValues(prev => reindexBatchValues(prev, index, nextProfiles.length))
+    setBatchLocations(prev => reindexBatchLocations(prev, index))
+    setFieldErrors({})
+  }
+
+  const renderBaziProfileFields = (profileIndex?: number) => {
+    const isBatchProfile = typeof profileIndex === 'number'
+    const nameFor = (fieldName: typeof BATCH_BAZI_FIELDS[number]) => (
+      isBatchProfile ? batchFieldName(profileIndex, fieldName) : fieldName
+    )
+    const locationSelection = isBatchProfile
+      ? batchLocations[profileIndex] || DEFAULT_BATCH_LOCATION_SELECTION
+      : { province: selectedProvince, city: selectedCity, isCustomLocation }
+    const profileCities = isBatchProfile
+      ? Array.from(
+          new Set(
+            locationData
+              .filter(item => item.province === locationSelection.province)
+              .map(item => item.city)
+              .filter(Boolean),
+          ),
+        )
+      : cities
+    const handleProvinceChange = (province: string) => {
+      if (isBatchProfile) {
+        handleBatchProvinceChange(profileIndex, province)
+        return
+      }
+      setSelectedProvince(province)
+      setSelectedCity('')
+    }
+    const handleCityChange = (city: string) => {
+      if (isBatchProfile) {
+        handleBatchCityChange(profileIndex, city)
+        return
+      }
+      setSelectedCity(city)
+    }
+    const handleCustomToggle = () => {
+      if (isBatchProfile) {
+        toggleBatchCustomLocation(profileIndex)
+        return
+      }
+      toggleCustomLocation()
+    }
+
+    return (
+      <div className="space-y-4">
+        <label className="space-y-1.5 text-xs text-muted-foreground block">
+          <span>人物名称 *</span>
+          <input
+            type="text"
+            value={String(values[nameFor('profileName')] ?? '')}
+            disabled={disabled || isSubmitting}
+            required
+            placeholder="比如：小明、伴侣，或者小象要看的那个人"
+            onChange={event => updateValue(nameFor('profileName'), event.target.value)}
+            className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+          />
+        </label>
+
+        <div className="space-y-2">
+          <p className="text-sm font-light text-foreground">出生日期</p>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="relative">
+              <input
+                type="number"
+                value={String(values[nameFor('year')] ?? '')}
+                disabled={disabled || isSubmitting}
+                required
+                placeholder="1995"
+                onChange={event => updateValue(nameFor('year'), event.target.value)}
+                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 pr-8 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
+                年
+              </span>
+            </div>
+            <label className="relative">
+              <select
+                value={String(values[nameFor('month')] ?? '1')}
+                disabled={disabled || isSubmitting}
+                onChange={event => updateValue(nameFor('month'), event.target.value)}
+                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80 appearance-none cursor-pointer"
+              >
+                {MONTH_OPTIONS.map(month => (
+                  <option key={month.value} value={month.value}>
+                    {month.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                value={String(values[nameFor('day')] ?? '')}
+                disabled={disabled || isSubmitting}
+                required
+                placeholder="1"
+                onChange={event => updateValue(nameFor('day'), event.target.value)}
+                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 pr-8 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
+                日
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-light text-foreground">出生时间</p>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="relative">
+              <select
+                value={normalizeBaziHourValue(String(values[nameFor('hour')] ?? ''))}
+                disabled={disabled || isSubmitting}
+                required
+                onChange={event => updateValue(nameFor('hour'), event.target.value)}
+                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80 appearance-none cursor-pointer"
+              >
+                <option value="">时</option>
+                {BAZI_HOUR_GROUPS.map(group => (
+                  <optgroup key={group.label} label={`${group.label} ${group.rangeLabel}`}>
+                    {group.hours.map(hour => (
+                      <option key={hour.value} value={hour.value}>
+                        {hour.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                value={String(values[nameFor('minute')] ?? '0')}
+                disabled={disabled || isSubmitting}
+                placeholder="00"
+                onChange={event => updateValue(nameFor('minute'), event.target.value)}
+                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 pr-8 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
+                分
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-light text-foreground">出生地点</p>
+            <button
+              type="button"
+              onClick={handleCustomToggle}
+              disabled={disabled || isSubmitting}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-light transition-all ${
+                locationSelection.isCustomLocation
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-muted/80'
+              } disabled:opacity-50`}
+            >
+              <MapPin className="w-3 h-3" />
+              自定义经纬度
+            </button>
+          </div>
+
+          {!locationSelection.isCustomLocation ? (
+            <div className="grid grid-cols-2 gap-3">
+              <OptimizedSelect
+                value={locationSelection.province}
+                onChange={event => handleProvinceChange(event.target.value)}
+                options={provinces}
+                placeholder="请选择省份"
+                disabled={disabled || isSubmitting}
+              />
+              <OptimizedSelect
+                value={locationSelection.city}
+                onChange={event => handleCityChange(event.target.value)}
+                options={profileCities}
+                placeholder="请选择城市"
+                disabled={disabled || isSubmitting || !locationSelection.province}
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1.5 text-xs text-muted-foreground">
+                <span>经度</span>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={String(values[nameFor('longitude')] ?? '')}
+                  disabled={disabled || isSubmitting}
+                  placeholder="121.5"
+                  onChange={event => updateValue(nameFor('longitude'), event.target.value)}
+                  className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+                />
+              </label>
+              <label className="space-y-1.5 text-xs text-muted-foreground">
+                <span>纬度</span>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={String(values[nameFor('latitude')] ?? '')}
+                  disabled={disabled || isSubmitting}
+                  placeholder="31.2"
+                  onChange={event => updateValue(nameFor('latitude'), event.target.value)}
+                  className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+                />
+              </label>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="space-y-1.5 text-xs text-muted-foreground">
+            <span>历法 *</span>
+            <select
+              value={String(values[nameFor('isSolar')] ?? 'solar')}
+              disabled={disabled || isSubmitting}
+              onChange={event => updateValue(nameFor('isSolar'), event.target.value)}
+              className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+            >
+              <option value="solar">公历 / 阳历</option>
+              <option value="lunar">农历 / 阴历</option>
+            </select>
+          </label>
+          <label className="space-y-1.5 text-xs text-muted-foreground">
+            <span>性别 *</span>
+            <select
+              value={String(values[nameFor('gender')] ?? 'male')}
+              disabled={disabled || isSubmitting}
+              onChange={event => updateValue(nameFor('gender'), event.target.value)}
+              className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+            >
+              <option value="male">男</option>
+              <option value="female">女</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    )
+  }
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (disabled || isSubmitting) return
-    const nextErrors = validateInputValues(request.fields, values)
+    const nextErrors = isBatchBaziProfileRequest
+      ? validateBatchBaziProfiles(batchProfiles, values)
+      : validateInputValues(request.fields, values)
     setFieldErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
     setIsSubmitting(true)
@@ -276,7 +718,48 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
         </div>
       )}
 
-      {isBaziProfileRequest ? (
+      {isBatchBaziProfileRequest ? (
+        <div className="mt-4 space-y-4">
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={addBatchProfile}
+              disabled={disabled || isSubmitting}
+              aria-label="添加人物"
+              title="添加人物"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card text-foreground transition-colors hover:border-primary/50 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </div>
+          {batchProfiles.map((profile, index) => (
+            <div key={`${profile.profileName || 'profile'}-${index}`} className="rounded-lg border border-border/70 bg-card/45 p-3">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-sm font-medium text-foreground">
+                  {String(values[batchFieldName(index, 'profileName')] || profile.profileName || `人物${index + 1}`)}
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                    {index + 1}/{batchProfiles.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeBatchProfile(index)}
+                    disabled={disabled || isSubmitting || batchProfiles.length <= 1}
+                    aria-label="移除人物"
+                    title="移除人物"
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {renderBaziProfileFields(index)}
+            </div>
+          ))}
+        </div>
+      ) : isBaziProfileRequest ? (
         <div className="mt-4 space-y-4">
           <label className="space-y-1.5 text-xs text-muted-foreground block">
             <span>人物名称 *</span>
@@ -345,17 +828,21 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
             <div className="grid grid-cols-2 gap-3">
               <label className="relative">
                 <select
-                  value={String(values.hour ?? '')}
+                  value={normalizeBaziHourValue(String(values.hour ?? ''))}
                   disabled={disabled || isSubmitting}
                   required
                   onChange={event => updateValue('hour', event.target.value)}
                   className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80 appearance-none cursor-pointer"
                 >
                   <option value="">时</option>
-                  {HOUR_OPTIONS.map(hour => (
-                    <option key={hour} value={hour}>
-                      {hour}时
-                    </option>
+                  {BAZI_HOUR_GROUPS.map(group => (
+                    <optgroup key={group.label} label={`${group.label} ${group.rangeLabel}`}>
+                      {group.hours.map(hour => (
+                        <option key={hour.value} value={hour.value}>
+                          {hour.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />

@@ -45,7 +45,6 @@ export async function POST(req: Request) {
           ? normalizeAgentComplexityMode(body.complexity)
           : undefined,
       },
-      { signal: req.signal },
     )
 
     return new Response(result.stream, {

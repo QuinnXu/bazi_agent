@@ -125,6 +125,29 @@ export function buildBaziHumanInputRequest(
   }
 }
 
+export function buildBaziProfilesHumanInputRequest(
+  content: string,
+  profiles: AgentBaziFormData[],
+  resumeIntent: string,
+): AgentHumanInputRequestUiEvent {
+  const names = profiles
+    .map(profile => profile.profileName?.trim())
+    .filter(Boolean)
+  return {
+    type: 'human_input_request',
+    requestId: newRequestId('bazi_profiles'),
+    kind: 'bazi_profiles',
+    title: names.length > 0
+      ? `补全${names.join('、')}的八字人物`
+      : '批量新建八字人物',
+    message: `${content}\n如果名字识别不准，可以在对应人物卡里改成正确名字。`,
+    fields: [],
+    profiles,
+    submitLabel: '生成这些命盘并继续',
+    resumeIntent,
+  }
+}
+
 function requestForField(
   kind: PendingAgentStepKind,
   title: string,
@@ -652,6 +675,18 @@ function extractCreatedProfileName(text: string): string | null {
   return name || null
 }
 
+function extractCreatedProfileNames(text: string): string[] {
+  const match = text.match(/已创建八字人物[：:]\s*([^\n。；;]+)/)
+  const raw = match?.[1]
+    ?.replace(/人物名修正.*$/u, '')
+    .trim()
+  if (!raw) return []
+  return raw
+    .split(/[、,，;；]/u)
+    .map(name => name.replace(/[。！？!?.：:（）()【】\[\]{}"'“”‘’\s]/g, '').trim())
+    .filter(Boolean)
+}
+
 const SELF_NAMES = new Set(['我', '本人', '自己', '当前命主', '用户', '命主'])
 
 function profileNameEquals(left?: string | null, right?: string | null): boolean {
@@ -725,13 +760,13 @@ function depthOptions(slots: AgentAnalysisSlots, plan?: AgentCardPlan | null): A
     {
       label: '均衡分析',
       value: 'balanced',
-      description: `${getAgentReportAppleCost('balanced')} 个苹果，适合多数问题，结构完整但不冗长。`,
+      description: `${getAgentReportAppleCost('balanced')} 个苹果，覆盖格局、阶段、风险和行动建议。`,
       params: { draftSlots: withDepth(slots, 'balanced') },
     },
     {
       label: '深度报告',
       value: 'detailed',
-      description: `${getAgentReportAppleCost('detailed')} 个苹果，展开大运、时间窗口和行动地图。`,
+      description: `${getAgentReportAppleCost('detailed')} 个苹果，展开大运流年、转折节点和场景专项建议。`,
       params: { draftSlots: withDepth(slots, 'detailed') },
     },
   ], plan)
@@ -762,10 +797,35 @@ export function planNextQuestion(
   const intentText = slots.matter?.raw || latestText
   const lifetimeWealth = isLifetimeWealthQuestion(intentText)
   const partnerArchetype = isPartnerArchetypeQuestion(intentText)
-  const unresolvedNames = partnerArchetype ? [] : (slots.unresolvedNames || [])
+  const unresolvedNames = partnerArchetype ? [] : Array.from(new Set(
+    (slots.unresolvedNames || [])
+      .map(name => name.trim())
+      .filter(Boolean),
+  ))
   const needsPeople = slots.matter?.analysisMode === 'analysis' && category !== 'avatar'
   const needsConcreteCounterparty = category === 'relationship' && !partnerArchetype
   if (needsPeople && (unresolvedNames.length || slots.people.length === 0 || (needsConcreteCounterparty && slots.people.length < 2))) {
+    if (unresolvedNames.length > 1) {
+      const profileNames = Array.from(new Set(unresolvedNames))
+      const knownNames = slots.people.map(person => person.name).filter(Boolean)
+      const content = knownNames.length > 0
+        ? `我识别到这次会一起看「${knownNames.join('、')}、${profileNames.join('、')}」，但还缺「${profileNames.join('、')}」的八字资料。补全后我再继续判断大家是否适合一起合作。`
+        : `我识别到这次会一起看「${profileNames.join('、')}」，但还缺这些人物的八字资料。补全后我再继续判断大家是否适合一起合作。`
+      const profiles = profileNames.map(name => buildBaziFormDataFromText(latestText, name))
+      const ui = buildBaziProfilesHumanInputRequest(content, profiles, `继续分析：${intentText}`)
+      return {
+        content,
+        ui,
+        pending: {
+          kind: 'create_profiles',
+          draftSlots: slots,
+          params: { profileNames },
+          resumeIntent: ui.resumeIntent || '补全八字人物后继续分析',
+          sourceIntent: intentText,
+          taskKind: 'bazi_profile',
+        },
+      }
+    }
     const profileName = unresolvedNames[0] || (needsConcreteCounterparty ? '对方' : '')
     const content = profileName
       ? `我先理解你说的对方是「${profileName}」。如果要看两个人适不适合，需要先有对方的八字资料；你也可以在卡片里把名字改准。`
@@ -954,6 +1014,35 @@ export function applyPendingAnswer(
 
   const correctedSlots = applyWorkflowCorrection(slots, latestText, correction)
   if (correctedSlots) return correctedSlots
+
+  if (pending.kind === 'create_profiles') {
+    const createdNames = extractCreatedProfileNames(latestText)
+    if (createdNames.length > 0) {
+      const originalNames: string[] = Array.isArray(pending.params?.profileNames)
+        ? pending.params.profileNames.map((name: unknown) => String(name || '').trim()).filter(Boolean)
+        : (slots.unresolvedNames || []).map(name => name.trim()).filter(Boolean)
+      const originalSet = new Set(originalNames)
+      const createdSet = new Set(createdNames)
+      const mentionedNames = (slots.mentionedNames || [])
+        .map(name => name.trim())
+        .filter(name => name && !originalSet.has(name))
+      originalNames.forEach((originalName, index) => {
+        const createdName = createdNames[index]
+        if (!createdName) return
+        if (!mentionedNames.includes(createdName)) mentionedNames.push(createdName)
+        if (originalName && originalName !== createdName) {
+          slots.supplements = [
+            ...slots.supplements,
+            `用户将系统识别的人物「${originalName}」修正并保存为「${createdName}」，后续以「${createdName}」这份命盘承接该人物。`,
+          ]
+        }
+      })
+      slots.mentionedNames = Array.from(new Set(mentionedNames))
+      slots.unresolvedNames = (slots.unresolvedNames || [])
+        .map(name => name.trim())
+        .filter(name => name && !originalSet.has(name) && !createdSet.has(name))
+    }
+  }
 
   if (pending.kind === 'create_profile') {
     const createdName = extractCreatedProfileName(latestText)

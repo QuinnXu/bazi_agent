@@ -6,10 +6,10 @@ import {
   getOrResetQuota,
 } from '@/lib/quota'
 import {
-  FEATURE_SENTINELS,
   getFeaturePrompt,
   type FeatureKind,
 } from '@/lib/feature-prompts'
+import { getScenarioPrompt, inferFeatureScenario } from '@/lib/agent-scenario-prompts'
 import { FEATURE_APPLE_COSTS, getFeatureAppleCost } from '@/lib/apple-costs'
 import {
   getAgentReportPreferenceInstruction,
@@ -34,6 +34,12 @@ import {
   recordLlmUsage,
   type LlmUsageSource,
 } from '@/lib/token-usage'
+import {
+  buildBubuAvatarUserText,
+  buildBubuFortuneUserMessage,
+  buildBubuHepanUserMessage,
+  buildBubuLifePathUserMessage,
+} from '@/lib/bubu-content'
 
 // ==================== Types ====================
 
@@ -110,143 +116,23 @@ export interface FeatureAnalysisStreamResult {
 
 // ==================== Build user message text ====================
 
-function truncate(text: string | null | undefined, max = 1200): string {
-  if (!text) return '（暂无完整命盘文本）'
-  return text.length > max ? text.slice(0, max) + '\n...（已截断）' : text
-}
-
-function describeParticipant(p: Participant, idx?: number): string {
-  const head = idx !== undefined ? `### 人物${idx + 1}：${p.name || '未命名'}` : `### ${p.name || '未命名'}`
-  const pillars = p.pillars ? `\n四柱：${p.pillars}` : ''
-  const bazi = p.baziText ? `\n命盘信息：\n${truncate(p.baziText)}` : ''
-  return `${head}${pillars}${bazi}`
-}
-
-function analysisAngleBlock(angle?: string | null): string {
-  const text = String(angle || '').trim()
-  return text ? `\n\n【卜卜象本次规划方向】${text}` : ''
-}
-
 export function buildHepanUserMessage(params: HepanParams): string {
-  const subtypeLabel =
-    params.subtype === 'pair'
-      ? '双人合盘'
-      : params.subtype === 'multi'
-      ? '多人合盘'
-      : '应事分析'
-
-  const blocks = params.participants
-    .map((p, i) => describeParticipant(p, i))
-    .join('\n\n')
-
-  const relation = params.relationLabel
-    ? `\n\n【关系类型】${params.relationLabel}`
-    : ''
-  const event = params.eventDesc
-    ? `\n\n【应事 / 关注事件描述】${params.eventDesc}`
-    : ''
-
-  return `${FEATURE_SENTINELS.hepan}（${subtypeLabel}）
-
-请基于以下 ${params.participants.length} 位参与者的八字信息进行合盘分析。
-
-${blocks}${relation}${event}${analysisAngleBlock(params.analysisAngle)}
-
-请按系统提示中要求的结构输出。`
+  return buildBubuHepanUserMessage(params)
 }
 
 export function buildFortuneUserMessage(params: FortuneParams): string {
   const startDate = new Date(params.start)
   const endDate = new Date(params.end)
   const calendarTable = buildGanZhiTable(startDate, endDate, params.granularity)
-  const focusLabel =
-    params.focus.length > 0 ? params.focus.join('、') : '整体运势'
-  const depthInstruction = buildFortuneDepthInstruction(params)
-
-  return `${FEATURE_SENTINELS.fortune}（${params.granularity === 'day' ? '逐日' : '逐月'}）
-
-【命主信息】
-${describeParticipant(params.profile)}
-
-【时间范围】${params.start} ~ ${params.end}
-【关注方向】${focusLabel}
-${analysisAngleBlock(params.analysisAngle)}
-
-${calendarTable}
-
-请基于命主八字 + 上方时间表，按系统提示中要求的结构进行近期运势推演。每个关注方向独立成段。
-${depthInstruction}`
-}
-
-function monthSpan(start: string, end: string): number {
-  const startDate = new Date(start)
-  const endDate = new Date(end)
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return 0
-  return (
-    (endDate.getFullYear() - startDate.getFullYear()) * 12 +
-    (endDate.getMonth() - startDate.getMonth()) +
-    1
-  )
-}
-
-function buildFortuneDepthInstruction(params: FortuneParams): string {
-  if (params.granularity !== 'month') {
-    return `
-【输出深度要求】
-- 如果用户只问短期几天，可以保持精炼；如果范围超过 14 天，请按周或关键阶段展开，不要只给笼统结论。
-- 每个关注方向都要给出命局依据、时间窗口和行动建议。`
-  }
-
-  const months = monthSpan(params.start, params.end)
-  if (months > 18) {
-    return `
-【长篇报告要求：多年财运研究报告】
-- 这是多年跨度，请写成完整长篇财运报告，但不要把每一个月都写成等长大章，避免信息过载。
-- 先给执行摘要和财富主线，再按年份展开：每一年至少 5-8 个自然段，说明财富主题、大运/流年关系、收入机会、风险支出、人际合作、资产配置倾向和行动策略。
-- 每一年内标出 2-4 个关键月份或季度窗口，说明这些窗口为什么值得关注；逐月表没有具体日柱时，用月份/季度/交节前后表达，不要编造具体日期。
-- 对跨大运或关键流年转换要单独成段说明，帮助用户理解财运节奏如何变化。
-- 结尾给出长期财富节奏地图、风险清单、能力建设清单和可执行年度规划。`
-  }
-
-  const monthlyLength = months > 0 && months <= 8
-    ? '每个月至少写 4-6 个自然段，约 450-700 中文字。'
-    : '每个月至少写 3-5 个自然段，约 300-550 中文字，并在季度/阶段处做综合。'
-
-  return `
-【长篇报告要求：逐月 deep research 风格】
-- 这不是短答复，请写成完整长篇报告：先给执行摘要，再给命盘基线，再逐月展开，最后给节奏地图和行动清单。
-- 用户问“接下来几个月/未来几个月/半年/一年”时，每一个月份都必须成为独立章节，禁止只用“三行式”概括。
-- ${monthlyLength}
-- 每个月章节必须包含：本月主题、与原局/大运/流年的作用关系、事业/财富/关系/身心四个维度中的重点变化、上旬/中旬/下旬关键窗口、可执行建议。
-- 如果关注方向只有“整体”，也要自然覆盖事业、财富、人际关系、情绪身心和学习成长；如果用户指定了 focus，则优先展开指定方向。
-- 关键时间点只能基于给定月柱/日柱表推导。逐月表没有具体日柱时，用“上旬/中旬/下旬/交节前后”等窗口表达，不要编造具体日期。
-- 用报告式标题、清晰层级和自然段落写作，内容要有密度、有解释、有行动价值，避免空泛鸡汤。`
+  return buildBubuFortuneUserMessage(params, calendarTable)
 }
 
 export function buildAvatarUserText(params: AvatarParams): string {
-  const profileBlock =
-    params.combineBazi && params.profile
-      ? `\n【命主信息（用于五行/风格倾向参考）】\n${describeParticipant(params.profile)}`
-      : params.combineBazi
-      ? `\n【提示】用户希望结合八字，但未提供命主信息，请略过五行风格段并提示用户补充。`
-      : `\n【提示】用户未开启结合八字，请略过五行风格段。`
-
-  return `${FEATURE_SENTINELS.avatar}
-
-请分析下方上传的头像图片，并结合命理参考给出建议。
-${profileBlock}${analysisAngleBlock(params.analysisAngle)}
-
-请按系统提示中要求的 6 段式结构输出。`
+  return buildBubuAvatarUserText(params)
 }
 
 export function buildLifePathUserMessage(params: LifePathParams): string {
-  return `${FEATURE_SENTINELS.lifepath}
-
-【命主信息】
-${describeParticipant(params.profile)}
-${analysisAngleBlock(params.analysisAngle)}
-
-请按系统提示中要求的结构，做一次贯穿一生的脉络梳理与总体分析。`
+  return buildBubuLifePathUserMessage(params)
 }
 
 // ==================== Validation ====================
@@ -324,8 +210,10 @@ export function buildFeatureMessages(
   const reportInstruction = reportPreferenceInstruction
     ? `\n\n${reportPreferenceInstruction}`
     : ''
+  const scenario = inferFeatureScenario(kind, params)
+  const scenarioInstruction = `\n\n${getScenarioPrompt(scenario, { reportPreference })}`
   const systemPrompt =
-    getFeaturePrompt(kind, useUltraPrompt) + complexityInstruction + reportInstruction
+    getFeaturePrompt(kind, useUltraPrompt) + complexityInstruction + reportInstruction + scenarioInstruction
 
   if (kind === 'avatar') {
     const avatarParams = params as AvatarParams

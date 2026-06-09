@@ -3,6 +3,7 @@
 import React, { useMemo } from "react"
 import { X } from "lucide-react"
 import Image from "next/image"
+import { BUBU_COPY } from "@/lib/bubu-content"
 
 interface DonationDialogProps {
   isOpen: boolean;
@@ -10,20 +11,11 @@ interface DonationDialogProps {
   appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null;
 }
 
-// 卜卜象口吻的投喂文案
-const donationMessages = [
-  "卜卜象最喜欢苹果啦~ 吃了苹果才能帮你看得更准呢",
-  "每个苹果都是星星做的，卜卜象会认真帮你分析命盘的",
-  "投喂一个苹果，卜卜象开心一整天~",
-  "有苹果吃的卜卜象，算命特别灵✨",
-  "谢谢你的苹果！卜卜象会努力帮你看运势的~",
-  "苹果是卜卜象的能量来源🍎 吃饱了才能转动水晶球",
-]
-
 export function DonationDialog({ isOpen, onClose, appleQuota }: DonationDialogProps) {
   // Pick a stable random message per dialog open
   const randomMessage = useMemo(() => {
-    return donationMessages[Math.floor(Math.random() * donationMessages.length)]
+    const messages = BUBU_COPY.donation.messages
+    return messages[Math.floor(Math.random() * messages.length)]
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
@@ -52,7 +44,7 @@ export function DonationDialog({ isOpen, onClose, appleQuota }: DonationDialogPr
           <div className="w-9 h-9 rounded-full bg-primary/15 flex items-center justify-center text-lg">
             🍎
           </div>
-          <h2 className="text-xl font-light text-foreground">给卜卜象投喂苹果</h2>
+          <h2 className="text-xl font-light text-foreground">{BUBU_COPY.donation.title}</h2>
         </div>
 
         {/* 内容 */}
@@ -66,11 +58,11 @@ export function DonationDialog({ isOpen, onClose, appleQuota }: DonationDialogPr
           {appleQuota && (
             <div className="inline-flex items-center gap-1.5 bg-secondary/50 rounded-full px-3 py-1.5">
               <span className="text-xs font-light text-foreground">
-                你今天还有 {appleQuota.remaining} 个苹果🍎
+                {BUBU_COPY.donation.quota(appleQuota.remaining)}
               </span>
               {appleQuota.isPaid && (
                 <span className="bg-accent/20 text-accent rounded-full px-1.5 py-0.5 text-[10px] font-light">
-                  VIP
+                  {BUBU_COPY.donation.vipBadge}
                 </span>
               )}
             </div>
@@ -92,7 +84,7 @@ export function DonationDialog({ isOpen, onClose, appleQuota }: DonationDialogPr
 
           {/* 升级提示 */}
           <p className="text-[11px] text-muted-foreground/70 font-light leading-relaxed">
-            打赏后私信告知，即可升级为 VIP 获得每日 999 个苹果🍎
+            {BUBU_COPY.donation.vipHint}
           </p>
         </div>
       </div>

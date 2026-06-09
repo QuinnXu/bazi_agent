@@ -27,6 +27,9 @@ export async function GET() {
       dailyLimit: quota.dailyLimit,
       usedToday: quota.usedToday,
       remaining: quota.remaining,
+      membershipExpiresAt: quota.membershipExpiresAt,
+      bonusAppleLimit: quota.bonusAppleLimit,
+      bonusExpiresAt: quota.bonusExpiresAt,
     })
   } catch (error) {
     console.error('Quota API Error:', error)

@@ -99,13 +99,16 @@ export function createUsageTrackedStream(
   let receivedAnyBytes = false
   let recorded = false
 
-  const finalize = async (status: LlmUsageStatus) => {
+  const scheduleFinalize = (status: LlmUsageStatus) => {
     if (recorded) return
     recorded = true
-    await recordLlmUsage({
-      ...usage,
-      outputTokens: estimateTokensForText(output),
-      status,
+    const finalOutput = output
+    setTimeout(() => {
+      void recordLlmUsage({
+        ...usage,
+        outputTokens: estimateTokensForText(finalOutput),
+        status,
+      })
     })
   }
 
@@ -124,8 +127,8 @@ export function createUsageTrackedStream(
         }
 
         output += decoder.decode()
-        await finalize(receivedAnyBytes ? 'completed' : 'empty')
         controller.close()
+        scheduleFinalize(receivedAnyBytes ? 'completed' : 'empty')
       } catch (error) {
         output += decoder.decode()
         const isAbort = !!(
@@ -134,12 +137,12 @@ export function createUsageTrackedStream(
           'name' in error &&
           String((error as any).name) === 'AbortError'
         )
-        await finalize(isAbort ? 'aborted' : 'failed')
         try {
           controller.error(error)
         } catch {
           /* stream already closed */
         }
+        scheduleFinalize(isAbort ? 'aborted' : 'failed')
       }
     },
   })

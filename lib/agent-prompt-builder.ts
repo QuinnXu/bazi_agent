@@ -3,8 +3,14 @@ import {
   getDailyGanZhiRange,
   getMonthlyGanZhiRange,
 } from '@/lib/calendar'
-import { BBX_PERSONA } from '@/lib/feature-prompts'
 import { isLifetimeWealthQuestion, isPartnerArchetypeQuestion } from '@/lib/agent-slot-extractor'
+import {
+  getScenarioLabel,
+  getScenarioPrompt,
+  getScenarioStructure,
+  inferAgentScenario,
+  type AgentScenarioKind,
+} from '@/lib/agent-scenario-prompts'
 import type {
   AgentAnalysisRequest,
   AgentAnalysisSlots,
@@ -12,6 +18,12 @@ import type {
   AgentOutputDepth,
   AgentResolvedPerson,
 } from '@/lib/agent-workflow-types'
+import {
+  BUBU_PROMPTS,
+  buildAgentAnalysisDepthInstruction,
+  buildAgentAnalysisSystemPrompt,
+  buildAgentAnalysisUserPrompt,
+} from '@/lib/bubu-content'
 
 function truncate(text: string | null | undefined, max: number): string {
   if (!text) return ''
@@ -45,48 +57,14 @@ function personBlock(person: AgentResolvedPerson, index: number): string {
   return `### 人物 ${index + 1}：${person.name || '未命名'}${pillars}${dayunText}${bazi}`
 }
 
-function depthInstruction(depth: AgentOutputDepth, slots: AgentAnalysisSlots): string {
-  if (depth === 'concise') {
-    return '输出 500-900 中文字。先给结论，再给关键依据、时间/风险提醒和 3-5 条行动建议。'
-  }
-  if (depth === 'detailed') {
-    const raw = slots.matter?.raw || ''
-    const longHorizon = isLifetimeWealthQuestion(raw) || slots.matter?.category === 'lifepath'
-    const target = longHorizon
-      ? '目标 12000-22000 中文字；如果资料足够，请按人生阶段/大运窗口充分展开。'
-      : '目标 9000-16000 中文字；如果所问时间跨度较长，请按阶段或月份充分展开。'
-    return `输出长篇深度报告，${target}
-- 不要在 3000-5000 字左右提前收尾；max_tokens 已为长文预留，请把空间用于具体推演。
-- 至少包含 7 个以上清晰一级章节，每个核心章节至少 4-7 个自然段。
-- 充分展开命局底色、大运/流年/流月作用、关键时间窗口、条件触发、风险点、反例提醒和行动地图。
-- 可以用表格或分段清单帮助扫描，但每个结论后必须给出命理依据和现实行动含义。
-- 不要用重复话水字数；用具体阶段、窗口、条件、风险和建议填充篇幅。`
-  }
-  return '输出 1200-2600 中文字。保留清晰层级，兼顾命理依据、阶段节奏、重点方向和可执行建议。'
+function depthInstruction(depth: Exclude<AgentOutputDepth, 'chat'>, slots: AgentAnalysisSlots): string {
+  const raw = slots.matter?.raw || ''
+  const longHorizon = isLifetimeWealthQuestion(raw) || slots.matter?.category === 'lifepath'
+  return buildAgentAnalysisDepthInstruction(depth, longHorizon)
 }
 
-function structureInstruction(slots: AgentAnalysisSlots): string {
-  const category = slots.matter?.category
-  const raw = slots.matter?.raw || ''
-  if (isLifetimeWealthQuestion(raw)) {
-    return '结构按：财富格局底色、人生/大运财富窗口、当下阶段与未来关键节点、风险与现金流提醒、可执行行动建议。必须把“暴富/发财”处理为机会窗口与风险概率，不能承诺必然结果。'
-  }
-  if (isPartnerArchetypeQuestion(raw)) {
-    return '结构按：命主赚钱方式、适合的合作对象画像、互补资源与分工方式、合作雷区、如何筛选真实候选人、行动建议。不要假设有具体第二个人命盘。'
-  }
-  if (category === 'relationship') {
-    return '结构按：关系总览、双方能量互动、大运/流年里的关系节奏、关键磨合点、行动建议。'
-  }
-  if (category === 'lifepath') {
-    return '结构按：格局底色、核心性格与能力、大运分段、关键人生窗口、当下行动建议。'
-  }
-  if (category === 'event') {
-    return '结构按：问题背景复述、命理倾向、时机与风险、可选路径比较、行动建议。'
-  }
-  if (category === 'fortune') {
-    return '结构按：执行摘要、命盘与周期基线、所问时间走势、分重点解读、行动清单。'
-  }
-  return '结构按：核心结论、命理依据、相关时间/人物因素、行动建议、小象提醒。'
+function structureInstruction(scenario: AgentScenarioKind): string {
+  return getScenarioStructure(scenario)
 }
 
 function formatDate(date: Date): string {
@@ -134,10 +112,12 @@ export function buildCalendarContext(slots: AgentAnalysisSlots): AgentCalendarCo
 
 export function buildAgentAnalysisMessages(request: AgentAnalysisRequest): any[] {
   const slots = request.slots
+  const scenario = inferAgentScenario(slots, request.userQuestion)
+  const scenarioLabel = getScenarioLabel(scenario)
   const intentNote = isLifetimeWealthQuestion(slots.matter?.raw || request.userQuestion)
-    ? '人生财富窗口：用户在问财富突破/发财暴富的阶段性机会。请结合命盘与大运看窗口、条件和风险，不要把它降级为短期运势，也不要保证结果。'
+    ? BUBU_PROMPTS.agent.intentNotes.lifetimeWealth
     : isPartnerArchetypeQuestion(slots.matter?.raw || request.userQuestion)
-      ? '合作对象画像：用户在问适合哪类人一起赚钱/搞钱。请基于当前命主分析互补人群、合作方式和筛选标准，不要要求或假设一个具体第二人。'
+      ? BUBU_PROMPTS.agent.intentNotes.partnerArchetype
       : ''
   const people = slots.people.length
     ? slots.people.map(personBlock).join('\n\n')
@@ -149,50 +129,28 @@ export function buildAgentAnalysisMessages(request: AgentAnalysisRequest): any[]
     ? slots.supplements.map(item => `- ${truncate(item, 500)}`).join('\n')
     : '（无额外补充）'
 
-  const system = `${BBX_PERSONA}
+  const system = buildAgentAnalysisSystemPrompt({
+    nowText: request.calendar.nowText,
+    timezone: request.calendar.timezone,
+    structureInstruction: structureInstruction(scenario),
+    scenarioPrompt: getScenarioPrompt(scenario, { depth: request.depth }),
+    depthInstruction: depthInstruction(request.depth, slots),
+    promptStyleHint: request.promptStyleHint,
+  })
 
-你现在不是四项工具之一，而是卜卜象统一分析引擎。请基于已确认的“人物、所问时间、所问事宜、补充信息”生成回答。
-
-【当前时间锚点】
-- 现在是：${request.calendar.nowText}
-- 时区：${request.calendar.timezone}
-
-【硬性规则】
-- 不编造人物、出生信息、四柱、图片观察、具体日期或专业结论。
-- 命理表达必须使用“趋势 / 倾向 / 参考 / 建议”，避免“必然、注定、绝对”。
-- 涉及医疗、法律、投资等高风险事项，只能给趋势参考，并建议咨询专业人士。
-- 用户的主动选择永远比命理更重要。
-- 不要输出内部字段名、JSON 或工具调用痕迹。
-
-【本次结构】
-${structureInstruction(slots)}
-
-【本次篇幅】
-${depthInstruction(request.depth, slots)}
-${request.promptStyleHint ? `\n【用户风格补充】\n${request.promptStyleHint}` : ''}`
-
-  const user = `【用户原问题】
-${request.userQuestion}
-
-【当前公历信息】
-现在是：${request.calendar.nowText}
-时区：${request.calendar.timezone}
-
-${request.calendar.tableText}
-
-【相关人物八字与大运】
-${people}
-
-【所问事宜】
-类型：${slots.matter?.category || 'general'}
-重点：${focus}
-原话：${slots.matter?.raw || request.userQuestion}
-${intentNote ? `意图策略：${intentNote}` : ''}
-
-【补充信息】
-${supplements}
-
-请直接给用户最终分析。`
+  const user = buildAgentAnalysisUserPrompt({
+    userQuestion: request.userQuestion,
+    nowText: request.calendar.nowText,
+    timezone: request.calendar.timezone,
+    calendarTableText: request.calendar.tableText,
+    peopleText: people,
+    matterCategory: slots.matter?.category || 'general',
+    scenarioLabel,
+    focusText: focus,
+    rawMatter: slots.matter?.raw || request.userQuestion,
+    intentNote,
+    supplementsText: supplements,
+  })
 
   return [
     { role: 'system', content: system },

@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Image from 'next/image'
-import { X, Mail, Lock, ArrowLeft } from 'lucide-react'
+import { X, Mail, Lock, ArrowLeft, Ticket } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
+import { BUBU_COPY, buildAuthDialogTitles, formatAuthErrorMessage } from '@/lib/bubu-content'
 
 type AuthMode = 'signin' | 'signup' | 'verify_otp' | 'forgot_password'
 
@@ -13,32 +14,19 @@ interface AuthDialogProps {
   mode?: 'signin' | 'signup'
 }
 
-function authErrorMessage(err: { message?: string } | null): string {
-  if (!err?.message) return '哎呀，网络好像打了个小盹，稍后再试一次喔 🐘'
-  const msg = err.message.toLowerCase()
-  if (msg.includes('already registered') || msg.includes('already exists') || msg.includes('already been registered'))
-    return '这个邮箱已经是卜卜象的好朋友啦，直接登录吧 🐘'
-  if (msg.includes('invalid login') || msg.includes('invalid_credentials'))
-    return '哎呀，密码好像有点小脾气，要不再试一次？ 🐾'
-  if (msg.includes('email not confirmed'))
-    return '需要去邮箱找找卜卜象寄给你的验证小信封哦 ✉️'
-  if (msg.includes('token has expired') || msg.includes('otp_expired'))
-    return '验证码已经在风中走散啊，让卜卜象再发一个吧 🌬️'
-  if (msg.includes('otp_disabled'))
-    return '验证码功能未启用，请联系管理员'
-  return err.message
-}
-
 export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: AuthDialogProps) {
   const [mode, setMode] = useState<AuthMode>(initialMode)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [referralCode, setReferralCode] = useState('')
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', ''])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [resendCountdown, setResendCountdown] = useState(0)
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
+  const otpVerifyInFlightRef = useRef(false)
+  const verifiedOtpKeyRef = useRef<string | null>(null)
   const { signIn, signUp, verifyOtp, resendSignUpOtp, resetPasswordForEmail } = useAuth()
 
   // 60 秒重发倒计时
@@ -54,13 +42,25 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
       setError(null)
       setSuccessMessage(null)
       setOtpDigits(['', '', '', '', '', ''])
+      otpVerifyInFlightRef.current = false
+      verifiedOtpKeyRef.current = null
+      return
+    }
+
+    const params = new URLSearchParams(window.location.search)
+    const codeFromUrl = params.get('ref') || params.get('invite')
+    const savedCode = window.localStorage.getItem('bubu_referral_code')
+    const nextCode = (codeFromUrl || savedCode || '').trim().toUpperCase()
+    if (nextCode) {
+      setReferralCode(nextCode)
+      window.localStorage.setItem('bubu_referral_code', nextCode)
     }
   }, [isOpen])
 
-  const clearMessages = () => {
+  const clearMessages = useCallback(() => {
     setError(null)
     setSuccessMessage(null)
-  }
+  }, [])
 
   // ── 注册 / 登录 提交 ──
   const handleSubmit = async (e: React.FormEvent) => {
@@ -72,23 +72,29 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
       if (mode === 'signin') {
         const { error: err } = await signIn(email, password)
         if (err) {
-          setError(authErrorMessage(err))
+          setError(formatAuthErrorMessage(err))
         } else {
           onClose()
         }
       } else if (mode === 'signup') {
-        const { error: err } = await signUp(email, password)
+        const normalizedReferralCode = referralCode.trim().toUpperCase()
+        if (normalizedReferralCode) {
+          window.localStorage.setItem('bubu_referral_code', normalizedReferralCode)
+        }
+        const { error: err } = await signUp(email, password, normalizedReferralCode)
         if (err) {
-          setError(authErrorMessage(err))
+          setError(formatAuthErrorMessage(err))
         } else {
           // 注册成功 → 进入验证码输入步骤
+          otpVerifyInFlightRef.current = false
+          verifiedOtpKeyRef.current = null
           setMode('verify_otp')
           setResendCountdown(60)
-          setSuccessMessage(`卜卜象已经把验证码寄到 ${email}`)
+          setSuccessMessage(BUBU_COPY.auth.messages.otpSent(email))
         }
       }
     } catch {
-      setError('哎呀，网络好像打了个小盹，稍后再试一次喔 🐘')
+      setError(BUBU_COPY.auth.errors.generic)
     } finally {
       setLoading(false)
     }
@@ -128,35 +134,47 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
     otpRefs.current[focusIndex]?.focus()
   }, [otpDigits])
 
-  const handleVerifyOtp = async () => {
+  const handleVerifyOtp = useCallback(async () => {
     clearMessages()
     const token = otpDigits.join('')
     if (token.length !== 6) {
-      setError('小象还缺完整的 6 位验证码')
+      setError(BUBU_COPY.auth.messages.otpIncomplete)
       return
     }
 
+    const normalizedEmail = email.trim().toLowerCase()
+    const otpKey = `${normalizedEmail}:${token}`
+    if (otpVerifyInFlightRef.current || verifiedOtpKeyRef.current === otpKey) {
+      return
+    }
+
+    otpVerifyInFlightRef.current = true
     setLoading(true)
     try {
-      const { error: err } = await verifyOtp(email, token)
+      const { error: err } = await verifyOtp(normalizedEmail || email, token, referralCode.trim().toUpperCase())
       if (err) {
-        setError(authErrorMessage(err))
+        verifiedOtpKeyRef.current = null
+        setError(formatAuthErrorMessage(err))
       } else {
+        verifiedOtpKeyRef.current = otpKey
+        window.localStorage.removeItem('bubu_referral_code')
         onClose()
       }
     } catch {
-      setError('小象没有核对成功，稍后再试一次喔')
+      verifiedOtpKeyRef.current = null
+      setError(BUBU_COPY.auth.messages.otpVerifyFailed)
     } finally {
+      otpVerifyInFlightRef.current = false
       setLoading(false)
     }
-  }
+  }, [clearMessages, email, onClose, otpDigits, referralCode, verifyOtp])
 
   // 自动提交：6 位都填满时自动验证
   useEffect(() => {
     if (mode === 'verify_otp' && otpDigits.every(d => d !== '')) {
       handleVerifyOtp()
     }
-  }, [otpDigits, mode])
+  }, [handleVerifyOtp, otpDigits, mode])
 
   const handleResend = async () => {
     if (resendCountdown > 0) return
@@ -165,15 +183,17 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
     try {
       const { error: err } = await resendSignUpOtp(email)
       if (err) {
-        setError(authErrorMessage(err))
+        setError(formatAuthErrorMessage(err))
       } else {
         setResendCountdown(60)
-        setSuccessMessage('小象重新寄出验证码啦，请查收邮箱')
+        setSuccessMessage(BUBU_COPY.auth.messages.otpResent)
         setOtpDigits(['', '', '', '', '', ''])
+        otpVerifyInFlightRef.current = false
+        verifiedOtpKeyRef.current = null
         otpRefs.current[0]?.focus()
       }
     } catch {
-      setError('小象暂时没寄出去，稍后再试一次喔')
+      setError(BUBU_COPY.auth.messages.sendFailed)
     } finally {
       setLoading(false)
     }
@@ -184,38 +204,39 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
     e.preventDefault()
     clearMessages()
     if (!email) {
-      setError('小象还需要你的邮箱地址')
+      setError(BUBU_COPY.auth.messages.missingEmail)
       return
     }
     setLoading(true)
     try {
       const { error: err } = await resetPasswordForEmail(email)
       if (err) {
-        setError(authErrorMessage(err))
+        setError(formatAuthErrorMessage(err))
       } else {
-        setSuccessMessage('小象已经寄出重置邮件，点开邮件里的链接就能去修改密码喔。')
+        setSuccessMessage(BUBU_COPY.auth.messages.resetSent)
       }
     } catch {
-      setError('小象暂时没寄出去，稍后再试一次喔')
+      setError(BUBU_COPY.auth.messages.sendFailed)
     } finally {
       setLoading(false)
     }
   }
 
   // ── 模式切换 ──
-  const goToSignIn = () => { setMode('signin'); clearMessages(); setOtpDigits(['', '', '', '', '', '']) }
-  const goToSignUp = () => { setMode('signup'); clearMessages() }
+  const resetOtpState = () => {
+    setOtpDigits(['', '', '', '', '', ''])
+    otpVerifyInFlightRef.current = false
+    verifiedOtpKeyRef.current = null
+  }
+
+  const goToSignIn = () => { setMode('signin'); clearMessages(); resetOtpState() }
+  const goToSignUp = () => { setMode('signup'); clearMessages(); resetOtpState() }
   const goToForgotPassword = () => { setMode('forgot_password'); clearMessages() }
 
   if (!isOpen) return null
 
   // ── 标题文案 ──
-  const titles: Record<AuthMode, { title: string; subtitle: string }> = {
-    signin: { title: '欢迎回来找小象', subtitle: '登录后，卜卜象会记得你的聊天和人物档案' },
-    signup: { title: '和小象打个招呼', subtitle: '创建账户后，就能保存你的命理小资料' },
-    verify_otp: { title: '拆开验证小信封', subtitle: `验证码已发送到 ${email}` },
-    forgot_password: { title: '让小象帮你找回密码', subtitle: '输入注册邮箱，小象会寄出重置链接' },
-  }
+  const titles = buildAuthDialogTitles(email)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -260,7 +281,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
           <>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-light text-foreground mb-2">邮箱</label>
+                <label className="block text-sm font-light text-foreground mb-2">{BUBU_COPY.auth.labels.email}</label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
@@ -268,14 +289,14 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
-                    placeholder="your@email.com"
+                    placeholder={BUBU_COPY.auth.placeholders.email}
                     required
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-light text-foreground mb-2">密码</label>
+                <label className="block text-sm font-light text-foreground mb-2">{BUBU_COPY.auth.labels.password}</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
@@ -283,12 +304,29 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
-                    placeholder="••••••••"
+                    placeholder={BUBU_COPY.auth.placeholders.password}
                     required
                     minLength={6}
                   />
                 </div>
               </div>
+
+              {mode === 'signup' && (
+                <div>
+                  <label className="block text-sm font-light text-foreground mb-2">{BUBU_COPY.auth.labels.referralCode}</label>
+                  <div className="relative">
+                    <Ticket className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={referralCode}
+                      onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                      className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
+                      placeholder={BUBU_COPY.auth.placeholders.referralCode}
+                      autoCapitalize="characters"
+                    />
+                  </div>
+                </div>
+              )}
 
               {error && (
                 <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20">
@@ -306,7 +344,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 disabled={loading}
                 className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
               >
-                {loading ? '小象处理中...' : mode === 'signin' ? '登录找小象' : '加入小象小站'}
+                {loading ? BUBU_COPY.auth.buttons.processing : mode === 'signin' ? BUBU_COPY.auth.buttons.signin : BUBU_COPY.auth.buttons.signup}
               </button>
             </form>
 
@@ -316,14 +354,14 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 onClick={mode === 'signin' ? goToSignUp : goToSignIn}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
-                {mode === 'signin' ? '还没有账户？和小象打个招呼' : '已有账户？回到小象这里'}
+                {mode === 'signin' ? BUBU_COPY.auth.buttons.goSignup : BUBU_COPY.auth.buttons.goSignin}
               </button>
               {mode === 'signin' && (
                 <button
                   onClick={goToForgotPassword}
                   className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  忘记密码？让小象寄封信
+                  {BUBU_COPY.auth.buttons.forgotPassword}
                 </button>
               )}
             </div>
@@ -368,7 +406,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
               disabled={loading || otpDigits.some(d => d === '')}
               className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
             >
-              {loading ? '小象核对中...' : '交给小象验证'}
+              {loading ? BUBU_COPY.auth.buttons.otpChecking : BUBU_COPY.auth.buttons.otpSubmit}
             </button>
 
             {/* 重发验证码 */}
@@ -379,8 +417,8 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 className="text-sm text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {resendCountdown > 0
-                  ? `小象稍等 ${resendCountdown}s`
-                  : '让小象重寄验证码'}
+                  ? BUBU_COPY.auth.buttons.resendCountdown(resendCountdown)
+                  : BUBU_COPY.auth.buttons.resendOtp}
               </button>
             </div>
           </div>
@@ -391,7 +429,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
           <>
             <form onSubmit={handleForgotPassword} className="space-y-4">
               <div>
-                <label className="block text-sm font-light text-foreground mb-2">邮箱</label>
+                <label className="block text-sm font-light text-foreground mb-2">{BUBU_COPY.auth.labels.email}</label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <input
@@ -399,7 +437,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
-                    placeholder="your@email.com"
+                    placeholder={BUBU_COPY.auth.placeholders.email}
                     required
                   />
                 </div>
@@ -421,7 +459,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 disabled={loading}
                 className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
               >
-                {loading ? '小象寄信中...' : '让小象寄重置邮件'}
+                {loading ? BUBU_COPY.auth.buttons.sendingMail : BUBU_COPY.auth.buttons.sendReset}
               </button>
             </form>
 
@@ -430,7 +468,7 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
                 onClick={goToSignIn}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
               >
-                回到登录
+                {BUBU_COPY.auth.buttons.backToSignin}
               </button>
             </div>
           </>

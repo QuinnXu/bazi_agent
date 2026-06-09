@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Image from 'next/image'
 import {
   MessageCircle,
@@ -61,6 +61,7 @@ interface AppSidebarProps {
   onOpenChangePassword: () => void
   appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null
   onOpenDonation?: () => void
+  refreshKey?: number
 }
 
 const featureItems: { id: Exclude<FeatureType, 'chat'>; label: string; cost: number; icon: React.ElementType }[] = [
@@ -106,12 +107,14 @@ export function AppSidebar({
   onOpenChangePassword,
   appleQuota,
   onOpenDonation,
+  refreshKey = 0,
 }: AppSidebarProps) {
   const { user, signOut } = useAuth()
   const { isMobile, setOpenMobile } = useSidebar()
   const supabase = useMemo(() => createBrowserClient(), [])
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
+  const loadSessionsSeqRef = useRef(0)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [abilitiesOpen, setAbilitiesOpen] = useState(false)
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
@@ -119,6 +122,8 @@ export function AppSidebar({
 
   const loadSessions = useCallback(async () => {
     if (!user) return
+    const requestSeq = loadSessionsSeqRef.current + 1
+    loadSessionsSeqRef.current = requestSeq
     setLoadingSessions(true)
     try {
       const { data, error } = await supabase
@@ -127,18 +132,22 @@ export function AppSidebar({
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
       if (error) throw error
-      setSessions(data || [])
+      if (loadSessionsSeqRef.current === requestSeq) {
+        setSessions(data || [])
+      }
     } catch (error) {
       console.error('加载会话失败:', error)
     } finally {
-      setLoadingSessions(false)
+      if (loadSessionsSeqRef.current === requestSeq) {
+        setLoadingSessions(false)
+      }
     }
   }, [supabase, user])
 
   // 加载会话列表
   useEffect(() => {
     if (user) loadSessions()
-  }, [loadSessions, user])
+  }, [loadSessions, refreshKey, user])
 
   useEffect(() => {
     setAbilitiesOpen(!isMobile)

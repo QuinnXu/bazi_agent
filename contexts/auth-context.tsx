@@ -2,15 +2,15 @@
 
 import { createContext, useContext, useEffect, useState } from 'react'
 import { User } from '@supabase/supabase-js'
-import { createBrowserClient } from '@/lib/supabase/client'
+import { createBrowserClient, createPasswordRecoveryClient } from '@/lib/supabase/client'
 
 interface AuthContextType {
   user: User | null
   loading: boolean
-  signUp: (email: string, password: string) => Promise<{ error: any }>
+  signUp: (email: string, password: string, referralCode?: string) => Promise<{ error: any }>
   signIn: (email: string, password: string) => Promise<{ error: any }>
   signOut: () => Promise<void>
-  verifyOtp: (email: string, token: string) => Promise<{ error: any }>
+  verifyOtp: (email: string, token: string, referralCode?: string) => Promise<{ error: any }>
   resendSignUpOtp: (email: string) => Promise<{ error: any }>
   updatePassword: (newPassword: string) => Promise<{ error: any }>
   resetPasswordForEmail: (email: string) => Promise<{ error: any }>
@@ -39,9 +39,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, referralCode?: string) => {
     try {
-      const { error } = await supabase.auth.signUp({ email, password })
+      const normalizedReferralCode = referralCode?.trim()
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: normalizedReferralCode
+          ? { data: { referral_code: normalizedReferralCode } }
+          : undefined,
+      })
       if (error) return { error }
       return { error: null }
     } catch (error) {
@@ -65,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut()
   }
 
-  const verifyOtp = async (email: string, token: string) => {
+  const verifyOtp = async (email: string, token: string, referralCode?: string) => {
     try {
       const { data, error } = await supabase.auth.verifyOtp({
         email,
@@ -74,15 +81,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       })
       if (error) return { error }
 
-      // 验证成功后自动创建 profile
-      const verifiedUser = data?.user
+      let verifiedUser = data?.user ?? data?.session?.user ?? null
       if (verifiedUser) {
-        await supabase
-          .from('profiles')
-          .upsert(
-            { id: verifiedUser.id, email: verifiedUser.email ?? '', display_name: null },
-            { onConflict: 'id' }
-          )
+        setUser(verifiedUser)
+      } else {
+        const { data: { session } } = await supabase.auth.getSession()
+        verifiedUser = session?.user ?? null
+        setUser(verifiedUser)
+      }
+
+      // 验证成功后自动创建 profile
+      if (verifiedUser) {
+        try {
+          let settleRes = await fetch('/api/referrals/complete-registration', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ referral_code: referralCode?.trim() || undefined }),
+          })
+
+          if (settleRes.status === 401) {
+            await supabase.auth.getSession()
+            await new Promise(resolve => setTimeout(resolve, 200))
+            settleRes = await fetch('/api/referrals/complete-registration', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ referral_code: referralCode?.trim() || undefined }),
+            })
+          }
+
+          if (!settleRes.ok) {
+            const settleData = await settleRes.json().catch(() => ({}))
+            console.warn('[Auth] 注册奖励结算失败，登录已成功:', settleData.error || settleRes.status)
+          }
+        } catch (settleError) {
+          console.warn('[Auth] 注册奖励结算异常，登录已成功:', settleError)
+        }
       }
 
       return { error: null }
@@ -116,8 +149,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const resetPasswordForEmail = async (email: string) => {
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/callback?next=/auth/reset-password`,
+      const passwordRecoveryClient = createPasswordRecoveryClient()
+      const { error } = await passwordRecoveryClient.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
       })
       return { error: error ?? null }
     } catch (error) {

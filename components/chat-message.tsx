@@ -20,10 +20,11 @@ import {
 import type { FeatureKind } from "@/lib/feature-types"
 import { sanitizeReplacementChars } from "@/lib/text-sanitize"
 import {
+  BUBU_COPY,
   BUBU_FOLLOW_UP_DEFAULTS,
   BUBU_FOLLOW_UP_LOADING,
   getBubuStreamLabel,
-} from "@/lib/bubu-copy"
+} from "@/lib/bubu-content"
 import {
   AgentInputRequest,
   type AgentInlineInputRequest,
@@ -72,32 +73,31 @@ const FEATURE_META: Record<
   { title: string; icon: React.ElementType; suggests: string[] }
 > = {
   hepan: {
-    title: "合盘分析报告",
+    title: BUBU_COPY.chatMessage.featureMeta.hepan.title,
     icon: Users,
-    suggests: ["我们的相处节奏？", "哪一年关系会更近？", "需要注意哪些磨合点？"],
+    suggests: [...BUBU_COPY.chatMessage.featureMeta.hepan.suggests],
   },
   fortune: {
-    title: "近期运势推演",
+    title: BUBU_COPY.chatMessage.featureMeta.fortune.title,
     icon: CalendarRange,
-    suggests: ["这段时间财运会怎样？", "感情上要注意什么？", "哪几天最适合行动？"],
+    suggests: [...BUBU_COPY.chatMessage.featureMeta.fortune.suggests],
   },
   avatar: {
-    title: "头像气质报告",
+    title: BUBU_COPY.chatMessage.featureMeta.avatar.title,
     icon: ImageIcon,
-    suggests: ["再生成 3 个风格建议", "适合什么配色？", "可以再给一个头像 prompt 吗？"],
+    suggests: [...BUBU_COPY.chatMessage.featureMeta.avatar.suggests],
   },
   lifepath: {
-    title: "人生脉络总览",
+    title: BUBU_COPY.chatMessage.featureMeta.lifepath.title,
     icon: Compass,
-    suggests: ["哪个大运最关键？", "三十岁前的重点是什么？", "晚年要注意什么？"],
+    suggests: [...BUBU_COPY.chatMessage.featureMeta.lifepath.suggests],
   },
 }
 
 const DEFAULT_FOLLOW_UPS = BUBU_FOLLOW_UP_DEFAULTS
 const FOLLOW_UP_LIMIT = 3
-const SMOOTH_REVEAL_MS = 16
-const SMOOTH_REVEAL_FAST_MS = 8
-const SMOOTH_REVEAL_CATCHUP_CHARS = 48
+const STREAM_REVEAL_FRAME_MS = 22
+const STREAM_REVEAL_CATCHUP_CHARS = 360
 
 const markdownComponents = {
   h1: ({ children }: { children?: React.ReactNode }) => (
@@ -193,90 +193,75 @@ function getRestAfterSentinel(content: string): string {
   return content.replace(/^\[卜卜象·[^\]]+\][^\n]*\n*/, "").trim()
 }
 
-function takeSmoothRevealChunk(text: string): string {
+function takeStreamRevealChunk(text: string, backlogLength: number): string {
   if (!text) return ""
+
   const chars = Array.from(text)
-  const preview = chars.slice(0, 32).join("")
+  const preview = chars.slice(0, 24).join("")
   const hasWideChars = /[^\x00-\x7F]/.test(preview)
-  const min = hasWideChars ? 6 : 18
-  const max = hasWideChars ? 12 : 28
-  const hardLimit = Math.min(chars.length, max)
 
-  for (let index = hardLimit; index >= min; index -= 1) {
-    const char = chars[index - 1]
-    if (/[\s，,、：:；;。！？!?]/.test(char)) {
-      return chars.slice(0, index).join("")
-    }
+  let step = hasWideChars ? 1 : 4
+  if (backlogLength > STREAM_REVEAL_CATCHUP_CHARS * 6) {
+    step = hasWideChars ? 10 : 28
+  } else if (backlogLength > STREAM_REVEAL_CATCHUP_CHARS * 3) {
+    step = hasWideChars ? 6 : 18
+  } else if (backlogLength > STREAM_REVEAL_CATCHUP_CHARS) {
+    step = hasWideChars ? 3 : 10
+  } else if (backlogLength > STREAM_REVEAL_CATCHUP_CHARS / 2) {
+    step = hasWideChars ? 2 : 7
   }
 
-  return chars.slice(0, hardLimit).join("")
+  return chars.slice(0, Math.min(chars.length, step)).join("")
 }
 
-function takeSmoothRevealStep(text: string, backlogLength: number): string {
-  if (backlogLength > SMOOTH_REVEAL_CATCHUP_CHARS * 3) {
-    return Array.from(text).slice(0, SMOOTH_REVEAL_CATCHUP_CHARS).join("")
-  }
-
-  return takeSmoothRevealChunk(text)
-}
-
-function useSmoothStreamingText(targetContent: string, isStreaming: boolean): string {
+function useChatGptStreamingText(targetContent: string, isStreaming: boolean): string {
   const [visibleContent, setVisibleContent] = useState(targetContent)
   const visibleRef = useRef(targetContent)
   const targetRef = useRef(targetContent)
   const streamingRef = useRef(isStreaming)
-  const frameRef = useRef<number | null>(null)
-  const lastRevealAtRef = useRef(0)
+  const timerRef = useRef<number | null>(null)
 
   useEffect(() => {
     visibleRef.current = visibleContent
   }, [visibleContent])
 
-  const cancelRevealFrame = useCallback(() => {
-    if (frameRef.current !== null) {
-      window.cancelAnimationFrame(frameRef.current)
-      frameRef.current = null
+  const clearRevealTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
     }
   }, [])
 
-  const revealStep = useCallback((timestamp: number) => {
-    frameRef.current = null
+  const revealStep = useCallback(() => {
+    timerRef.current = null
     if (!streamingRef.current) return
 
     const target = targetRef.current
     const current = visibleRef.current
-
     if (!target.startsWith(current)) {
       visibleRef.current = target
       setVisibleContent(target)
-      lastRevealAtRef.current = timestamp
       return
     }
-
     if (target.length <= current.length) return
 
     const backlogLength = target.length - current.length
-    const revealDelay = backlogLength > SMOOTH_REVEAL_CATCHUP_CHARS
-      ? SMOOTH_REVEAL_FAST_MS
-      : SMOOTH_REVEAL_MS
+    const pending = target.slice(current.length)
+    const next = current + takeStreamRevealChunk(pending, backlogLength)
+    visibleRef.current = next
+    setVisibleContent(next)
 
-    if (timestamp - lastRevealAtRef.current >= revealDelay) {
-      const pending = target.slice(current.length)
-      const next = current + takeSmoothRevealStep(pending, backlogLength)
-      visibleRef.current = next
-      setVisibleContent(next)
-      lastRevealAtRef.current = timestamp
-    }
-
-    if (targetRef.current.length > visibleRef.current.length && frameRef.current === null) {
-      frameRef.current = window.requestAnimationFrame(revealStep)
+    const remaining = targetRef.current.length - visibleRef.current.length
+    if (remaining > 0) {
+      timerRef.current = window.setTimeout(revealStep, STREAM_REVEAL_FRAME_MS)
     }
   }, [])
 
-  const requestRevealFrame = useCallback(() => {
-    if (frameRef.current === null) {
-      frameRef.current = window.requestAnimationFrame(revealStep)
-    }
+  const scheduleReveal = useCallback(() => {
+    if (timerRef.current !== null || !streamingRef.current) return
+    const backlogLength = targetRef.current.length - visibleRef.current.length
+    if (backlogLength <= 0) return
+    timerRef.current = window.setTimeout(revealStep, STREAM_REVEAL_FRAME_MS)
   }, [revealStep])
 
   useEffect(() => {
@@ -284,7 +269,7 @@ function useSmoothStreamingText(targetContent: string, isStreaming: boolean): st
     targetRef.current = targetContent
 
     if (!isStreaming) {
-      cancelRevealFrame()
+      clearRevealTimer()
       if (visibleRef.current !== targetContent) {
         visibleRef.current = targetContent
         setVisibleContent(targetContent)
@@ -295,14 +280,15 @@ function useSmoothStreamingText(targetContent: string, isStreaming: boolean): st
     if (!targetContent.startsWith(visibleRef.current)) {
       visibleRef.current = targetContent
       setVisibleContent(targetContent)
+      return
     }
 
-    requestRevealFrame()
-  }, [cancelRevealFrame, isStreaming, requestRevealFrame, targetContent])
+    scheduleReveal()
+  }, [clearRevealTimer, isStreaming, scheduleReveal, targetContent])
 
   useEffect(() => {
-    return () => cancelRevealFrame()
-  }, [cancelRevealFrame])
+    return () => clearRevealTimer()
+  }, [clearRevealTimer])
 
   return isStreaming ? visibleContent : targetContent
 }
@@ -501,7 +487,7 @@ function UserFeatureCard({ kind, content }: { kind: FeatureKind; content: string
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium">
-            我想做：{meta.title.replace("报告", "").replace("总览", "").replace("推演", "")}
+            {BUBU_COPY.chatMessage.userFeaturePrefix}{meta.title.replace("报告", "").replace("总览", "").replace("推演", "")}
           </p>
           {summary && <p className="text-[11px] opacity-80 mt-1 truncate">{summary}</p>}
         </div>
@@ -514,7 +500,7 @@ function UserFeatureCard({ kind, content }: { kind: FeatureKind; content: string
             className="mt-2 text-[11px] opacity-70 hover:opacity-100 inline-flex items-center gap-1"
           >
             {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            {expanded ? "收起完整请求" : "查看完整请求"}
+            {expanded ? BUBU_COPY.chatMessage.collapseRequest : BUBU_COPY.chatMessage.expandRequest}
           </button>
           {expanded && (
             <pre className="mt-2 text-[11px] whitespace-pre-wrap opacity-85 font-light max-h-60 overflow-y-auto leading-relaxed">
@@ -536,7 +522,7 @@ function ReportHeader({ kind }: { kind: FeatureKind }) {
         <Icon className="w-3.5 h-3.5" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70">卜卜象 · 报告</p>
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground/70">{BUBU_COPY.chatMessage.reportEyebrow}</p>
         <p className="text-sm font-medium text-foreground">{meta.title}</p>
       </div>
       <Sparkles className="w-3.5 h-3.5 text-accent" />
@@ -568,7 +554,7 @@ function FollowUp({
   const suggests = suggestions
   return (
     <div className="mt-4 pt-3 border-t border-border/50">
-      <p className="text-[11px] text-muted-foreground/70 mb-2">卜卜象猜你还想问：</p>
+      <p className="text-[11px] text-muted-foreground/70 mb-2">{BUBU_COPY.chatMessage.followUpTitle}</p>
       <div className="flex flex-wrap gap-2">
         {suggests.map(text => (
           <button
@@ -785,7 +771,7 @@ function StreamingMarkdown({ content }: { content: string }) {
         <div className="my-4 rounded-lg border border-border bg-muted">
           <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            <span>代码生成中</span>
+            <span>{BUBU_COPY.chatMessage.codeGenerating}</span>
           </div>
           <pre className="max-h-72 overflow-auto p-4 text-sm font-mono whitespace-pre-wrap">
             {parts.codeBlockDraft || " "}
@@ -828,10 +814,10 @@ function AssistantActions({
         onClick={onCopy}
         disabled={isStreaming}
         className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-card px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
-        title={isStreaming ? "生成完成后可复制" : "复制全文"}
+        title={isStreaming ? BUBU_COPY.chatMessage.copyAfterCompleteTitle : BUBU_COPY.chatMessage.copyTitle}
       >
         {copied ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
-        {copied ? "已复制" : "复制"}
+        {copied ? BUBU_COPY.chatMessage.copied : BUBU_COPY.chatMessage.copy}
       </button>
       {canCollapse && (
         <button
@@ -839,10 +825,10 @@ function AssistantActions({
           onClick={onToggleCollapse}
           disabled={isStreaming}
           className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border/70 bg-card px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
-          title={isCollapsed ? "展开全文" : "折叠长答案"}
+          title={isCollapsed ? BUBU_COPY.chatMessage.expandFullAnswerTitle : BUBU_COPY.chatMessage.collapseLongAnswerTitle}
         >
           {isCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-          {isCollapsed ? "展开" : "折叠"}
+          {isCollapsed ? BUBU_COPY.chatMessage.expand : BUBU_COPY.chatMessage.collapse}
         </button>
       )}
     </div>
@@ -876,7 +862,7 @@ const ChatMessage = memo(function ChatMessage({
     () => sanitizeReplacementChars(message.content),
     [message.content],
   )
-  const visibleContent = useSmoothStreamingText(displayContent, isStreaming)
+  const visibleContent = useChatGptStreamingText(displayContent, isStreaming)
 
   const userKind = useMemo(
     () => (isUser ? detectFeatureKindFromContent(displayContent) : null),

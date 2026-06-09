@@ -1,6 +1,9 @@
 import { callLLMTextWithUsage } from '@/lib/llm'
 import { recordLlmUsage, type LlmUsageMode } from '@/lib/token-usage'
-import { BUBU_FOLLOW_UP_DEFAULTS, isTemplateFollowUpSuggestion } from '@/lib/bubu-copy'
+import {
+  buildFollowUpSuggestionsPrompt,
+  isTemplateFollowUpSuggestion,
+} from '@/lib/bubu-content'
 
 export interface FollowUpSuggestionMessage {
   role: 'user' | 'assistant' | 'system'
@@ -137,7 +140,7 @@ function buildMessages(input: GenerateFollowUpSuggestionsInput) {
   return [
     {
       role: 'system',
-      content: `你是聊天产品里的“后续追问推荐”生成器，只输出 JSON。\n\n根据用户上一问、最近对话、当前回复和结构化上下文，生成 3 个自然、可点击的中文追问。\n\n要求：\n- 只输出 {"suggestions":["...","...","..."]}\n- 每条尽量 8-24 个中文字符，可略长但不要超过 36 字\n- 像卜卜象会递给用户的小问题，口语、具体、有上下文\n- 优先点名人物、时间范围、关系/财运/事业等真实上下文\n- 不要重复用户刚问过的问题，不要重复当前回复已经完整回答的句子\n- 不要编造命理结论，不要替用户下判断\n- 避免模板腔：不要输出“继续展开上面的重点”“整理成行动清单”“下一步怎么做”，也不要输出这些本地兜底：${BUBU_FOLLOW_UP_DEFAULTS.join('、')}`,
+      content: buildFollowUpSuggestionsPrompt(),
     },
     {
       role: 'user',

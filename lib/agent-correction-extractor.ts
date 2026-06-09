@@ -1,5 +1,6 @@
 import { callLLMTextWithUsage } from '@/lib/llm'
 import { recordLlmUsage } from '@/lib/token-usage'
+import { buildAgentCorrectionExtractorPrompt } from '@/lib/bubu-content'
 import type {
   AgentParticipant,
   AgentWorkflowCorrection,
@@ -125,20 +126,7 @@ export async function extractAgentCorrectionWithLLM(input: {
   const messages = [
     {
       role: 'system',
-      content: `你是 Agent workflow 的低延迟纠错抽取器，只输出 JSON。
-
-任务：判断用户最新一句是否在纠正当前 pending workflow 的上下文。不要回答用户，不要做命理分析。
-
-只允许输出一个 JSON object：
-{"intent":"correction"|"none","scope":"person"|"time"|"focus"|"depth"|"profile_data"|null,"confidence":"low"|"medium"|"high","reason":"简短原因"}
-
-scope=person 时额外输出：intendedName, rejectedName, createNew。
-scope=time 时额外输出：timeText（用户想改成的时间自然语言）。
-scope=focus 时额外输出：focus（字符串数组）。
-scope=depth 时额外输出：depth，只能是 concise/balanced/detailed。
-scope=profile_data 时额外输出：fieldName, value。
-
-如果只是普通追问、感谢、闲聊、或无法确定纠正对象，输出 {"intent":"none","scope":null,"confidence":"low","reason":"..."}。`,
+      content: buildAgentCorrectionExtractorPrompt(),
     },
     {
       role: 'user',

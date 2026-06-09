@@ -60,7 +60,6 @@ export async function POST(req: Request) {
       complexity,
       maxSteps: body.maxSteps,
       timeoutMs: body.timeoutMs,
-      signal: req.signal,
     })
 
     return new Response(stream, {

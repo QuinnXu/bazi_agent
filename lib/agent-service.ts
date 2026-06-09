@@ -51,6 +51,13 @@ import {
   sanitizeReplacementChars,
   takeSemanticStreamChunk,
 } from '@/lib/text-sanitize'
+import {
+  BUBU_COPY,
+  buildAgentDirectAnswerGuidance,
+  buildAgentEarlierContextSummary,
+  buildAgentReportStyleHint,
+  buildAgentSessionSummary,
+} from '@/lib/bubu-content'
 import type {
   AgentAnalysisRequest,
   AgentAnalysisSlots,
@@ -282,7 +289,7 @@ function normalizeMessages(messages: AgentMessage[]): AgentMessage[] {
   return [
     {
       role: 'system',
-      content: `【更早上下文摘要】\n${truncateText(summary, 2400)}`,
+      content: buildAgentEarlierContextSummary(truncateText(summary, 2400)),
     },
     ...recent,
   ]
@@ -293,10 +300,10 @@ function fastLocalAnswer(input: AgentChatInput): string | null {
   if (!latest) return null
   const compact = latest.replace(/[\s。！？!?,，～~.]/g, '').toLowerCase()
   if (/^(你好|您好|嗨|hi|hello|在吗|早上好|下午好|晚上好)$/.test(compact)) {
-    return '你好呀～我是卜卜象。你可以直接告诉我想看的问题，比如近期运势、关系合盘、人生脉络，或者先创建一个八字人物。'
+    return BUBU_COPY.agentService.fastHello
   }
   if (/^(谢谢|感谢|多谢|thx|thanks)$/.test(compact)) {
-    return '不客气呀～需要继续看某个月份、某段关系或某个选择时，直接告诉我就好。'
+    return BUBU_COPY.agentService.fastThanks
   }
   return null
 }
@@ -316,7 +323,7 @@ async function openDirectChatStream(
   if (input.sessionSummary) {
     summaryMessages.push({
       role: 'system',
-      content: `【会话摘要】\n${truncateText(input.sessionSummary, 1600)}`,
+      content: buildAgentSessionSummary(truncateText(input.sessionSummary, 1600)),
     })
   }
 
@@ -434,7 +441,7 @@ function buildAnalysisRequest(
     conversationSummary: input.sessionSummary || input.featureContext?.summary || null,
     promptStyleHint: customInstruction
       ? customInstruction
-      : `当前报告风格：${getAgentReportPreferenceLabel(preference)}`,
+      : buildAgentReportStyleHint(getAgentReportPreferenceLabel(preference)),
   }
 }
 
@@ -599,7 +606,13 @@ function buildDirectAnswerInput(
   const focus = slots.matter?.focus?.join('、') || slots.matter?.category || '当前问题'
   const guidance: AgentMessage = {
     role: 'system',
-    content: `【Agent 直接回答模式】这次不要写成长报告，也不要展示报告结构。请围绕用户的具体问题直接回答，结合可用八字/人物/时间上下文给出结论、原因和行动提醒。若信息有不确定处，简短说明假设即可。\n判定原因：${policy.reason}\n原始问题：${sourceText}\n人物：${people}\n时间：${time}\n重点：${focus}`,
+    content: buildAgentDirectAnswerGuidance({
+      reason: policy.reason,
+      sourceText,
+      people,
+      time,
+      focus,
+    }),
   }
   return {
     ...input,
@@ -756,14 +769,14 @@ export async function* runAgentChatEvents(
       step: 1,
       phase: 'final',
       status: 'running',
-      title: '小象先接住这一句',
+      title: BUBU_COPY.agentService.progress.fastAnswerRunning,
     })
     yield* streamTextEvents(fastAnswer)
     yield progressEvent(startedAt, {
       step: 1,
       phase: 'final',
       status: 'completed',
-      title: '小象短答递上啦',
+      title: BUBU_COPY.agentService.progress.fastAnswerDone,
     })
     yield { type: 'done', trace }
     return
@@ -775,8 +788,8 @@ export async function* runAgentChatEvents(
       step: 1,
       phase: 'planner',
       status: 'running',
-      title: '小象在挑工具',
-      detail: '挑一把顺手的小工具',
+      title: BUBU_COPY.agentService.progress.planningTool,
+      detail: BUBU_COPY.agentService.progress.planningToolDetail,
     })
     toolDecision = await maybeSelectAgentTool(input, deps, latest)
     if (toolDecision) {
@@ -792,7 +805,7 @@ export async function* runAgentChatEvents(
       step: 1,
       phase: 'planner',
       status: 'completed',
-      title: toolDecision ? '小象挑好工具啦' : '小象按规则排好路',
+      title: toolDecision ? BUBU_COPY.agentService.progress.toolPicked : BUBU_COPY.agentService.progress.rulePlanned,
       detail: toolDecision?.name,
     })
   }
@@ -809,10 +822,10 @@ export async function* runAgentChatEvents(
       step: 1,
       phase: 'final',
       status: 'running',
-      title: '小象直接开讲',
+      title: BUBU_COPY.agentService.progress.directStart,
     })
     if (input.pendingConfirmation) {
-      yield* streamTextEvents('刚才那一步分析我先帮你放在旁边，不会丢。我们先接住你现在这句。\n\n')
+      yield* streamTextEvents(BUBU_COPY.agentService.pendingAside)
     }
     const directStream = await openDirectChatStream(input, deps, input.signal)
     yield* streamReadableEvents(directStream)
@@ -820,7 +833,7 @@ export async function* runAgentChatEvents(
       step: 1,
       phase: 'final',
       status: 'completed',
-      title: '小象讲完啦',
+      title: BUBU_COPY.agentService.progress.directDone,
     })
     yield { type: 'done', trace, pendingConfirmation: input.pendingConfirmation || null }
     return
@@ -830,8 +843,8 @@ export async function* runAgentChatEvents(
     step: 1,
     phase: 'planner',
     status: 'running',
-    title: '小象在捡关键信息',
-    detail: '人物、时间、事宜，一颗颗摆好',
+    title: BUBU_COPY.agentService.progress.collecting,
+    detail: BUBU_COPY.agentService.progress.collectingDetail,
   })
 
   const liveCorrection = await maybeExtractLiveCorrection(input, deps, latest)
@@ -877,11 +890,11 @@ export async function* runAgentChatEvents(
     step: 1,
     phase: 'planner',
     status: 'completed',
-    title: '关键信息捡好啦',
+    title: BUBU_COPY.agentService.progress.collected,
   })
 
   if (resolved.matter?.category === 'avatar') {
-    const content = '头像分析需要先看到图片，卜卜象不能凭空想象头像。你可以先到「头像分析推荐」里上传图片；如果只是想聊职业感或社交头像方向，也可以描述一下画面，我先帮你做聊天式建议。'
+    const content = BUBU_COPY.agentService.avatarGuidance
     yield traceEvent(trace, {
       step: 2,
       action: 'avatar_guidance',
@@ -892,14 +905,14 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'running',
-      title: '小象想先看看图',
+      title: BUBU_COPY.agentService.progress.avatarNeedsImage,
     })
     yield* streamTextEvents(content)
     yield progressEvent(startedAt, {
       step: 2,
       phase: 'final',
       status: 'completed',
-      title: '图片提醒递上啦',
+      title: BUBU_COPY.agentService.progress.avatarGuidanceDone,
     })
     yield { type: 'done', trace }
     return
@@ -945,7 +958,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'completed',
-      title: '小象等你选一下',
+      title: BUBU_COPY.agentService.progress.waitingChoice,
     })
     yield {
       type: 'done',
@@ -967,7 +980,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'running',
-      title: '小象直接回答',
+      title: BUBU_COPY.agentService.progress.directAnswer,
     })
     const directStream = await openDirectChatStream(
       buildDirectAnswerInput(input, resolved, sourceText, responsePolicy),
@@ -979,7 +992,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'completed',
-      title: '小象答完啦',
+      title: BUBU_COPY.agentService.progress.directAnswerDone,
     })
     yield { type: 'done', trace, pendingConfirmation: null }
     return
@@ -999,8 +1012,8 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'running',
-      title: '小象开始认真分析',
-      detail: `小象思考深度：${request.depth}`,
+      title: BUBU_COPY.agentService.progress.analysisStart,
+      detail: BUBU_COPY.agentService.progress.analysisDetail(request.depth),
     })
     const stream = await openAnalysisStream(input, deps, request)
     const reader = stream.getReader()
@@ -1022,7 +1035,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'completed',
-      title: '小象分析完成啦',
+      title: BUBU_COPY.agentService.progress.analysisDone,
     })
     yield {
       type: 'done',
@@ -1044,7 +1057,7 @@ export async function* runAgentChatEvents(
       step: 2,
       phase: 'final',
       status: 'failed',
-      title: '小象分析卡住啦',
+      title: BUBU_COPY.agentService.progress.analysisFailed,
       detail,
     })
     yield { type: 'error', message: detail }

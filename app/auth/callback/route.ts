@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
+import { completeUserRegistration } from '@/lib/rewards'
 
 /**
  * 处理 Supabase 邮箱确认链接回调（及 OAuth 等 code 交换）。
@@ -8,7 +9,17 @@ import { createServerSupabaseClient } from '@/lib/supabase/server'
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
-  const next = requestUrl.searchParams.get('next') ?? '/'
+  const nextParam = requestUrl.searchParams.get('next') ?? '/'
+  const next = nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/'
+
+  if (next.startsWith('/auth/reset-password')) {
+    const target = new URL(next, requestUrl.origin)
+    ;['code', 'token_hash', 'type', 'error', 'error_code', 'error_description'].forEach((key) => {
+      const value = requestUrl.searchParams.get(key)
+      if (value) target.searchParams.set(key, value)
+    })
+    return NextResponse.redirect(target)
+  }
 
   if (code) {
     const supabase = await createServerSupabaseClient()
@@ -16,18 +27,8 @@ export async function GET(request: Request) {
     if (!error) {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        await supabase
-          .from('profiles')
-          .upsert(
-            { id: user.id, email: user.email ?? '', display_name: null },
-            { onConflict: 'id' }
-          )
+        await completeUserRegistration(user)
       }
-    } else if (next.startsWith('/auth/reset-password')) {
-      // 链接过期或 code 已被使用：让 reset-password 页面给用户友好提示
-      const target = new URL(next, requestUrl.origin)
-      target.searchParams.set('error', 'invalid_link')
-      return NextResponse.redirect(target)
     }
   }
 

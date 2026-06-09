@@ -45,8 +45,6 @@ export async function POST(req: Request) {
       useUltraMode,
       participants,
       featureContext,
-    }, {
-      signal: req.signal,
     })
 
     return new Response(stream, {

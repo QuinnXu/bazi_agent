@@ -134,6 +134,7 @@ export type AgentWorkflowCorrection =
 export type PendingAgentStepKind =
   | 'select_person'
   | 'create_profile'
+  | 'create_profiles'
   | 'confirm_time'
   | 'confirm_focus'
   | 'select_depth'
@@ -141,6 +142,7 @@ export type PendingAgentStepKind =
 
 export type AgentHumanInputKind =
   | 'bazi_profile'
+  | 'bazi_profiles'
   | 'profile_required'
   | 'feature_params'
 
@@ -223,6 +225,7 @@ export interface AgentHumanInputRequestUiEvent {
   title: string
   message: string
   fields: AgentHumanInputField[]
+  profiles?: AgentBaziFormData[]
   submitLabel?: string
   resumeIntent?: string
 }

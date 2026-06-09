@@ -2,6 +2,7 @@ import { callLLMWithTools, type LlmToolCall, type LlmToolDefinition } from '@/li
 import { recordLlmUsage } from '@/lib/token-usage'
 import { hasClearFocusIntent, isLifetimeWealthQuestion, isPartnerArchetypeQuestion, parseAskedTime } from '@/lib/agent-slot-extractor'
 import type { ChatFeatureContext, ChatParticipant } from '@/lib/chat-service'
+import { buildAgentToolRouterPrompt } from '@/lib/bubu-content'
 import type {
   AgentAnalysisSlots,
   AgentMatterCategory,
@@ -112,9 +113,14 @@ export const AGENT_TOOL_DEFINITIONS: LlmToolDefinition[] = [
         ...commonProperties,
         profileName: {
           type: 'string',
-          description: '缺少资料的人物名。当前命主缺资料时可填“我”；关系对象缺资料时填对象名字。',
+          description: '缺少资料的人物名。兼容旧字段；如果缺多个具体人物，优先使用 profileNames。',
         },
-      }, ['reason', 'profileName']),
+        profileNames: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '缺少资料的具体人物名列表。多人合盘/合作问题里一次列出所有缺资料的人物。',
+        },
+      }, ['reason']),
     },
   },
   {
@@ -254,23 +260,7 @@ function toolPlannerMessages(input: AgentToolPlanningInput) {
   return [
     {
       role: 'system',
-      content: `你是卜卜象 Agent 的后端工具路由器。你只能通过 OpenAI tool calling 选择一个工具，不要直接回答用户。
-
-决策规则：
-1. 用户明确要闲聊、简单说、不要报告、不要推演、解释已有内容时，调用 agent_direct_chat。
-2. 用户的问题具体、边界清楚、人物上下文已足够，且几段话就能有效回答时，调用 agent_direct_chat，例如某天适不适合行动、近期状态提醒、单个选择建议。
-3. 用户明确要报告/详细/深度/完整/全面/展开/研究，或问题较长、多段、多主题、长期/宏观/需要结构化章节时，不要直聊；先检查缺什么并进入报告流程。
-4. 用户要做八字/命盘/合盘/运势/事业财运/感情/人生脉络等结构化分析时，如果属于宏观或报告型需求，不要直聊；先检查缺什么。
-5. 缺当前命主或被提到人物的八字资料，调用 agent_request_bazi_profile。
-6. 只有时间缺失或时间词含糊时，才调用 agent_confirm_time_range，例如“最近/未来/以后/这段时间/什么时候/哪段时间”。如果用户说的是今天/明天/后天/本周X/周末/具体日期，或已经添加时间段，不要为了确认时间再调用时间卡。
-7. 分析重点太宽且用户没说重点，调用 agent_confirm_focus。用户已说财运/财富/暴富/发财/搞钱/赚钱/事业/感情等明确重点时，不要调用 agent_confirm_focus。
-8. 只剩报告长度未定，且这是报告型需求时，调用 agent_select_depth。
-9. 报告型需求的人物、时间、重点、深度都足够时，调用 agent_run_bazi_analysis。
-10. 不要把用户询问的运势时间误当出生日期；出生资料只能在用户明确提供出生年月日时用于资料卡预填。
-11. “此生/这一生/什么时候能暴富/发财”是人生财富窗口，不要要求用户改选未来 30 天/3 个月/今年；如果当前命主已存在，通常只需要选择深度或直接分析。
-12. “适合和谁/哪类人一起搞钱/合伙赚钱”是合作对象画像，不是缺少具体第二个人；不要调用 agent_request_bazi_profile 补“谁”的八字。
-13. 轻量日常择日问题，例如“我今天适合出门吗/明天适合签约吗”，且没有要求报告、详细分析、深度推演时，调用 agent_direct_chat，让主聊天结合已有命盘直接回答。
-14. pendingConfirmation 不为空时，优先让既有 workflow 处理，除非用户明显改成闲聊。`,
+      content: buildAgentToolRouterPrompt(),
     },
     {
       role: 'user',
@@ -436,10 +426,18 @@ export function applyAgentToolDecisionToSlots(
 
   if (decision.name === 'agent_request_bazi_profile') {
     const profileName = stringValue(args.profileName)
-    next.people = []
-    if (profileName && !SELF_NAMES.has(profileName)) {
-      next.mentionedNames = [profileName]
-      next.unresolvedNames = [profileName]
+    const requestedNames = Array.from(new Set([
+      ...stringArray(args.profileNames),
+      ...(profileName ? [profileName] : []),
+    ].filter(name => !SELF_NAMES.has(name))))
+    const existingUnresolved = (next.unresolvedNames || []).filter(name => !SELF_NAMES.has(name))
+    const unresolvedNames = existingUnresolved.length > 0 ? existingUnresolved : requestedNames
+    if (unresolvedNames.length > 0) {
+      next.mentionedNames = Array.from(new Set([
+        ...(next.mentionedNames || []),
+        ...unresolvedNames,
+      ]))
+      next.unresolvedNames = unresolvedNames
       next.confidence.people = 'medium'
     } else {
       next.confidence.people = 'none'

@@ -1,7 +1,8 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react"
+import { startTransition, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react"
+import dynamic from "next/dynamic"
 import {
   Send,
   PanelLeftClose,
@@ -29,43 +30,43 @@ import Image from "next/image"
 import { MinimalBackground } from "@/components/minimal-background"
 import { ChatMessage, type MessageRunKind, type MessageStreamState } from "@/components/chat-message"
 import type { AgentInlineInputRequest, AgentInputField, AgentInputValues } from "@/components/agent-input-request"
-import { BaziDialog } from "@/components/bazi-dialog"
-import { DonationDialog } from "@/components/donation-button"
-import { AuthDialog } from "@/components/auth-dialog"
 import { UserMenu } from "@/components/user-menu"
 import { useAuth } from "@/contexts/auth-context"
 import { createBrowserClient } from "@/lib/supabase/client"
-import { ProfilesManagementDialog } from "@/components/profiles-management-dialog"
-import { ChangePasswordDialog } from "@/components/change-password-dialog"
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar"
 import { toast } from "@/hooks/use-toast"
 import { AppSidebar, type ChatMode, type FeatureType } from "@/components/app-sidebar"
 import { FeatureCards } from "@/components/feature-cards"
 import { FeatureLauncherButton } from "@/components/feature-launcher-button"
-import { HepanPage } from "@/components/features/hepan-page"
-import { FortunePage } from "@/components/features/fortune-page"
-import { AvatarPage } from "@/components/features/avatar-page"
-import { LifePathPage } from "@/components/features/lifepath-page"
 import { detectFeatureKindFromContent } from "@/components/chat-message"
 import { sanitizeReplacementChars } from "@/lib/text-sanitize"
 import {
+  BUBU_COPY,
   BUBU_EMPTY_RESPONSE,
   createBubuMessageId,
+  formatFeatureRequestDisplay,
   getBubuGeneratingLabel,
   getBubuStreamLabel,
   shouldSkipFollowUpSuggestions,
-} from "@/lib/bubu-copy"
+} from "@/lib/bubu-content"
 import type {
   FeatureKind,
   FeaturePayload,
-  HepanParams,
-  FortuneParams,
-  AvatarParams,
-  LifePathParams,
 } from "@/lib/feature-types"
 import { estimateTokensForText } from "@/lib/token-estimator"
 import type { AgentComplexityMode, AgentReportPreference } from "@/lib/agent-complexity"
 import { CLASSIC_CHAT_APPLE_COST } from "@/lib/apple-costs"
+
+const BaziDialog = dynamic(() => import("@/components/bazi-dialog").then(mod => mod.BaziDialog), { ssr: false })
+const DonationDialog = dynamic(() => import("@/components/donation-button").then(mod => mod.DonationDialog), { ssr: false })
+const AuthDialog = dynamic(() => import("@/components/auth-dialog").then(mod => mod.AuthDialog), { ssr: false })
+const RewardsDialog = dynamic(() => import("@/components/rewards-dialog").then(mod => mod.RewardsDialog), { ssr: false })
+const ProfilesManagementDialog = dynamic(() => import("@/components/profiles-management-dialog").then(mod => mod.ProfilesManagementDialog), { ssr: false })
+const ChangePasswordDialog = dynamic(() => import("@/components/change-password-dialog").then(mod => mod.ChangePasswordDialog), { ssr: false })
+const HepanPage = dynamic(() => import("@/components/features/hepan-page").then(mod => mod.HepanPage), { ssr: false })
+const FortunePage = dynamic(() => import("@/components/features/fortune-page").then(mod => mod.FortunePage), { ssr: false })
+const AvatarPage = dynamic(() => import("@/components/features/avatar-page").then(mod => mod.AvatarPage), { ssr: false })
+const LifePathPage = dynamic(() => import("@/components/features/lifepath-page").then(mod => mod.LifePathPage), { ssr: false })
 
 interface Message {
   id: string;
@@ -108,8 +109,58 @@ interface FollowUpSuggestionRequest {
   pendingKind?: string | null
 }
 
+type DurableRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
+type DurableRunKind = 'classic_chat' | 'agent_chat' | 'feature_analyze'
+
+interface DurableRunEvent {
+  seq: number
+  event_type: string
+  content?: string | null
+  payload?: Record<string, any>
+  created_at?: string
+}
+
+interface DurableRunSnapshot {
+  id: string
+  session_id: string
+  kind: DurableRunKind
+  status: DurableRunStatus
+  output_text: string
+  final_metadata?: Record<string, any>
+  assistant_message_id?: string | null
+  model?: string | null
+  input_tokens?: number | null
+  error?: string | null
+  created_at?: string
+  updated_at?: string
+  completed_at?: string | null
+  events?: DurableRunEvent[]
+}
+
+type ForegroundRunStatus = 'queued' | 'streaming' | 'complete' | 'stopped' | 'error'
+
+interface ForegroundRunState {
+  id: string
+  operationId: string
+  sessionId: string
+  runKind: MessageRunKind
+  mode: ChatMode
+  userMessage: Message
+  assistantMessage: Message
+  controller: AbortController
+  content: string
+  status: ForegroundRunStatus
+  streamState: MessageStreamState
+  startedAt: number
+  isAnalyzing: boolean
+  stopRequested: boolean
+  hadOutput: boolean
+  agentUi?: AgentInlineInputRequest
+  agentUiStatus?: 'pending' | 'submitted'
+}
+
 interface AgentPendingConfirmation {
-  kind: 'select_person' | 'create_profile' | 'confirm_time' | 'confirm_focus' | 'select_depth' | 'ready_to_analyze' | FeatureKind
+  kind: 'select_person' | 'create_profile' | 'create_profiles' | 'confirm_time' | 'confirm_focus' | 'select_depth' | 'ready_to_analyze' | FeatureKind
   draftSlots?: any
   field?: AgentInputField
   params?: any
@@ -216,18 +267,29 @@ type AgentStreamEvent =
 const COMPOSER_MIN_HEIGHT = 32
 const COMPOSER_MAX_HEIGHT = 128
 const STREAM_AUTO_SCROLL_INTERVAL_MS = 80
+const RUN_POLL_INITIAL_DELAY_MS = 180
+const RUN_POLL_MAX_DELAY_MS = 650
+const RUN_POLL_BACKOFF_MS = 80
+
+function createViewOperationId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
 
 const AGENT_FEATURE_MENTIONS: Array<{
   kind: FeatureKind
   label: string
   hint: string
   icon: React.ElementType
-}> = [
-  { kind: 'fortune', label: '近期运势', hint: '帮你看清近期能量天气和最佳行事时机 🌤️', icon: CalendarRange },
-  { kind: 'hepan', label: '合盘 / 应事', hint: '匹配两位以上人物或事件', icon: Users },
-  { kind: 'lifepath', label: '人生脉络', hint: '匹配单个命主人生总览', icon: Compass },
-  { kind: 'avatar', label: '头像分析', hint: '匹配图片和五行风格', icon: ImageIcon },
-]
+}> = BUBU_COPY.page.agentFeatureMentions.map(item => ({
+  ...item,
+  icon: item.kind === 'fortune'
+    ? CalendarRange
+    : item.kind === 'hepan'
+    ? Users
+    : item.kind === 'lifepath'
+    ? Compass
+    : ImageIcon,
+}))
 
 const AGENT_COMPLEXITY_OPTIONS: Array<{
   mode: AgentComplexityMode
@@ -262,45 +324,46 @@ function normalizeAgentBaziFormData(data?: Partial<BaziData>): BaziData {
 
 function legacyBaziEventToHumanInput(event: AgentBaziFormEvent): AgentInlineInputRequest {
   const data = normalizeAgentBaziFormData(event.initialData)
+  const copy = BUBU_COPY.page.legacyBaziForm
   return {
     type: 'human_input_request',
     requestId: `legacy-bazi-${Date.now()}`,
     kind: 'bazi_profile',
-    title: '小象还缺一份人物资料',
+    title: copy.title,
     message: event.message,
-    submitLabel: '交给小象排盘并继续',
-    resumeIntent: '创建八字人物后，请小象继续当前问题',
+    submitLabel: copy.submitLabel,
+    resumeIntent: copy.resumeIntent,
     fields: [
-      { name: 'profileName', label: '人物名称', inputType: 'text', required: true, value: '我' },
-      { name: 'year', label: '出生年份', inputType: 'number', required: true, value: data.year },
-      { name: 'month', label: '出生月份', inputType: 'number', required: true, value: data.month },
-      { name: 'day', label: '出生日期', inputType: 'number', required: true, value: data.day },
-      { name: 'hour', label: '出生小时', inputType: 'number', required: true, value: data.hour },
-      { name: 'minute', label: '出生分钟', inputType: 'number', value: data.minute || '0' },
+      { name: 'profileName', label: copy.fields.profileName, inputType: 'text', required: true, value: copy.defaultProfileName },
+      { name: 'year', label: copy.fields.year, inputType: 'number', required: true, value: data.year },
+      { name: 'month', label: copy.fields.month, inputType: 'number', required: true, value: data.month },
+      { name: 'day', label: copy.fields.day, inputType: 'number', required: true, value: data.day },
+      { name: 'hour', label: copy.fields.hour, inputType: 'number', required: true, value: data.hour },
+      { name: 'minute', label: copy.fields.minute, inputType: 'number', value: data.minute || '0' },
       {
         name: 'isSolar',
-        label: '历法',
+        label: copy.fields.calendar,
         inputType: 'select',
         required: true,
         value: data.isSolar ? 'solar' : 'lunar',
         options: [
-          { label: '公历 / 阳历', value: 'solar' },
-          { label: '农历 / 阴历', value: 'lunar' },
+          { label: copy.calendarOptions.solar, value: 'solar' },
+          { label: copy.calendarOptions.lunar, value: 'lunar' },
         ],
       },
       {
         name: 'gender',
-        label: '性别',
+        label: copy.fields.gender,
         inputType: 'select',
         required: true,
         value: data.isFemale ? 'female' : 'male',
         options: [
-          { label: '男', value: 'male' },
-          { label: '女', value: 'female' },
+          { label: copy.genderOptions.male, value: 'male' },
+          { label: copy.genderOptions.female, value: 'female' },
         ],
       },
-      { name: 'longitude', label: '出生地经度', inputType: 'number', required: true, value: data.longitude },
-      { name: 'latitude', label: '出生地纬度', inputType: 'number', required: true, value: data.latitude },
+      { name: 'longitude', label: copy.fields.longitude, inputType: 'number', required: true, value: data.longitude },
+      { name: 'latitude', label: copy.fields.latitude, inputType: 'number', required: true, value: data.latitude },
     ],
   }
 }
@@ -496,6 +559,12 @@ function isMissingMessageMetadataColumn(error: any) {
   return message.includes('model') || message.includes('tokens_used')
 }
 
+function isDurableRunsSchemaUnavailable(error: any): boolean {
+  const message = String(error?.message || '')
+  return error?.code === 'PGRST205' ||
+    message.includes("Could not find the table 'public.llm_runs'")
+}
+
 function getLlmResponseMeta(response: Response) {
   const model = response.headers.get('x-llm-model')
   const inputTokens = Number(response.headers.get('x-llm-input-tokens') || '0')
@@ -547,6 +616,17 @@ function HomeContent() {
   const streamContentRef = useRef('')
   const rafIdRef = useRef<number | null>(null)
   const streamingMessageIdRef = useRef<string | null>(null)
+  const activeRunIdRef = useRef<string | null>(null)
+  const activeRunKindRef = useRef<MessageRunKind>('classic')
+  const resumingRunRef = useRef<string | null>(null)
+  const durableRunsAvailableRef = useRef<boolean | null>(null)
+  const selectedSessionIdRef = useRef<string | null>(null)
+  const sessionViewSeqRef = useRef(0)
+  const loadSessionSeqRef = useRef(0)
+  const activeOperationIdRef = useRef<string | null>(null)
+  const activeForegroundRunIdRef = useRef<string | null>(null)
+  const foregroundRunsRef = useRef<Map<string, ForegroundRunState>>(new Map())
+  const foregroundRunBySessionRef = useRef<Map<string, string>>(new Map())
   const abortControllerRef = useRef<AbortController | null>(null)
   const stopRequestedRef = useRef(false)
   const streamHadOutputRef = useRef(false)
@@ -567,11 +647,13 @@ function HomeContent() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [currentSessionMode, setCurrentSessionMode] = useState<ChatMode>('agent')
   const [activeChatMode, setActiveChatMode] = useState<ChatMode>('agent')
+  const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
   const [agentComplexity, setAgentComplexity] = useState<AgentComplexityMode>('instant')
   const [messages, setMessages] = useState<Message[]>([])
   const [activeStreamingMessageId, setActiveStreamingMessageId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isSessionLoading, setIsSessionLoading] = useState(false)
   const [isStreamingStarted, setIsStreamingStarted] = useState(false)
   const [baziData, setBaziData] = useState<BaziData | null>(null)
   const [baziAnalysisResult, setBaziAnalysisResult] = useState<string | null>(null)
@@ -591,6 +673,7 @@ function HomeContent() {
   const [isUltraMode, setIsUltraMode] = useState(false)
   const [activeFeature, setActiveFeature] = useState<FeatureType>('chat')
   const [showDonationDialog, setShowDonationDialog] = useState(false)
+  const [showRewardsDialog, setShowRewardsDialog] = useState(false)
   const [featureContext, setFeatureContext] = useState<FeatureContext | null>(null)
   const [sessionSummary, setSessionSummary] = useState<string | null>(null)
   const [agentPendingConfirmation, setAgentPendingConfirmation] = useState<AgentPendingConfirmation | null>(null)
@@ -602,12 +685,30 @@ function HomeContent() {
   const [composerModeOpen, setComposerModeOpen] = useState(false)
 
   // Apple quota state
-  const [appleQuota, setAppleQuota] = useState<{ remaining: number; dailyLimit: number; isPaid: boolean } | null>(null)
+  const [appleQuota, setAppleQuota] = useState<{
+    remaining: number
+    dailyLimit: number
+    isPaid: boolean
+    membershipExpiresAt?: string | null
+    bonusAppleLimit?: number
+    bonusExpiresAt?: string | null
+  } | null>(null)
   const [showQuotaExhausted, setShowQuotaExhausted] = useState(false)
   
   // Scroll to top button visibility
   const [showScrollTop, setShowScrollTop] = useState(false)
   const [showJumpLatest, setShowJumpLatest] = useState(false)
+
+  const messagesRef = useRef<Message[]>([])
+  const featureContextRef = useRef<FeatureContext | null>(null)
+
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  useEffect(() => {
+    featureContextRef.current = featureContext
+  }, [featureContext])
 
   // Fetch apple quota when user changes
   const fetchQuota = useCallback(async () => {
@@ -619,7 +720,14 @@ function HomeContent() {
       const res = await fetch('/api/quota')
       if (res.ok) {
         const data = await res.json()
-        setAppleQuota({ remaining: data.remaining, dailyLimit: data.dailyLimit, isPaid: data.isPaid })
+        setAppleQuota({
+          remaining: data.remaining,
+          dailyLimit: data.dailyLimit,
+          isPaid: data.isPaid,
+          membershipExpiresAt: data.membershipExpiresAt ?? null,
+          bonusAppleLimit: data.bonusAppleLimit ?? 0,
+          bonusExpiresAt: data.bonusExpiresAt ?? null,
+        })
       }
     } catch (error) {
       console.error('获取配额失败:', error)
@@ -662,6 +770,214 @@ function HomeContent() {
   const setStreamingMessageId = useCallback((id: string | null) => {
     streamingMessageIdRef.current = id
     setActiveStreamingMessageId(id)
+  }, [])
+
+  const cancelPendingStreamFrame = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      window.cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = null
+    }
+  }, [])
+
+  const getForegroundRunForSession = useCallback((sessionId: string | null) => {
+    if (!sessionId) return null
+    const runId = foregroundRunBySessionRef.current.get(sessionId)
+    if (!runId) return null
+    const run = foregroundRunsRef.current.get(runId)
+    if (!run || run.status === 'complete') return null
+    return run
+  }, [])
+
+  const isForegroundRunVisible = useCallback((run: ForegroundRunState) => (
+    selectedSessionIdRef.current === run.sessionId &&
+    activeForegroundRunIdRef.current === run.id
+  ), [])
+
+  const mergeForegroundRunMessages = useCallback((baseMessages: Message[], sessionId: string | null) => {
+    const run = getForegroundRunForSession(sessionId)
+    if (!run) return baseMessages
+
+    const nextMessages = [...baseMessages]
+    const hasLocalUser = nextMessages.some(message =>
+      message.id === run.userMessage.id ||
+      (
+        message.role === 'user' &&
+        message.content === run.userMessage.content &&
+        Math.abs(message.createdAt.getTime() - run.userMessage.createdAt.getTime()) < 120_000
+      ),
+    )
+    if (!hasLocalUser) {
+      nextMessages.push(run.userMessage)
+    }
+
+    const assistantContent = run.content || run.assistantMessage.content
+    const assistant: Message = {
+      ...run.assistantMessage,
+      content: assistantContent,
+      streamState: run.streamState,
+      agentUi: run.agentUi,
+      agentUiStatus: run.agentUiStatus,
+    }
+    const existingAssistantIndex = nextMessages.findIndex(message => message.id === assistant.id)
+    if (existingAssistantIndex >= 0) {
+      nextMessages[existingAssistantIndex] = assistant
+    } else {
+      const finalContent = sanitizeReplacementChars(assistantContent).trim()
+      const hasSameSavedAssistant = finalContent && nextMessages.some(message =>
+        message.role === 'assistant' &&
+        sanitizeReplacementChars(message.content).trim() === finalContent,
+      )
+      if (!hasSameSavedAssistant) {
+        nextMessages.push(assistant)
+      }
+    }
+
+    return nextMessages.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+  }, [getForegroundRunForSession])
+
+  const attachForegroundRunToView = useCallback((sessionId: string | null) => {
+    const run = getForegroundRunForSession(sessionId)
+    activeForegroundRunIdRef.current = run?.id || null
+    activeOperationIdRef.current = run?.operationId || null
+    activeRunIdRef.current = null
+    resumingRunRef.current = null
+
+    if (!run) {
+      abortControllerRef.current = null
+      stopRequestedRef.current = false
+      streamHadOutputRef.current = false
+      streamContentRef.current = ''
+      setStreamingMessageId(null)
+      setIsLoading(false)
+      setIsAnalyzing(false)
+      setIsStreamingStarted(false)
+      return null
+    }
+
+    activeRunKindRef.current = run.runKind
+    abortControllerRef.current = run.controller
+    stopRequestedRef.current = run.stopRequested
+    streamHadOutputRef.current = run.hadOutput
+    streamContentRef.current = run.content
+    setStreamingMessageId(run.assistantMessage.id)
+    const runActive = run.status === 'queued' || run.status === 'streaming'
+    setIsLoading(runActive)
+    setIsAnalyzing(runActive && run.isAnalyzing)
+    setIsStreamingStarted(Boolean(run.content.trim()) || run.status === 'streaming')
+    return run
+  }, [getForegroundRunForSession, setStreamingMessageId])
+
+  const registerForegroundRun = useCallback((run: ForegroundRunState) => {
+    foregroundRunsRef.current.set(run.id, run)
+    foregroundRunBySessionRef.current.set(run.sessionId, run.id)
+    if (selectedSessionIdRef.current === run.sessionId) {
+      attachForegroundRunToView(run.sessionId)
+    }
+  }, [attachForegroundRunToView])
+
+  const clearForegroundRun = useCallback((run: ForegroundRunState) => {
+    foregroundRunsRef.current.delete(run.id)
+    if (foregroundRunBySessionRef.current.get(run.sessionId) === run.id) {
+      foregroundRunBySessionRef.current.delete(run.sessionId)
+    }
+    if (activeForegroundRunIdRef.current === run.id) {
+      activeForegroundRunIdRef.current = null
+      activeOperationIdRef.current = null
+      abortControllerRef.current = null
+      stopRequestedRef.current = false
+      streamHadOutputRef.current = false
+      streamContentRef.current = ''
+      setStreamingMessageId(null)
+      setIsLoading(false)
+      setIsAnalyzing(false)
+      setIsStreamingStarted(false)
+    }
+  }, [setStreamingMessageId])
+
+  const applyForegroundRunPatch = useCallback((
+    run: ForegroundRunState,
+    patch: {
+      content?: string
+      status?: ForegroundRunStatus
+      streamState?: MessageStreamState
+      agentUi?: AgentInlineInputRequest
+      agentUiStatus?: 'pending' | 'submitted'
+      suggestedFollowUps?: string[]
+      followUpStatus?: Message['followUpStatus']
+    },
+  ) => {
+    if (patch.content !== undefined) {
+      run.content = patch.content
+      run.hadOutput = run.hadOutput || Boolean(patch.content)
+    }
+    if (patch.status) run.status = patch.status
+    if (patch.streamState) run.streamState = patch.streamState
+    if (patch.agentUi !== undefined) run.agentUi = patch.agentUi
+    if (patch.agentUiStatus !== undefined) run.agentUiStatus = patch.agentUiStatus
+
+    if (!isForegroundRunVisible(run)) return
+    if (patch.content !== undefined) {
+      streamContentRef.current = patch.content
+      streamHadOutputRef.current = streamHadOutputRef.current || Boolean(patch.content)
+      if (patch.content.trim() || patch.status === 'streaming') {
+        setIsStreamingStarted(true)
+      }
+    }
+    if (patch.status === 'complete' || patch.status === 'stopped' || patch.status === 'error') {
+      setIsLoading(false)
+      setIsAnalyzing(false)
+      setIsStreamingStarted(false)
+    }
+
+    setMessages(prev => prev.map(message =>
+      message.id === run.assistantMessage.id
+        ? {
+            ...message,
+            content: patch.content !== undefined ? patch.content : message.content,
+            streamState: patch.streamState || message.streamState,
+            agentUi: patch.agentUi !== undefined ? patch.agentUi : message.agentUi,
+            agentUiStatus: patch.agentUiStatus !== undefined ? patch.agentUiStatus : message.agentUiStatus,
+            ...(patch.suggestedFollowUps !== undefined ? { suggestedFollowUps: patch.suggestedFollowUps } : {}),
+            ...(patch.followUpStatus !== undefined ? { followUpStatus: patch.followUpStatus } : {}),
+          }
+        : message,
+    ))
+  }, [isForegroundRunVisible])
+
+  const scheduleForegroundContentUpdate = useCallback((run: ForegroundRunState) => {
+    if (!isForegroundRunVisible(run) || rafIdRef.current !== null) return
+    rafIdRef.current = window.requestAnimationFrame(() => {
+      rafIdRef.current = null
+      if (!isForegroundRunVisible(run)) return
+      const latestContent = run.content
+      streamContentRef.current = latestContent
+      setMessages(prev => prev.map(message =>
+        message.id === run.assistantMessage.id
+          ? {
+              ...message,
+              content: latestContent,
+              streamState: run.streamState,
+              agentUi: run.agentUi,
+              agentUiStatus: run.agentUiStatus,
+            }
+          : message,
+      ))
+    })
+  }, [isForegroundRunVisible])
+
+  const beginSessionView = useCallback((sessionId: string | null) => {
+    const nextSeq = sessionViewSeqRef.current + 1
+    sessionViewSeqRef.current = nextSeq
+    selectedSessionIdRef.current = sessionId
+    cancelPendingStreamFrame()
+    attachForegroundRunToView(sessionId)
+    setIsSessionLoading(false)
+    setShowJumpLatest(false)
+    return nextSeq
+  }, [attachForegroundRunToView, cancelPendingStreamFrame])
+
+  const refreshSessionList = useCallback(() => {
+    setSessionListRefreshKey(key => key + 1)
   }, [])
 
   const updateStreamingMessage = useCallback((
@@ -819,6 +1135,7 @@ function HomeContent() {
   const ensureSession = useCallback(async (mode: ChatMode = activeChatMode) => {
     if (!user) return null
     if (currentSessionId && currentSessionId !== 'new') {
+      selectedSessionIdRef.current = currentSessionId
       if (currentSessionMode !== mode) {
         setCurrentSessionMode(mode)
         try {
@@ -834,6 +1151,8 @@ function HomeContent() {
       return currentSessionId
     }
     try {
+      const createViewSeq = sessionViewSeqRef.current
+      const createTargetSessionId = selectedSessionIdRef.current
       let { data, error } = await supabase
         .from('chat_sessions')
         .insert({ user_id: user.id, title: '新对话', mode } as any)
@@ -850,14 +1169,22 @@ function HomeContent() {
       }
       if (error) throw error
       if (!data) throw new Error('创建会话失败：未返回会话')
+      if (
+        sessionViewSeqRef.current !== createViewSeq ||
+        selectedSessionIdRef.current !== createTargetSessionId
+      ) {
+        return data.id
+      }
+      selectedSessionIdRef.current = data.id
       setCurrentSessionId(data.id)
       setCurrentSessionMode(mode)
+      refreshSessionList()
       return data.id
     } catch (error) {
       console.error('创建会话失败:', error)
       return null
     }
-  }, [activeChatMode, currentSessionId, currentSessionMode, supabase, user])
+  }, [activeChatMode, currentSessionId, currentSessionMode, refreshSessionList, supabase, user])
 
   // 保存消息到数据库
   const saveMessage = useCallback(async (
@@ -897,15 +1224,30 @@ function HomeContent() {
           } as any)
       }
       await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId)
+      refreshSessionList()
     } catch (error) {
       console.error('保存消息失败:', error)
     }
-  }, [activeChatMode, supabase, user])
+  }, [activeChatMode, refreshSessionList, supabase, user])
 
   // 加载会话消息
   const loadSession = useCallback(async (sessionId: string, modeHint?: ChatMode) => {
+    const targetSessionId = sessionId === 'new' ? null : sessionId
+    const requestSeq = loadSessionSeqRef.current + 1
+    loadSessionSeqRef.current = requestSeq
+    const viewSeq = sessionId !== 'new' && selectedSessionIdRef.current === targetSessionId
+      ? sessionViewSeqRef.current
+      : beginSessionView(targetSessionId)
+
+    const isLatestSessionLoad = () =>
+      loadSessionSeqRef.current === requestSeq &&
+      sessionViewSeqRef.current === viewSeq &&
+      selectedSessionIdRef.current === targetSessionId
+
     if (sessionId === 'new') {
+      setIsSessionLoading(false)
       setMessages([])
+      selectedSessionIdRef.current = null
       setCurrentSessionId(null)
       const nextMode = modeHint || activeChatMode
       setCurrentSessionMode(nextMode)
@@ -919,12 +1261,20 @@ function HomeContent() {
       setMentionOpen(false)
       return
     }
+    setCurrentSessionId(sessionId)
+    if (modeHint) {
+      setCurrentSessionMode(modeHint)
+      setActiveChatMode(modeHint)
+    }
+    setMessages([])
+    setIsSessionLoading(true)
     try {
-      const { data: sessionData } = await supabase
+      const { data: sessionData, error: sessionError } = await supabase
         .from('chat_sessions')
         .select('*')
         .eq('id', sessionId)
         .single()
+      if (sessionError) throw sessionError
       const sessionMode: ChatMode =
         ((sessionData as any)?.mode === 'agent' ? 'agent' : modeHint || 'classic')
 
@@ -934,6 +1284,7 @@ function HomeContent() {
         .eq('session_id', sessionId)
         .order('created_at', { ascending: true })
       if (error) throw error
+      if (!isLatestSessionLoad()) return
       const loadedMessages: Message[] = (data || [])
         .filter(msg => msg.role === 'user' || msg.role === 'assistant')
         .map(msg => ({
@@ -945,22 +1296,74 @@ function HomeContent() {
         model: (msg as any).model ?? null,
         tokensUsed: (msg as any).tokens_used ?? null,
       }))
-      setMessages(loadedMessages)
+      const { data: completedRuns, error: runsError } = await supabase
+        .from('llm_runs')
+        .select('id, kind, status, output_text, assistant_message_id, model, input_tokens, completed_at, updated_at, created_at')
+        .eq('session_id', sessionId)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: true })
+      if (runsError && !isDurableRunsSchemaUnavailable(runsError)) throw runsError
+      if (!isLatestSessionLoad()) return
+      const loadedMessageIds = new Set(loadedMessages.map(message => message.id))
+      const loadedAssistantContents = new Set(
+        loadedMessages
+          .filter(message => message.role === 'assistant')
+          .map(message => sanitizeReplacementChars(message.content).trim())
+          .filter(Boolean),
+      )
+      const recoveredRunMessages = ((completedRuns || []) as DurableRunSnapshot[])
+        .reduce<Message[]>((recovered, run) => {
+          const content = sanitizeReplacementChars(run.output_text || '').trim()
+          if (!content) return recovered
+          const id = run.assistant_message_id || `run-${run.id}`
+          if (loadedMessageIds.has(id) || loadedAssistantContents.has(content)) return recovered
+          const mode: ChatMode = run.kind === 'classic_chat' ? 'classic' : 'agent'
+          recovered.push({
+            id,
+            role: 'assistant' as const,
+            content,
+            createdAt: new Date(run.completed_at || run.updated_at || run.created_at || Date.now()),
+            mode,
+            model: run.model ?? null,
+            tokensUsed: typeof run.input_tokens === 'number'
+              ? run.input_tokens + estimateTokensForText(content)
+              : estimateTokensForText(content),
+            streamState: createMessageStreamState(
+              run.kind === 'classic_chat' ? 'classic' : run.kind === 'feature_analyze' ? 'feature' : 'agent',
+              'complete',
+            ),
+          })
+          return recovered
+        }, [])
+      const sessionMessages = mergeForegroundRunMessages(
+        [...loadedMessages, ...recoveredRunMessages]
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+        sessionId,
+      )
+      startTransition(() => {
+        setMessages(sessionMessages)
+        setCurrentSessionMode(sessionMode)
+        setActiveChatMode(sessionMode)
+        // Reset feature context when switching sessions; will be re-derived if needed
+        setFeatureContext(null)
+        setSessionSummary((sessionData as any)?.summary || null)
+        setAgentPendingConfirmation(null)
+        setAgentParticipants([])
+        setAgentTimeRanges([])
+        setAgentReportPreference(null)
+        setMentionOpen(false)
+        setIsSessionLoading(false)
+      })
+      selectedSessionIdRef.current = sessionId
       setCurrentSessionId(sessionId)
-      setCurrentSessionMode(sessionMode)
-      setActiveChatMode(sessionMode)
-      // Reset feature context when switching sessions; will be re-derived if needed
-      setFeatureContext(null)
-      setSessionSummary((sessionData as any)?.summary || null)
-      setAgentPendingConfirmation(null)
-      setAgentParticipants([])
-      setAgentTimeRanges([])
-      setAgentReportPreference(null)
-      setMentionOpen(false)
+      attachForegroundRunToView(sessionId)
     } catch (error) {
-      console.error('加载会话失败:', error)
+      if (isLatestSessionLoad()) {
+        setIsSessionLoading(false)
+        console.error('加载会话失败:', error)
+      }
     }
-  }, [activeChatMode, supabase])
+  }, [activeChatMode, attachForegroundRunToView, beginSessionView, mergeForegroundRunMessages, supabase])
 
   const requestFollowUpSuggestions = useCallback(async (
     messageId: string,
@@ -1230,14 +1633,446 @@ function HomeContent() {
   const handleStopGeneration = useCallback(() => {
     if (!isLoading) return
     stopRequestedRef.current = true
+    const activeForegroundRunId = activeForegroundRunIdRef.current
+    const activeForegroundRun = activeForegroundRunId
+      ? foregroundRunsRef.current.get(activeForegroundRunId)
+      : null
+    if (activeForegroundRun) {
+      activeForegroundRun.stopRequested = true
+      applyForegroundRunPatch(activeForegroundRun, {
+        streamState: activeForegroundRun.streamState
+          ? { ...activeForegroundRun.streamState, label: BUBU_COPY.page.stoppingLabel }
+          : createMessageStreamState(activeForegroundRun.runKind, 'streaming', BUBU_COPY.page.stoppingLabel),
+      })
+      activeForegroundRun.controller.abort()
+      return
+    }
     updateStreamingMessage(message => ({
       ...message,
       streamState: message.streamState
-        ? { ...message.streamState, label: '小象正在收住笔尖…' }
-        : createMessageStreamState('classic', 'streaming', '小象正在收住笔尖…'),
+        ? { ...message.streamState, label: BUBU_COPY.page.stoppingLabel }
+        : createMessageStreamState('classic', 'streaming', BUBU_COPY.page.stoppingLabel),
     }))
+    const activeRunId = activeRunIdRef.current
+    if (activeRunId) {
+      void fetch(`/api/llm-runs/${activeRunId}/cancel`, { method: 'POST' }).catch(error => {
+        console.error('取消后台任务失败:', error)
+      })
+      return
+    }
     abortControllerRef.current?.abort()
-  }, [isLoading, updateStreamingMessage])
+  }, [applyForegroundRunPatch, isLoading, updateStreamingMessage])
+
+  const pollDurableRun = useCallback(async (args: {
+    runId: string
+    assistantMessageId: string
+    runKind: MessageRunKind
+    mode: ChatMode
+    sessionId?: string | null
+    viewSeq?: number
+    operationId?: string
+    previousUserContent: string
+    recentMessages: Message[]
+    reportType?: string | null
+    featureContext?: FeatureContext | null
+    participants?: { name?: string | null; baziText?: string | null; pillars?: string | null }[]
+    featureSummary?: string | null
+    onDone?: (snapshot: DurableRunSnapshot) => Promise<void> | void
+  }): Promise<DurableRunSnapshot | null> => {
+    activeRunIdRef.current = args.runId
+    activeRunKindRef.current = args.runKind
+    let afterSeq = 0
+    let lastOutput = ''
+    let lastAppliedContent = ''
+    let lastAppliedStatus: MessageStreamState['status'] | null = null
+    let lastAppliedMessageId: string | null = null
+    let finalSnapshot: DurableRunSnapshot | null = null
+    let pollDelayMs = RUN_POLL_INITIAL_DELAY_MS
+
+    const isRunAttachedToView = () => {
+      if (args.operationId && activeOperationIdRef.current !== args.operationId) return false
+      if (typeof args.viewSeq === 'number' && sessionViewSeqRef.current !== args.viewSeq) return false
+      if (args.sessionId !== undefined && selectedSessionIdRef.current !== args.sessionId) return false
+      return true
+    }
+
+    const applySnapshot = (snapshot: DurableRunSnapshot): boolean => {
+      if (!isRunAttachedToView()) return false
+      const snapshotContent = sanitizeReplacementChars(snapshot.output_text || '')
+      if (snapshotContent && snapshotContent !== lastOutput) {
+        lastOutput = snapshotContent
+        streamContentRef.current = snapshotContent
+        streamHadOutputRef.current = true
+        setIsStreamingStarted(true)
+      }
+      const content = snapshotContent || lastOutput
+      const status = snapshot.status
+      const streamStatus =
+        status === 'completed'
+          ? 'complete'
+          : status === 'failed'
+          ? 'error'
+          : status === 'canceled'
+          ? 'stopped'
+          : content
+          ? 'streaming'
+          : 'queued'
+      const nextMessageId = status === 'completed' && snapshot.assistant_message_id
+        ? snapshot.assistant_message_id
+        : args.assistantMessageId
+      const nextContent =
+        content ||
+        (status === 'failed'
+          ? (args.runKind === 'feature' ? BUBU_EMPTY_RESPONSE.featureError : BUBU_EMPTY_RESPONSE.genericError)
+          : status === 'canceled'
+          ? (args.runKind === 'feature' ? BUBU_EMPTY_RESPONSE.stoppedFeature : BUBU_EMPTY_RESPONSE.stopped)
+          : '')
+      if (
+        nextMessageId === lastAppliedMessageId &&
+        nextContent === lastAppliedContent &&
+        streamStatus === lastAppliedStatus
+      ) {
+        return false
+      }
+      lastAppliedMessageId = nextMessageId
+      lastAppliedContent = nextContent
+      lastAppliedStatus = streamStatus
+      setMessages(prev => prev.map(message =>
+        message.id === args.assistantMessageId
+          ? {
+              ...message,
+              id: nextMessageId,
+              content: nextContent || message.content,
+              streamState: createMessageStreamState(
+                args.runKind,
+                streamStatus,
+                status === 'queued' || status === 'running'
+                  ? '已进入后台推理，回来也能继续'
+                  : undefined,
+              ),
+              ...(status === 'failed' || status === 'canceled'
+                ? { suggestedFollowUps: [], followUpStatus: 'ready' as const }
+                : {}),
+            }
+          : message,
+      ))
+      return true
+    }
+
+    const applyEvent = (event: DurableRunEvent): boolean => {
+      if (!isRunAttachedToView()) return false
+      afterSeq = Math.max(afterSeq, Number(event.seq || 0))
+      if (event.event_type === 'delta' && event.content) {
+        const delta = sanitizeReplacementChars(event.content)
+        if (!delta) return false
+        lastOutput += delta
+        streamContentRef.current = lastOutput
+        streamHadOutputRef.current = true
+        setIsStreamingStarted(true)
+        setMessages(prev => prev.map(message =>
+          message.id === args.assistantMessageId
+            ? {
+                ...message,
+                content: lastOutput,
+                streamState: createMessageStreamState(args.runKind, 'streaming', getGeneratingLabel(args.runKind)),
+              }
+            : message,
+        ))
+        return true
+      }
+      if (event.event_type === 'progress' && event.payload?.progress) {
+        upsertAgentStep(event.payload.progress as AgentClientStep)
+        return true
+      }
+      if (event.event_type === 'ui' && event.payload?.ui) {
+        const ui = event.payload.ui as Extract<AgentStreamEvent, { type: 'ui' }>['ui']
+        const agentUi = ui.type === 'human_input_request'
+          ? ui
+          : legacyBaziEventToHumanInput(ui)
+        setMessages(prev => prev.map(message =>
+          message.id === args.assistantMessageId
+            ? { ...message, agentUi, agentUiStatus: 'pending' }
+            : message,
+        ))
+        return true
+      }
+      return false
+    }
+
+    while (true) {
+      if (!isRunAttachedToView()) return finalSnapshot
+      const res = await fetch(`/api/llm-runs/${args.runId}?after_seq=${afterSeq}&events_only=1`, {
+        cache: 'no-store',
+      })
+      if (!res.ok) {
+        throw new Error(`Run polling failed: ${res.status}`)
+      }
+      const snapshot = await res.json() as DurableRunSnapshot
+      finalSnapshot = snapshot
+      if (!isRunAttachedToView()) return finalSnapshot
+      let eventChanged = false
+      ;(snapshot.events || []).forEach(event => {
+        if (applyEvent(event)) eventChanged = true
+      })
+      const snapshotChanged = applySnapshot(snapshot)
+      const changed = eventChanged || snapshotChanged
+
+      if (['completed', 'failed', 'canceled'].includes(snapshot.status)) {
+        if (snapshot.status === 'completed') {
+          if (!isRunAttachedToView()) return finalSnapshot
+          const finalContent = sanitizeReplacementChars(snapshot.output_text || '').trim()
+          const shouldRequestFollowUps = Boolean(user) && !shouldSkipFollowUpSuggestions(finalContent)
+          const finalMessageId = snapshot.assistant_message_id || args.assistantMessageId
+          setMessages(prev => prev.map(message =>
+            message.id === args.assistantMessageId || message.id === finalMessageId
+              ? {
+                  ...message,
+                  id: finalMessageId,
+                  content: finalContent,
+                  streamState: createMessageStreamState(args.runKind, 'complete'),
+                  ...getFinalFollowUpState(finalContent, shouldRequestFollowUps),
+                }
+              : message,
+          ))
+          if (shouldRequestFollowUps) {
+            void requestFollowUpSuggestions(finalMessageId, {
+              assistantContent: finalContent,
+              runKind: args.runKind,
+              previousUserContent: args.previousUserContent,
+              recentMessages: args.recentMessages,
+              reportType: args.reportType || null,
+              featureContext: args.featureContext || null,
+              participants: args.participants || [],
+              pendingKind: (snapshot.final_metadata?.pendingConfirmation as AgentPendingConfirmation | null)?.kind || null,
+            })
+          }
+          if (isRunAttachedToView()) {
+            await args.onDone?.(snapshot)
+          }
+        }
+        break
+      }
+
+      await new Promise(resolve => window.setTimeout(resolve, pollDelayMs))
+      pollDelayMs = changed
+        ? RUN_POLL_INITIAL_DELAY_MS
+        : Math.min(RUN_POLL_MAX_DELAY_MS, pollDelayMs + RUN_POLL_BACKOFF_MS)
+    }
+
+    return finalSnapshot
+  }, [requestFollowUpSuggestions, upsertAgentStep, user])
+
+  const createDurableRun = useCallback(async (input: {
+    kind: DurableRunKind
+    sessionId: string
+    payload: Record<string, any>
+    clientMessageId: string
+  }): Promise<{ run_id: string; status: DurableRunStatus } | null> => {
+    if (durableRunsAvailableRef.current === false) return null
+    const response = await fetch('/api/llm-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: input.kind,
+        session_id: input.sessionId,
+        payload: input.payload,
+        client_message_id: input.clientMessageId,
+      }),
+    })
+    const data = await response.json().catch(() => ({})) as {
+      available?: boolean
+      run_id?: string
+      status?: DurableRunStatus
+      message?: string
+    }
+    if (!response.ok) {
+      throw new Error(data.message || `创建后台任务失败：${response.status}`)
+    }
+    if (data.available === false) {
+      durableRunsAvailableRef.current = false
+      return null
+    }
+    if (!data.run_id || !data.status) throw new Error('创建后台任务失败')
+    durableRunsAvailableRef.current = true
+    return { run_id: data.run_id, status: data.status }
+  }, [])
+
+  useEffect(() => {
+    if (
+      !user ||
+      !currentSessionId ||
+      currentSessionId === 'new' ||
+      isLoading ||
+      activeOperationIdRef.current ||
+      durableRunsAvailableRef.current === false
+    ) return
+    let cancelled = false
+    const sessionId = currentSessionId
+    const viewSeq = sessionViewSeqRef.current
+
+    const isCurrentSessionView = () =>
+      !cancelled &&
+      sessionViewSeqRef.current === viewSeq &&
+      selectedSessionIdRef.current === sessionId
+
+    let operationId: string | null = null
+    let resumedRunId: string | null = null
+
+    const resume = async () => {
+      try {
+        const response = await fetch(`/api/llm-runs?session_id=${sessionId}`, { cache: 'no-store' })
+        if (!response.ok) return
+        const data = await response.json() as { runs?: DurableRunSnapshot[]; available?: boolean }
+        if (data.available === false) {
+          durableRunsAvailableRef.current = false
+          return
+        }
+        durableRunsAvailableRef.current = true
+        if (!isCurrentSessionView()) return
+
+        const loadedMessages = messagesRef.current
+        const runs = data.runs || []
+        const activeRun = runs.find(candidate => candidate.status === 'queued' || candidate.status === 'running')
+        const completedRun = runs.find(candidate => {
+          if (candidate.status !== 'completed') return false
+          const content = sanitizeReplacementChars(candidate.output_text || '').trim()
+          if (!content) return false
+          const finalMessageId = candidate.assistant_message_id || null
+          return !loadedMessages.some(message =>
+            (finalMessageId && message.id === finalMessageId) ||
+            (message.role === 'assistant' && message.content === content)
+          )
+        })
+        const run = activeRun || completedRun
+        if (!run || !isCurrentSessionView() || resumingRunRef.current === run.id) return
+
+        resumedRunId = run.id
+        resumingRunRef.current = run.id
+
+        const runKind: MessageRunKind =
+          run.kind === 'classic_chat'
+            ? 'classic'
+            : run.kind === 'feature_analyze'
+            ? 'feature'
+            : 'agent'
+        const lastUserMessage = [...loadedMessages].reverse().find(message => message.role === 'user')
+
+        if (run.status === 'completed') {
+          const finalContent = sanitizeReplacementChars(run.output_text || '').trim()
+          if (!finalContent || !isCurrentSessionView()) return
+          const finalMessageId = run.assistant_message_id || `run-${run.id}`
+          const shouldRequestFollowUps = Boolean(user) && !shouldSkipFollowUpSuggestions(finalContent)
+          const completedMessage: Message = {
+            id: finalMessageId,
+            role: 'assistant',
+            content: finalContent,
+            createdAt: run.updated_at ? new Date(run.updated_at) : new Date(),
+            mode: run.kind === 'classic_chat' ? 'classic' : 'agent',
+            streamState: createMessageStreamState(runKind, 'complete'),
+            ...getFinalFollowUpState(finalContent, shouldRequestFollowUps),
+          }
+          setMessages(prev => {
+            if (prev.some(message =>
+              message.id === finalMessageId ||
+              (message.role === 'assistant' && message.content === finalContent)
+            )) return prev
+            return [...prev, completedMessage]
+          })
+
+          const metadata = run.final_metadata || {}
+          const pending = (metadata.pendingConfirmation || null) as AgentPendingConfirmation | null
+          const nextFeatureContext = metadata.featureContext as FeatureContext | undefined
+          if (pending) setAgentPendingConfirmation(pending)
+          if (nextFeatureContext?.summary) {
+            setFeatureContext(nextFeatureContext)
+            setSessionSummary(nextFeatureContext.summary)
+          }
+          fetchQuota()
+          if (shouldRequestFollowUps) {
+            void requestFollowUpSuggestions(finalMessageId, {
+              assistantContent: finalContent,
+              runKind,
+              previousUserContent: lastUserMessage?.content || '',
+              recentMessages: [...loadedMessages, completedMessage],
+              reportType: nextFeatureContext?.kind || metadata.featureContext?.kind || null,
+              featureContext: nextFeatureContext || featureContextRef.current,
+              participants: nextFeatureContext?.participants || metadata.featureContext?.participants || [],
+              pendingKind: pending?.kind || null,
+            })
+          }
+          return
+        }
+
+        operationId = createViewOperationId('resume')
+        activeOperationIdRef.current = operationId
+        if (!isCurrentSessionView()) return
+
+        const assistantMessageId = run.assistant_message_id || `run-${run.id}`
+        const assistantMessage: Message = {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: run.output_text || '',
+          createdAt: new Date(),
+          mode: run.kind === 'classic_chat' ? 'classic' : 'agent',
+          streamState: createMessageStreamState(runKind, run.output_text ? 'streaming' : 'queued', '已恢复后台推理'),
+        }
+        setMessages(prev => {
+          if (prev.some(message => message.id === assistantMessage.id || message.id === run.assistant_message_id)) return prev
+          return [...prev, assistantMessage]
+        })
+        setStreamingMessageId(assistantMessage.id)
+        streamContentRef.current = run.output_text || ''
+        setIsLoading(true)
+        if (runKind === 'feature') setIsAnalyzing(true)
+
+        await pollDurableRun({
+          runId: run.id,
+          assistantMessageId: assistantMessage.id,
+          runKind,
+          mode: run.kind === 'classic_chat' ? 'classic' : 'agent',
+          sessionId,
+          viewSeq,
+          operationId,
+          previousUserContent: lastUserMessage?.content || '',
+          recentMessages: [...loadedMessages, assistantMessage],
+          reportType: run.final_metadata?.featureContext?.kind || null,
+          featureContext: (run.final_metadata?.featureContext as FeatureContext | undefined) || featureContextRef.current,
+          participants: run.final_metadata?.featureContext?.participants || [],
+          onDone: async snapshot => {
+            const metadata = snapshot.final_metadata || {}
+            const pending = (metadata.pendingConfirmation || null) as AgentPendingConfirmation | null
+            const nextFeatureContext = metadata.featureContext as FeatureContext | undefined
+            if (pending) setAgentPendingConfirmation(pending)
+            if (nextFeatureContext?.summary) {
+              setFeatureContext(nextFeatureContext)
+              setSessionSummary(nextFeatureContext.summary)
+            }
+            fetchQuota()
+          },
+        })
+      } catch (error) {
+        console.error('恢复后台任务失败:', error)
+      } finally {
+        if (operationId && activeOperationIdRef.current === operationId) {
+          setIsLoading(false)
+          setIsStreamingStarted(false)
+          setIsAnalyzing(false)
+          setStreamingMessageId(null)
+          activeRunIdRef.current = null
+          activeOperationIdRef.current = null
+          streamContentRef.current = ''
+        }
+        if (resumedRunId && resumingRunRef.current === resumedRunId) {
+          resumingRunRef.current = null
+        }
+      }
+    }
+
+    void resume()
+    return () => {
+      cancelled = true
+    }
+  }, [currentSessionId, fetchQuota, isLoading, pollDurableRun, requestFollowUpSuggestions, setStreamingMessageId, user])
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1263,6 +2098,10 @@ function HomeContent() {
       ? pendingConfirmationOverride
       : agentPendingConfirmation
     if (!submittedText || isLoading) return;
+    if (!user) {
+      setShowAuthDialog(true)
+      return
+    }
     setComposerModeOpen(false)
     const requestConsumesApple =
       activeChatMode === 'classic'
@@ -1276,6 +2115,17 @@ function HomeContent() {
       return
     }
 
+    const operationId = createViewOperationId('chat')
+    const viewSeq = sessionViewSeqRef.current
+    activeOperationIdRef.current = operationId
+    let sessionId: string | null = currentSessionId && currentSessionId !== 'new' ? currentSessionId : null
+    const isOperationActive = (expectedSessionId?: string | null) => {
+      if (activeOperationIdRef.current !== operationId) return false
+      if (sessionViewSeqRef.current !== viewSeq) return false
+      if (expectedSessionId !== undefined && selectedSessionIdRef.current !== expectedSessionId) return false
+      return true
+    }
+
     let requestSelectedProfile = selectedProfileOverride !== undefined
       ? selectedProfileOverride
       : selectedProfile
@@ -1284,6 +2134,7 @@ function HomeContent() {
       : agentParticipants
     if (activeChatMode === 'agent') {
       const mentionedProfiles = await resolveMentionedProfiles(submittedText)
+      if (!isOperationActive()) return
       requestParticipants = mergeProfileContexts([
         ...requestParticipants,
         ...mentionedProfiles,
@@ -1328,7 +2179,6 @@ function HomeContent() {
     stopRequestedRef.current = false
     streamHadOutputRef.current = false
 
-    let sessionId: string | null = null
     const isNewSession = !currentSessionId
     if (user) {
       sessionId = await ensureSession(activeChatMode)
@@ -1338,14 +2188,36 @@ function HomeContent() {
         if (isNewSession) {
           const titleText = userMessage.content.slice(0, 30) + (userMessage.content.length > 30 ? '...' : '')
           await supabase.from('chat_sessions').update({ title: titleText }).eq('id', sessionId)
+          refreshSessionList()
         }
       }
     }
 
     const requestController = new AbortController()
     abortControllerRef.current = requestController
+    let foregroundRun: ForegroundRunState | null = null
 
     try {
+      if (!sessionId) throw new Error('创建会话失败')
+      foregroundRun = {
+        id: operationId,
+        operationId,
+        sessionId,
+        runKind,
+        mode: activeChatMode,
+        userMessage,
+        assistantMessage,
+        controller: requestController,
+        content: '',
+        status: 'queued',
+        streamState: createMessageStreamState(runKind, 'queued'),
+        startedAt: Date.now(),
+        isAnalyzing: false,
+        stopRequested: false,
+        hadOutput: false,
+      }
+      registerForegroundRun(foregroundRun)
+
       const requestData: any = {
         messages: [...messages, userMessage].map(m => ({
           role: m.role,
@@ -1421,10 +2293,12 @@ function HomeContent() {
             // Auto-dismiss after 8 seconds
             setTimeout(() => setShowQuotaExhausted(false), 8000)
             // Remove the user message we just added since the request failed
-            setMessages(prev => prev.filter(m => m.id !== userMessage.id && m.id !== assistantMessage.id))
-            setIsLoading(false)
-            setIsStreamingStarted(false)
-            setStreamingMessageId(null)
+            if (!foregroundRun || isForegroundRunVisible(foregroundRun)) {
+              setMessages(prev => prev.filter(m => m.id !== userMessage.id && m.id !== assistantMessage.id))
+              setIsLoading(false)
+              setIsStreamingStarted(false)
+              setStreamingMessageId(null)
+            }
             return
           }
         }
@@ -1447,7 +2321,6 @@ function HomeContent() {
         let buffer = ''
         let fullContent = ''
         let streamingStarted = false
-        let agentAssistantMessage: Message | null = assistantMessage
         const agentDoneState: {
           pendingConfirmation: AgentPendingConfirmation | null
           featureContext: FeatureContext | null
@@ -1456,60 +2329,63 @@ function HomeContent() {
           featureContext: null,
         }
 
-        const ensureAssistantMessage = (): Message => {
-          return agentAssistantMessage || assistantMessage
-        }
-
         const scheduleAssistantUpdate = () => {
-          const currentAssistant = ensureAssistantMessage()
-          if (!rafIdRef.current) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              const latestContent = streamContentRef.current
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === currentAssistant.id
-                    ? {
-                        ...msg,
-                        content: latestContent,
-                        streamState: createMessageStreamState('agent', 'streaming', getGeneratingLabel('agent')),
-                      }
-                    : msg
-                )
-              )
-              rafIdRef.current = null
-            })
-          }
+          if (foregroundRun) scheduleForegroundContentUpdate(foregroundRun)
         }
 
         const handleAgentEvent = (event: AgentStreamEvent) => {
           if (event.type === 'progress') {
-            upsertAgentStep(event.progress)
+            const streamState = createMessageStreamState(
+              'agent',
+              event.progress.status === 'failed' ? 'error' : 'streaming',
+              cleanAgentStepTitle(event.progress),
+              event.progress.phase === 'tool'
+                ? 'retrieving'
+                : event.progress.phase === 'final'
+                ? 'generating'
+                : 'understanding',
+            )
+            if (foregroundRun) {
+              applyForegroundRunPatch(foregroundRun, {
+                status: event.progress.status === 'failed' ? 'error' : 'streaming',
+                streamState,
+              })
+            } else {
+              upsertAgentStep(event.progress)
+            }
             return
           }
           if (event.type === 'ui') {
-            const currentAssistant = ensureAssistantMessage()
             const agentUi = event.ui.type === 'human_input_request'
               ? event.ui
               : legacyBaziEventToHumanInput(event.ui)
-            setMessages(prev =>
-              prev.map(msg =>
-                msg.id === currentAssistant.id
-                  ? { ...msg, agentUi, agentUiStatus: 'pending' }
-                  : msg
-              )
-            )
+            if (foregroundRun) {
+              applyForegroundRunPatch(foregroundRun, {
+                agentUi,
+                agentUiStatus: 'pending',
+              })
+            }
             return
           }
           if (event.type === 'delta') {
-            ensureAssistantMessage()
             const content = sanitizeReplacementChars(event.content)
             if (!content) return
             fullContent += content
-            streamContentRef.current = fullContent
-            streamHadOutputRef.current = true
+            if (foregroundRun) {
+              foregroundRun.content = fullContent
+              foregroundRun.hadOutput = true
+              foregroundRun.status = 'streaming'
+              foregroundRun.streamState = createMessageStreamState('agent', 'streaming', getGeneratingLabel('agent'))
+            }
+            if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+              streamContentRef.current = fullContent
+              streamHadOutputRef.current = true
+            }
             if (!streamingStarted && content.trim()) {
               streamingStarted = true
-              setIsStreamingStarted(true)
+              if (!foregroundRun || isForegroundRunVisible(foregroundRun)) {
+                setIsStreamingStarted(true)
+              }
             }
             scheduleAssistantUpdate()
             return
@@ -1560,45 +2436,49 @@ function HomeContent() {
           cancelAnimationFrame(rafIdRef.current)
           rafIdRef.current = null
         }
-        setStreamingMessageId(null)
+        if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+          setStreamingMessageId(null)
+        }
 
-        const currentAssistant = agentAssistantMessage || assistantMessage
+        const currentAssistant = assistantMessage
         const finalContent = fullContent.trim() ? fullContent : BUBU_EMPTY_RESPONSE.agent
         const shouldRequestAgentFollowUps = Boolean(user) &&
           !agentDoneState.pendingConfirmation &&
           !shouldSkipFollowUpSuggestions(finalContent)
-        setMessages(prev =>
-          prev.map(msg =>
-            msg.id === currentAssistant.id
-              ? {
-                  ...msg,
-                  content: finalContent,
-                  streamState: createMessageStreamState('agent', 'complete'),
-                  ...getFinalFollowUpState(finalContent, shouldRequestAgentFollowUps),
-                }
-              : msg
-          )
-        )
+        if (foregroundRun) {
+          applyForegroundRunPatch(foregroundRun, {
+            content: finalContent,
+            status: 'complete',
+            streamState: createMessageStreamState('agent', 'complete'),
+            ...getFinalFollowUpState(finalContent, shouldRequestAgentFollowUps),
+          })
+        }
         if (user && sessionId && finalContent) {
           await saveMessage(sessionId, 'assistant', finalContent, activeChatMode, {
             model: llmMeta.model,
             tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
           })
         }
-        setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
+        const runIsVisible = foregroundRun ? isForegroundRunVisible(foregroundRun) : isOperationActive(sessionId)
+        if (runIsVisible) {
+          setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
+        }
         if (agentDoneState.featureContext) {
-          setFeatureContext(agentDoneState.featureContext)
-          setSessionSummary(agentDoneState.featureContext.summary)
-          if (user && sessionId) {
-            await supabase
-              .from('chat_sessions')
-              .update({ summary: agentDoneState.featureContext.summary } as any)
-              .eq('id', sessionId)
+          if (runIsVisible) {
+            setFeatureContext(agentDoneState.featureContext)
+            setSessionSummary(agentDoneState.featureContext.summary)
           }
-        } else if (!agentDoneState.pendingConfirmation) {
+          if (user && sessionId) {
+              await supabase
+                .from('chat_sessions')
+                .update({ summary: agentDoneState.featureContext.summary } as any)
+                .eq('id', sessionId)
+              refreshSessionList()
+          }
+        } else if (runIsVisible && !agentDoneState.pendingConfirmation) {
           setAgentPendingConfirmation(null)
         }
-        if (shouldRequestAgentFollowUps) {
+        if (shouldRequestAgentFollowUps && runIsVisible) {
           const nextFeatureContext = agentDoneState.featureContext || featureContext
           void requestFollowUpSuggestions(currentAssistant.id, {
             assistantContent: finalContent,
@@ -1627,62 +2507,61 @@ function HomeContent() {
           const chunk = sanitizeReplacementChars(decoder.decode(value, { stream: true }));
           if (!chunk) continue
           fullContent += chunk
-          streamContentRef.current = fullContent
-          if (chunk) streamHadOutputRef.current = true
+          if (foregroundRun) {
+            foregroundRun.content = fullContent
+            foregroundRun.hadOutput = true
+            foregroundRun.status = 'streaming'
+            foregroundRun.streamState = createMessageStreamState('classic', 'streaming', getGeneratingLabel('classic'))
+          }
+          if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+            streamContentRef.current = fullContent
+            streamHadOutputRef.current = true
+          }
           if (!streamingStarted && chunk.trim()) {
             streamingStarted = true
-            setIsStreamingStarted(true);
+            if (!foregroundRun || isForegroundRunVisible(foregroundRun)) {
+              setIsStreamingStarted(true);
+            }
           }
-          if (!rafIdRef.current) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              const latestContent = streamContentRef.current
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === assistantMessage.id
-                    ? {
-                        ...msg,
-                        content: latestContent,
-                        streamState: createMessageStreamState('classic', 'streaming', getGeneratingLabel('classic')),
-                      }
-                    : msg
-                )
-              );
-              rafIdRef.current = null
-            })
-          }
+          if (foregroundRun) scheduleForegroundContentUpdate(foregroundRun)
         }
 
         const tail = sanitizeReplacementChars(decoder.decode())
         if (tail) {
           fullContent += tail
-          streamContentRef.current = fullContent
+          if (foregroundRun) {
+            foregroundRun.content = fullContent
+            foregroundRun.hadOutput = true
+            foregroundRun.streamState = createMessageStreamState('classic', 'streaming', getGeneratingLabel('classic'))
+          }
+          if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+            streamContentRef.current = fullContent
+          }
         }
 
         if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
-        setStreamingMessageId(null);
+        if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+          setStreamingMessageId(null);
+        }
         const finalContent = fullContent.trim()
           ? fullContent
           : BUBU_EMPTY_RESPONSE.classic
         const shouldRequestClassicFollowUps = Boolean(user) && !shouldSkipFollowUpSuggestions(finalContent)
-        setMessages(prev =>
-          prev.map(msg =>
-            msg.id === assistantMessage.id
-              ? {
-                  ...msg,
-                  content: finalContent,
-                  streamState: createMessageStreamState('classic', 'complete'),
-                  ...getFinalFollowUpState(finalContent, shouldRequestClassicFollowUps),
-                }
-              : msg
-          )
-        );
+        if (foregroundRun) {
+          applyForegroundRunPatch(foregroundRun, {
+            content: finalContent,
+            status: 'complete',
+            streamState: createMessageStreamState('classic', 'complete'),
+            ...getFinalFollowUpState(finalContent, shouldRequestClassicFollowUps),
+          })
+        }
         if (user && sessionId && finalContent) {
           await saveMessage(sessionId, 'assistant', finalContent, activeChatMode, {
             model: llmMeta.model,
             tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
           })
         }
-        if (shouldRequestClassicFollowUps) {
+        if (shouldRequestClassicFollowUps && (!foregroundRun || isForegroundRunVisible(foregroundRun))) {
           void requestFollowUpSuggestions(assistantMessage.id, {
             assistantContent: finalContent,
             runKind: 'classic',
@@ -1695,28 +2574,22 @@ function HomeContent() {
         }
       }
     } catch (error) {
-      if (stopRequestedRef.current || isAbortLikeError(error)) {
-        const partialContent = sanitizeReplacementChars(streamContentRef.current)
-        const currentMessageId = streamingMessageIdRef.current
-        if (currentMessageId) {
-          setMessages(prev =>
-            prev.map(msg =>
-              msg.id === currentMessageId
-                ? {
-                    ...msg,
-                    content: partialContent || BUBU_EMPTY_RESPONSE.stopped,
-                    streamState: createMessageStreamState(runKind, 'stopped'),
-                    suggestedFollowUps: [],
-                    followUpStatus: 'ready',
-                  }
-                : msg,
-            ),
-          )
+      if (foregroundRun?.stopRequested || stopRequestedRef.current || isAbortLikeError(error)) {
+        const partialContent = sanitizeReplacementChars(foregroundRun?.content ?? streamContentRef.current)
+        const stoppedContent = partialContent || BUBU_EMPTY_RESPONSE.stopped
+        if (foregroundRun) {
+          applyForegroundRunPatch(foregroundRun, {
+            content: stoppedContent,
+            status: 'stopped',
+            streamState: createMessageStreamState(runKind, 'stopped'),
+            suggestedFollowUps: [],
+            followUpStatus: 'ready',
+          })
         } else if (!streamHadOutputRef.current) {
           const stoppedMessage: Message = {
             id: createBubuMessageId('assistant'),
             role: 'assistant',
-            content: BUBU_EMPTY_RESPONSE.stopped,
+            content: stoppedContent,
             createdAt: new Date(),
             mode: activeChatMode,
             streamState: createMessageStreamState(runKind, 'stopped'),
@@ -1725,24 +2598,20 @@ function HomeContent() {
           }
           setMessages(prev => [...prev, stoppedMessage])
         }
+        if (user && sessionId && stoppedContent) {
+          await saveMessage(sessionId, 'assistant', stoppedContent, activeChatMode)
+        }
         return
       }
       console.error('Chat error:', error);
-      const currentMessageId = streamingMessageIdRef.current
-      if (currentMessageId) {
-        setMessages(prev =>
-          prev.map(msg =>
-            msg.id === currentMessageId
-              ? {
-                  ...msg,
-                    content: BUBU_EMPTY_RESPONSE.genericError,
-                    streamState: createMessageStreamState(runKind, 'error'),
-                    suggestedFollowUps: [],
-                    followUpStatus: 'ready',
-                }
-              : msg,
-          ),
-        )
+      if (foregroundRun) {
+        applyForegroundRunPatch(foregroundRun, {
+          content: BUBU_EMPTY_RESPONSE.genericError,
+          status: 'error',
+          streamState: createMessageStreamState(runKind, 'error'),
+          suggestedFollowUps: [],
+          followUpStatus: 'ready',
+        })
       } else {
         const errorMessage: Message = {
           id: createBubuMessageId('assistant'),
@@ -1756,17 +2625,30 @@ function HomeContent() {
         };
         setMessages(prev => [...prev, errorMessage]);
       }
+      if (user && sessionId) {
+        await saveMessage(sessionId, 'assistant', BUBU_EMPTY_RESPONSE.genericError, activeChatMode)
+      }
     } finally {
-      setIsLoading(false);
-      setIsStreamingStarted(false);
-      setStreamingMessageId(null);
-      streamContentRef.current = '';
-      abortControllerRef.current = null
-      stopRequestedRef.current = false
-      streamHadOutputRef.current = false
-      if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
+      if (foregroundRun) {
+        if (activeForegroundRunIdRef.current === foregroundRun.id && rafIdRef.current) {
+          cancelAnimationFrame(rafIdRef.current)
+          rafIdRef.current = null
+        }
+        clearForegroundRun(foregroundRun)
+      } else if (activeOperationIdRef.current === operationId) {
+        setIsLoading(false);
+        setIsStreamingStarted(false);
+        setStreamingMessageId(null);
+        streamContentRef.current = '';
+        activeRunIdRef.current = null
+        activeOperationIdRef.current = null
+        abortControllerRef.current = null
+        stopRequestedRef.current = false
+        streamHadOutputRef.current = false
+        if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
+      }
     }
-  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, sessionSummary, agentPendingConfirmation, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId, requestFollowUpSuggestions])
+  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, sessionSummary, agentPendingConfirmation, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId, requestFollowUpSuggestions, refreshSessionList, registerForegroundRun, scheduleForegroundContentUpdate, applyForegroundRunPatch, isForegroundRunVisible, clearForegroundRun])
 
   const handleComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (
@@ -1791,34 +2673,22 @@ function HomeContent() {
     }
     if (isLoading || isAnalyzing) return
 
-    // Build display content (sentinel-prefixed plaintext for the user bubble)
-    let userDisplay = ''
-    let participants: { name: string; baziText?: string | null; pillars?: string | null }[] = []
-    let summary = ''
-
-    if (payload.kind === 'hepan') {
-      const p = payload.params as HepanParams
-      const subLabel = p.subtype === 'pair' ? '双人合盘' : p.subtype === 'multi' ? '多人合盘' : '应事分析'
-      const names = p.participants.map(x => x.name).join('、')
-      summary = `${subLabel}：${names}${p.relationLabel ? ` · ${p.relationLabel}` : ''}${p.eventDesc ? ` · 应事：${p.eventDesc.slice(0, 30)}` : ''}`
-      participants = p.participants.map(x => ({ name: x.name, baziText: x.baziText, pillars: x.pillars }))
-      userDisplay = `[卜卜象·合盘]（${subLabel}）\n人物：${names}${p.relationLabel ? `\n关系：${p.relationLabel}` : ''}${p.eventDesc ? `\n应事：${p.eventDesc}` : ''}`
-    } else if (payload.kind === 'fortune') {
-      const p = payload.params as FortuneParams
-      summary = `近期运势 · ${p.profile.name}：${p.start} ~ ${p.end}（${p.granularity === 'day' ? '逐日' : '逐月'}）· 关注：${p.focus.join('、')}`
-      participants = [{ name: p.profile.name, baziText: p.profile.baziText, pillars: p.profile.pillars }]
-      userDisplay = `[卜卜象·近期运势]（${p.granularity === 'day' ? '逐日' : '逐月'}）\n命主：${p.profile.name}\n时间：${p.start} ~ ${p.end}\n关注：${p.focus.join('、')}`
-    } else if (payload.kind === 'avatar') {
-      const p = payload.params as AvatarParams
-      summary = `头像分析推荐${p.combineBazi && p.profile ? ` · 结合 ${p.profile.name} 的八字` : '（仅气质分析）'}`
-      participants = p.profile ? [{ name: p.profile.name, baziText: p.profile.baziText, pillars: p.profile.pillars }] : []
-      userDisplay = `[卜卜象·头像]\n上传了头像${p.combineBazi ? `，结合${p.profile ? ` ${p.profile.name} 的` : ''}八字` : ''}`
-    } else if (payload.kind === 'lifepath') {
-      const p = payload.params as LifePathParams
-      summary = `人生脉络与总体分析 · ${p.profile.name}`
-      participants = [{ name: p.profile.name, baziText: p.profile.baziText, pillars: p.profile.pillars }]
-      userDisplay = `[卜卜象·人生脉络]\n命主：${p.profile.name}`
+    const operationId = createViewOperationId('feature')
+    const viewSeq = sessionViewSeqRef.current
+    activeOperationIdRef.current = operationId
+    let sessionId: string | null = currentSessionId && currentSessionId !== 'new' ? currentSessionId : null
+    const isOperationActive = (expectedSessionId?: string | null) => {
+      if (activeOperationIdRef.current !== operationId) return false
+      if (sessionViewSeqRef.current !== viewSeq) return false
+      if (expectedSessionId !== undefined && selectedSessionIdRef.current !== expectedSessionId) return false
+      return true
     }
+
+    const {
+      userDisplay,
+      summary,
+      participants,
+    } = formatFeatureRequestDisplay(payload.kind, payload.params)
 
     // Switch back to chat view
     setActiveFeature('chat')
@@ -1850,7 +2720,6 @@ function HomeContent() {
     stopRequestedRef.current = false
     streamHadOutputRef.current = false
 
-    let sessionId: string | null = null
     const isNewSession = !currentSessionId
     if (user) {
       sessionId = await ensureSession(activeChatMode)
@@ -1859,14 +2728,36 @@ function HomeContent() {
         if (isNewSession) {
           const titleText = summary.slice(0, 30) + (summary.length > 30 ? '...' : '')
           await supabase.from('chat_sessions').update({ title: titleText }).eq('id', sessionId)
+          refreshSessionList()
         }
       }
     }
 
     const requestController = new AbortController()
     abortControllerRef.current = requestController
+    let foregroundRun: ForegroundRunState | null = null
 
     try {
+      if (!sessionId) throw new Error('创建会话失败')
+      foregroundRun = {
+        id: operationId,
+        operationId,
+        sessionId,
+        runKind: 'feature',
+        mode: activeChatMode,
+        userMessage,
+        assistantMessage,
+        controller: requestController,
+        content: '',
+        status: 'queued',
+        streamState: createMessageStreamState('feature', 'queued'),
+        startedAt: Date.now(),
+        isAnalyzing: true,
+        stopRequested: false,
+        hadOutput: false,
+      }
+      registerForegroundRun(foregroundRun)
+
       const res = await fetch('/api/feature-analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1887,8 +2778,10 @@ function HomeContent() {
             setAppleQuota(prev => prev ? { ...prev, remaining: err.remaining ?? 0 } : null)
             setTimeout(() => setShowQuotaExhausted(false), 8000)
             // Roll back the user bubble
-            setMessages(prev => prev.filter(m => m.id !== userMessage.id && m.id !== assistantMessage.id))
-            setStreamingMessageId(null)
+            if (!foregroundRun || isForegroundRunVisible(foregroundRun)) {
+              setMessages(prev => prev.filter(m => m.id !== userMessage.id && m.id !== assistantMessage.id))
+              setStreamingMessageId(null)
+            }
             return
           }
         }
@@ -1910,49 +2803,52 @@ function HomeContent() {
           const chunk = sanitizeReplacementChars(decoder.decode(value, { stream: true }))
           if (!chunk) continue
           fullContent += chunk
-          streamContentRef.current = fullContent
-          if (chunk) streamHadOutputRef.current = true
+          if (foregroundRun) {
+            foregroundRun.content = fullContent
+            foregroundRun.hadOutput = true
+            foregroundRun.status = 'streaming'
+            foregroundRun.streamState = createMessageStreamState('feature', 'streaming', getGeneratingLabel('feature'))
+          }
+          if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+            streamContentRef.current = fullContent
+            streamHadOutputRef.current = true
+          }
           if (!streamingStarted && chunk.trim()) {
             streamingStarted = true
-            setIsStreamingStarted(true)
+            if (!foregroundRun || isForegroundRunVisible(foregroundRun)) {
+              setIsStreamingStarted(true)
+            }
           }
-          if (!rafIdRef.current) {
-            rafIdRef.current = requestAnimationFrame(() => {
-              const latest = streamContentRef.current
-              setMessages(prev => prev.map(m =>
-                m.id === assistantMessage.id
-                  ? {
-                      ...m,
-                      content: latest,
-                      streamState: createMessageStreamState('feature', 'streaming', getGeneratingLabel('feature')),
-                    }
-                  : m
-              ))
-              rafIdRef.current = null
-            })
-          }
+          if (foregroundRun) scheduleForegroundContentUpdate(foregroundRun)
         }
         const tail = sanitizeReplacementChars(decoder.decode())
         if (tail) {
           fullContent += tail
-          streamContentRef.current = fullContent
+          if (foregroundRun) {
+            foregroundRun.content = fullContent
+            foregroundRun.hadOutput = true
+            foregroundRun.streamState = createMessageStreamState('feature', 'streaming', getGeneratingLabel('feature'))
+          }
+          if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+            streamContentRef.current = fullContent
+          }
         }
         if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
-        setStreamingMessageId(null)
+        if (foregroundRun && isForegroundRunVisible(foregroundRun)) {
+          setStreamingMessageId(null)
+        }
         const finalContent = fullContent.trim()
           ? fullContent
           : BUBU_EMPTY_RESPONSE.feature
         const shouldRequestFeatureFollowUps = Boolean(user) && !shouldSkipFollowUpSuggestions(finalContent)
-        setMessages(prev => prev.map(m =>
-          m.id === assistantMessage.id
-            ? {
-                ...m,
-                content: finalContent,
-                streamState: createMessageStreamState('feature', 'complete'),
-                ...getFinalFollowUpState(finalContent, shouldRequestFeatureFollowUps),
-              }
-            : m
-        ))
+        if (foregroundRun) {
+          applyForegroundRunPatch(foregroundRun, {
+            content: finalContent,
+            status: 'complete',
+            streamState: createMessageStreamState('feature', 'complete'),
+            ...getFinalFollowUpState(finalContent, shouldRequestFeatureFollowUps),
+          })
+        }
         if (user && sessionId && finalContent) {
           await saveMessage(sessionId, 'assistant', finalContent, activeChatMode, {
             model: llmMeta.model,
@@ -1963,15 +2859,19 @@ function HomeContent() {
         fetchQuota()
         // Save feature context for follow-up
         const nextFeatureContext: FeatureContext = { kind: payload.kind, summary, participants }
-        setFeatureContext(nextFeatureContext)
-        setSessionSummary(summary)
+        const runIsVisible = foregroundRun ? isForegroundRunVisible(foregroundRun) : isOperationActive(sessionId)
+        if (runIsVisible) {
+          setFeatureContext(nextFeatureContext)
+          setSessionSummary(summary)
+        }
         if (sessionId) {
           await supabase
             .from('chat_sessions')
             .update({ summary } as any)
             .eq('id', sessionId)
+          refreshSessionList()
         }
-        if (shouldRequestFeatureFollowUps) {
+        if (shouldRequestFeatureFollowUps && runIsVisible) {
           void requestFollowUpSuggestions(assistantMessage.id, {
             assistantContent: finalContent,
             runKind: 'feature',
@@ -1984,28 +2884,22 @@ function HomeContent() {
         }
       }
     } catch (error) {
-      if (stopRequestedRef.current || isAbortLikeError(error)) {
-        const partialContent = sanitizeReplacementChars(streamContentRef.current)
-        const currentMessageId = streamingMessageIdRef.current
-        if (currentMessageId) {
-          setMessages(prev =>
-            prev.map(message =>
-              message.id === currentMessageId
-                ? {
-                    ...message,
-                    content: partialContent || BUBU_EMPTY_RESPONSE.stoppedFeature,
-                    streamState: createMessageStreamState('feature', 'stopped'),
-                    suggestedFollowUps: [],
-                    followUpStatus: 'ready',
-                  }
-                : message,
-            ),
-          )
+      if (foregroundRun?.stopRequested || stopRequestedRef.current || isAbortLikeError(error)) {
+        const partialContent = sanitizeReplacementChars(foregroundRun?.content ?? streamContentRef.current)
+        const stoppedContent = partialContent || BUBU_EMPTY_RESPONSE.stoppedFeature
+        if (foregroundRun) {
+          applyForegroundRunPatch(foregroundRun, {
+            content: stoppedContent,
+            status: 'stopped',
+            streamState: createMessageStreamState('feature', 'stopped'),
+            suggestedFollowUps: [],
+            followUpStatus: 'ready',
+          })
         } else if (!streamHadOutputRef.current) {
           const stoppedMessage: Message = {
             id: createBubuMessageId('assistant'),
             role: 'assistant',
-            content: BUBU_EMPTY_RESPONSE.stoppedFeature,
+            content: stoppedContent,
             createdAt: new Date(),
             mode: activeChatMode,
             streamState: createMessageStreamState('feature', 'stopped'),
@@ -2014,23 +2908,21 @@ function HomeContent() {
           }
           setMessages(prev => [...prev, stoppedMessage])
         }
+        if (user && sessionId && stoppedContent) {
+          await saveMessage(sessionId, 'assistant', stoppedContent, activeChatMode)
+        }
         fetchQuota()
         return
       }
       console.error('Feature analyze error:', error)
-      const currentMessageId = streamingMessageIdRef.current
-      if (currentMessageId) {
-        setMessages(prev => prev.map(message =>
-          message.id === currentMessageId
-            ? {
-                ...message,
-                content: BUBU_EMPTY_RESPONSE.featureError,
-                streamState: createMessageStreamState('feature', 'error'),
-                suggestedFollowUps: [],
-                followUpStatus: 'ready',
-              }
-            : message
-        ))
+      if (foregroundRun) {
+        applyForegroundRunPatch(foregroundRun, {
+          content: BUBU_EMPTY_RESPONSE.featureError,
+          status: 'error',
+          streamState: createMessageStreamState('feature', 'error'),
+          suggestedFollowUps: [],
+          followUpStatus: 'ready',
+        })
       } else {
         const errorMessage: Message = {
           id: createBubuMessageId('assistant'),
@@ -2044,20 +2936,33 @@ function HomeContent() {
         }
         setMessages(prev => [...prev, errorMessage])
       }
+      if (user && sessionId) {
+        await saveMessage(sessionId, 'assistant', BUBU_EMPTY_RESPONSE.featureError, activeChatMode)
+      }
       // Server-side refund already happened; refresh quota to reflect
       fetchQuota()
     } finally {
-      setIsLoading(false)
-      setIsStreamingStarted(false)
-      setIsAnalyzing(false)
-      setStreamingMessageId(null)
-      streamContentRef.current = ''
-      abortControllerRef.current = null
-      stopRequestedRef.current = false
-      streamHadOutputRef.current = false
-      if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
+      if (foregroundRun) {
+        if (activeForegroundRunIdRef.current === foregroundRun.id && rafIdRef.current) {
+          cancelAnimationFrame(rafIdRef.current)
+          rafIdRef.current = null
+        }
+        clearForegroundRun(foregroundRun)
+      } else if (activeOperationIdRef.current === operationId) {
+        setIsLoading(false)
+        setIsStreamingStarted(false)
+        setIsAnalyzing(false)
+        setStreamingMessageId(null)
+        streamContentRef.current = ''
+        activeRunIdRef.current = null
+        activeOperationIdRef.current = null
+        abortControllerRef.current = null
+        stopRequestedRef.current = false
+        streamHadOutputRef.current = false
+        if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
+      }
     }
-  }, [user, isLoading, isAnalyzing, currentSessionId, ensureSession, saveMessage, supabase, fetchQuota, activeChatMode, agentComplexity, setStreamingMessageId, requestFollowUpSuggestions, messages])
+  }, [user, isLoading, isAnalyzing, currentSessionId, ensureSession, saveMessage, supabase, fetchQuota, activeChatMode, agentComplexity, setStreamingMessageId, requestFollowUpSuggestions, messages, refreshSessionList, registerForegroundRun, scheduleForegroundContentUpdate, applyForegroundRunPatch, isForegroundRunVisible, clearForegroundRun])
 
   // Helper used by chat-message follow-up buttons & launcher button.
   const fillAndSubmit = useCallback((text: string) => {
@@ -2209,6 +3114,94 @@ function HomeContent() {
     )
 
     try {
+      if (request.kind === 'bazi_profiles') {
+        const requestedProfiles = request.profiles || []
+        const submittedCount = Number(values['profiles.__count'])
+        const profileCount = Number.isFinite(submittedCount) && submittedCount > 0
+          ? Math.floor(submittedCount)
+          : requestedProfiles.length
+        const profiles = Array.from(
+          { length: profileCount },
+          (_, index) => requestedProfiles[index] || {},
+        )
+        if (profiles.length === 0) {
+          throw new Error('这张批量人物卡没有可保存的人物。')
+        }
+        const savedProfiles: SelectedProfileContext[] = []
+        for (let index = 0; index < profiles.length; index += 1) {
+          const profile = profiles[index]
+          const batchValueText = (name: string, fallback = '') => {
+            const value = values[`profiles.${index}.${name}`]
+            const text = agentInputValueToText(value)
+            return text || fallback
+          }
+          const data: BaziData = {
+            year: batchValueText('year'),
+            month: batchValueText('month', '1'),
+            day: batchValueText('day', '1'),
+            hour: batchValueText('hour'),
+            minute: batchValueText('minute', '0'),
+            isSolar: values[`profiles.${index}.isSolar`] === 'solar' || values[`profiles.${index}.isSolar`] === true,
+            isFemale: values[`profiles.${index}.gender`] === 'female' || values[`profiles.${index}.isFemale`] === true,
+            longitude: batchValueText('longitude', '121.5'),
+            latitude: batchValueText('latitude', '31.2'),
+          }
+          const profileName = batchValueText('profileName', profile.profileName || `人物${index + 1}`) || `人物${index + 1}`
+          const savedProfile = await createAndSaveBaziProfile(data, profileName, null, {
+            updateCurrent: false,
+            addToAgentContext: false,
+          })
+          savedProfiles.push(savedProfile)
+        }
+
+        const nextSelectedProfile = selectedProfile || savedProfiles[0] || null
+        const nextParticipants = mergeProfileContexts([
+          ...agentParticipants,
+          ...(selectedProfile ? [selectedProfile] : []),
+          ...savedProfiles,
+        ])
+        setAgentParticipants(nextParticipants)
+        if (!selectedProfile && savedProfiles[0]) {
+          setSelectedProfile(savedProfiles[0])
+          setSelectedProfileId(savedProfiles[0].id || null)
+          setBaziAnalysisResult(savedProfiles[0].baziText || null)
+        }
+
+        const originalNames: string[] = profiles
+          .map((profile, index) => {
+            const originalName = agentInputValueToText(values[`profiles.${index}.__originalName`])
+            return originalName || profile.profileName || ''
+          })
+          .filter(Boolean)
+        const corrections = originalNames
+          .map((originalName, index) => {
+            const savedName = savedProfiles[index]?.name
+            return originalName && savedName && originalName !== savedName
+              ? `${originalName} -> ${savedName}`
+              : ''
+          })
+          .filter(Boolean)
+        const savedNames = savedProfiles.map(profile => profile.name).filter(Boolean).join('、')
+        const nameCorrection = corrections.length > 0
+          ? `\n人物名修正：${corrections.join('；')}`
+          : ''
+        const resumeText = `${request.resumeIntent || '请继续刚才的问题'}\n已创建八字人物：${savedNames}。${nameCorrection}`
+        const event = {
+          preventDefault: () => {},
+          __contentOverride: resumeText,
+          __selectedProfileOverride: nextSelectedProfile,
+          __selectedParticipantsOverride: nextParticipants,
+          __preserveCurrentProfile: true,
+        } as React.FormEvent & {
+          __contentOverride: string
+          __selectedProfileOverride: SelectedProfileContext | null
+          __selectedParticipantsOverride: SelectedProfileContext[]
+          __preserveCurrentProfile: boolean
+        }
+        handleSubmit(event)
+        return
+      }
+
       if (request.kind === 'bazi_profile' || request.kind === 'profile_required') {
         const data: BaziData = {
           year: valueText('year'),
@@ -2588,7 +3581,21 @@ function HomeContent() {
       <div ref={messagesContainerRef} className="relative flex-1 overflow-y-auto px-3 pb-6 pt-16 [scrollbar-gutter:stable] md:px-6 md:pb-8">
         <div className="max-w-3xl mx-auto">
           <div ref={messagesStartRef} />
-          {messages.length === 0 ? (
+          {isSessionLoading ? (
+            <div className="space-y-4 py-4 md:space-y-6">
+              <div className="mr-auto w-full max-w-3xl rounded-2xl border border-border/65 bg-card/70 p-4 shadow-sm md:rounded-xl">
+                <div className="mb-3 flex items-center gap-2">
+                  <div className="h-7 w-7 rounded-lg bg-muted/70" />
+                  <div className="h-3 w-20 rounded-full bg-muted/70" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-3 w-11/12 rounded-full bg-muted/60" />
+                  <div className="h-3 w-8/12 rounded-full bg-muted/50" />
+                </div>
+              </div>
+              <div className="ml-auto h-10 w-64 max-w-[82%] rounded-2xl bg-primary/18 md:rounded-lg" />
+            </div>
+          ) : messages.length === 0 ? (
             <div className="flex min-h-[calc(100dvh-14rem)] items-center justify-center py-6 md:py-8">
               <div className="w-full space-y-5 text-center md:space-y-7">
                 <div className="space-y-3 md:space-y-4">
@@ -2923,7 +3930,7 @@ function HomeContent() {
                         type="button"
                         onClick={() => setAgentReportPreference(null)}
                         className="flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-                        title="移除报告风格"
+                        title={BUBU_COPY.page.removeReportStyleTitle}
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -3099,6 +4106,7 @@ function HomeContent() {
         onOpenChangePassword={() => setShowChangePasswordDialog(true)}
         appleQuota={appleQuota}
         onOpenDonation={() => setShowDonationDialog(true)}
+        refreshKey={sessionListRefreshKey}
       />
 
       <SidebarInset className="relative min-w-0 overflow-hidden bg-background">
@@ -3128,6 +4136,7 @@ function HomeContent() {
               onOpenAuth={() => setShowAuthDialog(true)}
               onOpenProfiles={() => setShowProfilesDialog(true)}
               onOpenChangePassword={() => setShowChangePasswordDialog(true)}
+              onOpenRewards={() => setShowRewardsDialog(true)}
               appleQuota={appleQuota}
             />
           </div>
@@ -3137,52 +4146,69 @@ function HomeContent() {
         </div>
 
         {/* Dialogs */}
-        <BaziDialog
-          isOpen={showBaziDialog}
-          onClose={() => {
-            setShowBaziDialog(false)
-            setAgentBaziInitialData(undefined)
-          }}
-          onSubmit={handleBaziSubmit}
-          initialData={agentBaziInitialData}
-        />
-        <AuthDialog
-          isOpen={showAuthDialog}
-          onClose={() => setShowAuthDialog(false)}
-        />
-        <ProfilesManagementDialog
-          isOpen={showProfilesDialog}
-          onClose={() => setShowProfilesDialog(false)}
-          onProfileSaved={(profile) => {
-            const option: BaziProfileOption = {
-              id: profile.id,
-              profile_name: profile.profile_name,
-              bazi_result_text: profile.bazi_result_text,
-              bazi_result: profile.bazi_result,
-            }
-            setAgentProfiles(prev => {
-              const next = prev.filter(item => item.id !== option.id)
-              return [option, ...next]
-            })
-            if (activeChatMode === 'agent') {
-              const ctx = profileOptionToContext(option)
-              setSelectedProfileId(option.id)
-              setSelectedProfile(ctx)
-              setBaziAnalysisResult(ctx.baziText || null)
-              setAgentParticipants(prev => mergeProfileContexts([...prev, ctx]))
-            }
-            loadAgentProfiles()
-          }}
-        />
-        <ChangePasswordDialog
-          isOpen={showChangePasswordDialog}
-          onClose={() => setShowChangePasswordDialog(false)}
-        />
-        <DonationDialog
-          isOpen={showDonationDialog}
-          onClose={() => setShowDonationDialog(false)}
-          appleQuota={appleQuota}
-        />
+        {showBaziDialog && (
+          <BaziDialog
+            isOpen={showBaziDialog}
+            onClose={() => {
+              setShowBaziDialog(false)
+              setAgentBaziInitialData(undefined)
+            }}
+            onSubmit={handleBaziSubmit}
+            initialData={agentBaziInitialData}
+          />
+        )}
+        {showAuthDialog && (
+          <AuthDialog
+            isOpen={showAuthDialog}
+            onClose={() => setShowAuthDialog(false)}
+          />
+        )}
+        {showRewardsDialog && (
+          <RewardsDialog
+            isOpen={showRewardsDialog}
+            onClose={() => setShowRewardsDialog(false)}
+            onRedeemed={fetchQuota}
+          />
+        )}
+        {showProfilesDialog && (
+          <ProfilesManagementDialog
+            isOpen={showProfilesDialog}
+            onClose={() => setShowProfilesDialog(false)}
+            onProfileSaved={(profile) => {
+              const option: BaziProfileOption = {
+                id: profile.id,
+                profile_name: profile.profile_name,
+                bazi_result_text: profile.bazi_result_text,
+                bazi_result: profile.bazi_result,
+              }
+              setAgentProfiles(prev => {
+                const next = prev.filter(item => item.id !== option.id)
+                return [option, ...next]
+              })
+              if (activeChatMode === 'agent') {
+                const ctx = profileOptionToContext(option)
+                setSelectedProfileId(option.id)
+                setSelectedProfile(ctx)
+                setBaziAnalysisResult(ctx.baziText || null)
+                setAgentParticipants(prev => mergeProfileContexts([...prev, ctx]))
+              }
+              loadAgentProfiles()
+            }}
+          />
+        )}
+        {showChangePasswordDialog && (
+          <ChangePasswordDialog
+            isOpen={showChangePasswordDialog}
+            onClose={() => setShowChangePasswordDialog(false)}
+          />
+        )}
+        {showDonationDialog && (
+          <DonationDialog
+            isOpen={showDonationDialog}
+            onClose={() => setShowDonationDialog(false)}
+            appleQuota={appleQuota}
+          />
+        )}
       </SidebarInset>
     </>
   )

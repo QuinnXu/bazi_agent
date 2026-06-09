@@ -8,6 +8,7 @@ import type {
   AgentTimeRangeContext,
   AgentWorkflowCorrection,
 } from '@/lib/agent-workflow-types'
+import { BUBU_PROMPTS } from '@/lib/bubu-content'
 
 const SELF_NAMES = new Set(['我', '本人', '自己', '当前命主', '用户', '命主'])
 
@@ -568,7 +569,7 @@ export function hasAnalysisIntent(text: string): boolean {
 function cleanName(raw: string): string | null {
   const name = raw
     .replace(/^[@#]/, '')
-    .replace(/(今年|本年|明年|后年|未来|接下来|最近|近期|这段时间|那段时间|关系|合盘|相处|合作|缘分|感情|怎么样|如何|好不好|适不适合|合不合适|合不合|配不配|适合|合适|匹配|般配|要不要|能不能|可不可以|好吗|吗|呢|呀).*$/u, '')
+    .replace(/(今年|本年|明年|后年|未来|接下来|最近|近期|这段时间|那段时间|谁更|谁比较|哪个更|哪一个更|更适合|更合适|更匹配|更般配|一起|一块|关系|合盘|相处|合作|搞事情|搞事|做事|创业|缘分|感情|怎么样|如何|好不好|适不适合|合不合适|合不合|配不配|适合|合适|匹配|般配|要不要|能不能|可不可以|好吗|吗|呢|呀).*$/u, '')
     .replace(/[，,。！？!?.、：:；;（）()【】\[\]{}"'“”‘’\s]/g, '')
     .trim()
   if (!name || SELF_NAMES.has(name)) return null
@@ -630,6 +631,15 @@ export function extractPersonCorrection(text: string): AgentPersonCorrection | n
   return null
 }
 
+function splitMentionedNameCandidates(raw: string): string[] {
+  const stripped = raw
+    .replace(/(今年|本年|明年|后年|未来|接下来|最近|近期|这段时间|那段时间|谁更|谁比较|哪个更|哪一个更|更适合|更合适|更匹配|更般配|一起|一块|关系|合盘|相处|合作|搞事情|搞事|做事|创业|缘分|感情|怎么样|如何|好不好|适不适合|合不合适|合不合|配不配|适合|合适|匹配|般配|要不要|能不能|可不可以|好吗|吗|呢|呀).*$/u, '')
+  return stripped
+    .split(/(?:和|跟|与|、|,|，|;|；)/u)
+    .map(part => cleanName(part))
+    .filter((name): name is string => !!name)
+}
+
 export function hasAgentCorrectionSignal(text: string): boolean {
   if (extractPersonCorrection(text)) return true
   return /(刚才|上面|之前|前面).{0,12}(错|不对|搞错|搞混)|(?:不是|并不是).{1,24}(而是|是|应该是|改成|换成)|(?:改成|换成|应该是|应该叫|新人物|新人|另一个|我说的是|我问的是|你搞混|搞混了)/.test(text)
@@ -637,14 +647,24 @@ export function hasAgentCorrectionSignal(text: string): boolean {
 
 export function extractMentionedNames(text: string): string[] {
   const names: string[] = []
+  const addName = (name: string | null) => {
+    const normalized = name?.trim()
+    if (normalized && !names.includes(normalized)) names.push(normalized)
+  }
   const patterns = [
+    /((?:我|本人|自己|当前命主|[^，,。！？!?\s]{2,18})(?:(?:和|跟|与|、|,|，)[^，,。！？!?\s]{2,18})+)\s*(?:适合|合适|一起|一块|合作|搞事情|搞事|做事|创业|合盘|关系|相处|缘分|怎么样|如何|好不好|吗|呢|吧)/gu,
     /(?:我|本人|自己|当前命主)\s*(?:和|跟|与)\s*([^，,。！？!?\s]{2,18})/gu,
+    /(?:谁更|谁比较|哪个更|哪一个更)(?:适合|合适|匹配|般配)\s*([^，,。！？!?\s]{2,18})/gu,
     /(?:和|跟|与)\s*([^，,。！？!?\s]{2,18})\s*(?:合盘|关系|相处|合作|缘分|感情|怎么样|如何|适合|合适|匹配|般配|合不合|配不配)/gu,
   ]
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
-      const cleaned = cleanName(match[1] || '')
-      if (cleaned && !names.includes(cleaned)) names.push(cleaned)
+      const candidates = splitMentionedNameCandidates(match[1] || '')
+      if (candidates.length > 0) {
+        candidates.forEach(addName)
+      } else {
+        addName(cleanName(match[1] || ''))
+      }
     }
   }
   return names
@@ -671,7 +691,7 @@ export function buildInitialSlots(input: {
     supplements.push('用户在问人生尺度的财富突破/财富窗口，应结合命盘底色与大运阶段分析，不需要再追问短期时间范围。')
   }
   if (isPartnerArchetypeQuestion(latest)) {
-    supplements.push('用户在问适合哪类合作对象/搞钱搭档，不是指定某个第二人合盘；请基于当前命主给出合作对象画像。')
+    supplements.push(BUBU_PROMPTS.agent.supplements.partnerArchetype)
   }
   const matter: AgentMatter | null = analysisIntent
     ? {

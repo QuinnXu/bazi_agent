@@ -1,6 +1,7 @@
 import { runAgentChat, runAgentChatEvents } from '../lib/agent-service'
 import { getAgentAnalysisGenerationOptions } from '../lib/agent-analysis-runner'
 import { buildAgentAnalysisMessages } from '../lib/agent-prompt-builder'
+import { buildFeatureMessages } from '../lib/feature-service'
 import { selectLlmConfig } from '../lib/llm'
 import type { AgentAnalysisRequest } from '../lib/agent-workflow-types'
 
@@ -118,6 +119,23 @@ function visibleUiText(ui: any): string {
       ]),
     ]),
   ].filter(Boolean).join('\n')
+}
+
+function messagesText(messages: any[]): string {
+  return messages
+    .map(message => typeof message.content === 'string' ? message.content : JSON.stringify(message.content))
+    .join('\n')
+}
+
+function analysisMessagesText(request?: AgentAnalysisRequest): string {
+  return request ? messagesText(buildAgentAnalysisMessages(request)) : ''
+}
+
+function assertPromptIncludes(label: string, text: string, phrases: string[]) {
+  const missing = phrases.filter(phrase => !text.includes(phrase))
+  if (missing.length > 0) {
+    throw new Error(`${label} missing prompt phrases: ${missing.join('、')}\n${text.slice(0, 1200)}`)
+  }
 }
 
 async function main() {
@@ -290,6 +308,11 @@ async function main() {
   ) {
     throw new Error(`tomorrow explicit date policy failed: text=${tomorrowSigningFinal.text}, ui=${JSON.stringify(tomorrowSigningFinal.ui)}, done=${JSON.stringify(tomorrowSigningFinal.done)}, request=${JSON.stringify(tomorrowSigningCaptured.request)}`)
   }
+  assertPromptIncludes('tomorrow event scenario prompt', analysisMessagesText(tomorrowSigningCaptured.request), [
+    '应事择日与决策参考',
+    '备选路径',
+    '专业风险提示',
+  ])
 
   const recentOutingCard = await collect(
     {
@@ -540,7 +563,9 @@ async function main() {
     lifetimeCaptured.request?.slots.askedTime !== null ||
     lifetimeCaptured.request?.slots.matter?.category !== 'lifepath' ||
     !lifetimeCaptured.request?.slots.matter?.focus?.includes('财富') ||
-    !lifetimePromptText.includes('人生财富窗口')
+    !lifetimePromptText.includes('人生财富窗口') ||
+    !lifetimePromptText.includes('风险概率') ||
+    !lifetimePromptText.includes('重大转折')
   ) {
     throw new Error(`lifetime wealth final failed: text=${lifetimeFinalText}, request=${JSON.stringify(lifetimeCaptured.request)}`)
   }
@@ -1080,6 +1105,11 @@ async function main() {
   ) {
     throw new Error(`relationship final failed: text=${relationshipFinalText}, request=${JSON.stringify(relationshipCaptured.request)}`)
   }
+  assertPromptIncludes('relationship scenario prompt', analysisMessagesText(relationshipCaptured.request), [
+    '关系合盘与合作互动',
+    '天干外显',
+    '地支内在',
+  ])
 
   const timeConfirm = await collect(
     {
@@ -1271,16 +1301,62 @@ async function main() {
   }
 
   const promptMessages = buildAgentAnalysisMessages(request)
-  const promptText = promptMessages.map(message => JSON.stringify(message.content)).join('\n')
+  const promptText = messagesText(promptMessages)
   if (
     !promptText.includes('相关人物八字与大运') ||
     !promptText.includes('庚午') ||
     !promptText.includes('当前公历信息') ||
     !promptText.includes('当前时间锚点') ||
-    !promptText.includes('所问时间')
+    !promptText.includes('所问时间') ||
+    !promptText.includes('场景深化要求') ||
+    !promptText.includes('财富现金流与风险规避') ||
+    !promptText.includes('天干外显') ||
+    !promptText.includes('地支内在') ||
+    !promptText.includes('重大转折')
   ) {
     throw new Error(`dynamic prompt missing required context: ${promptText.slice(0, 1000)}`)
   }
+
+  const featureFortunePromptText = messagesText(buildFeatureMessages(
+    'fortune',
+    {
+      profile: selfProfile,
+      start: '2026-05-01',
+      end: '2026-12-31',
+      granularity: 'month',
+      focus: ['事业', '财富'],
+      analysisAngle: '重点看职业发展、财富节奏和风险规避',
+    },
+    false,
+    'thinking',
+    { mode: 'balanced' },
+  ))
+  assertPromptIncludes('feature fortune scenario prompt', featureFortunePromptText, [
+    '职业发展与人生规划',
+    '场景深化要求',
+    '天干外显',
+    '地支内在',
+    '重大转折',
+  ])
+
+  const featureHepanPromptText = messagesText(buildFeatureMessages(
+    'hepan',
+    {
+      subtype: 'pair',
+      relationLabel: '合作伙伴',
+      participants: [selfProfile, xixiProfile],
+      analysisAngle: '重点看合作方式、关系磨合和利益边界',
+    },
+    false,
+    'thinking',
+    { mode: 'balanced' },
+  ))
+  assertPromptIncludes('feature hepan scenario prompt', featureHepanPromptText, [
+    '关系合盘与合作互动',
+    '天干外显',
+    '地支内在',
+    '合作风险',
+  ])
 
   const yearTimeConfirm = await collect(
     {

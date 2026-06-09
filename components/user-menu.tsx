@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react'
-import { User, LogOut, MessageSquare, Users, Sun, Moon, KeyRound } from 'lucide-react'
+import { User, LogOut, MessageSquare, Users, Sun, Moon, KeyRound, Gift } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { useTheme } from 'next-themes'
 
@@ -10,10 +10,11 @@ interface UserMenuProps {
   onOpenSessions?: () => void
   onOpenProfiles?: () => void
   onOpenChangePassword?: () => void
+  onOpenRewards?: () => void
   appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null
 }
 
-export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenChangePassword, appleQuota }: UserMenuProps) {
+export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenChangePassword, onOpenRewards, appleQuota }: UserMenuProps) {
   const { user, signOut } = useAuth()
   const [showMenu, setShowMenu] = useState(false)
   const { theme, setTheme, resolvedTheme } = useTheme()
@@ -145,7 +146,20 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenCha
                     修改密码
                   </button>
                 )}
-                
+
+                {onOpenRewards && (
+                  <button
+                    onClick={() => {
+                      onOpenRewards()
+                      setShowMenu(false)
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-foreground hover:bg-muted transition-colors flex items-center gap-2"
+                  >
+                    <Gift className="w-4 h-4" />
+                    推荐与兑换
+                  </button>
+                )}
+
                 <button
                   onClick={handleSignOut}
                   className="w-full px-4 py-2 text-left text-sm text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-2"

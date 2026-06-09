@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { isAdmin } from '@/lib/admin'
 import { AuthDialog } from '@/components/auth-dialog'
-import { RefreshCw, Save, Check, AlertCircle, BarChart3, Users, Calendar, Cpu } from 'lucide-react'
+import { RefreshCw, Save, Check, AlertCircle, BarChart3, Users, Calendar, Cpu, Ticket, Copy } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ComposedChart, Line,
@@ -16,14 +16,28 @@ interface UserQuotaRow {
   display_name: string | null
   is_paid: boolean
   daily_apple_limit: number
+  membership_expires_at: string | null
+  bonus_apple_limit: number
+  bonus_expires_at: string | null
   apples_used_today: number
   last_reset_date: string | null
   has_quota_record: boolean
+  referral_code: string
+  invite_link: string
+  referred_by: string | null
+  referred_by_email: string | null
+  referral_bound_at: string | null
+  referral_count: number
+  redemption_count: number
 }
 
 interface RowEdits {
   is_paid?: boolean
   daily_apple_limit?: number
+  membership_expires_at?: string | null
+  bonus_apple_limit?: number
+  bonus_expires_at?: string | null
+  referral_code?: string
 }
 
 interface DailyStat {
@@ -65,7 +79,29 @@ interface StatsRange {
   end_date: string
 }
 
-type TabKey = 'quotas' | 'stats'
+interface RedemptionCodeRow {
+  code: string
+  description: string | null
+  kind: 'membership_days' | 'bonus_quota' | 'combo'
+  membership_days: number
+  bonus_apple_limit: number
+  bonus_days: number
+  max_redemptions: number | null
+  redeemed_count: number
+  starts_at: string
+  expires_at: string | null
+  is_active: boolean
+  created_at: string
+}
+
+interface RedemptionCodeEdits {
+  description?: string | null
+  max_redemptions?: string
+  starts_at?: string
+  expires_at?: string
+}
+
+type TabKey = 'quotas' | 'stats' | 'codes'
 
 // ─── Date helpers (UTC, matches the API layer) ───
 
@@ -83,6 +119,11 @@ function rangeDayCount(start: string, end: string): number {
   const s = new Date(`${start}T00:00:00.000Z`).getTime()
   const e = new Date(`${end}T00:00:00.000Z`).getTime()
   return Math.max(1, Math.round((e - s) / 86_400_000) + 1)
+}
+
+function dateInputValue(value: string | null | undefined): string {
+  if (!value) return ''
+  return value.slice(0, 10)
 }
 
 // Friendly label for a model id (e.g. "google/gemini-3.1-flash-lite-preview")
@@ -622,6 +663,428 @@ function TrafficStats() {
   )
 }
 
+// ─── Redemption Codes Component ───
+
+function RedemptionCodesAdmin() {
+  const [codes, setCodes] = useState<RedemptionCodeRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [rowSaving, setRowSaving] = useState<Record<string, boolean>>({})
+  const [codeEdits, setCodeEdits] = useState<Record<string, RedemptionCodeEdits>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+  const [form, setForm] = useState({
+    code: '',
+    description: '',
+    kind: 'membership_days' as RedemptionCodeRow['kind'],
+    membership_days: '7',
+    bonus_apple_limit: '0',
+    bonus_days: '0',
+    max_redemptions: '',
+    starts_at: '',
+    expires_at: '',
+    is_active: true,
+  })
+
+  const fetchCodes = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/redemption-codes')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error || '获取兑换码失败')
+        return
+      }
+      setCodes(data.codes || [])
+      setCodeEdits({})
+    } catch {
+      setError('网络错误')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchCodes()
+  }, [fetchCodes])
+
+  const createCode = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    setSuccess(null)
+    try {
+      const payload = {
+        ...form,
+        membership_days: Number(form.membership_days || 0),
+        bonus_apple_limit: Number(form.bonus_apple_limit || 0),
+        bonus_days: Number(form.bonus_days || 0),
+        max_redemptions: form.max_redemptions ? Number(form.max_redemptions) : null,
+        starts_at: form.starts_at || null,
+        expires_at: form.expires_at || null,
+        is_active: form.is_active,
+      }
+      const res = await fetch('/api/admin/redemption-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error || '创建兑换码失败')
+        return
+      }
+      setSuccess(`已创建兑换码 ${data.code?.code || ''}`)
+      setForm(prev => ({ ...prev, code: '', description: '' }))
+      fetchCodes()
+    } catch {
+      setError('网络错误')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleKindChange = (kind: RedemptionCodeRow['kind']) => {
+    setForm(prev => ({
+      ...prev,
+      kind,
+      membership_days: kind === 'bonus_quota' ? '0' : prev.membership_days || '7',
+      bonus_apple_limit: kind === 'membership_days' ? '0' : prev.bonus_apple_limit || '10',
+      bonus_days: kind === 'membership_days' ? '0' : prev.bonus_days || '7',
+    }))
+  }
+
+  const setCodeEdit = (code: string, edit: RedemptionCodeEdits) => {
+    setCodeEdits(prev => ({
+      ...prev,
+      [code]: {
+        ...prev[code],
+        ...edit,
+      },
+    }))
+  }
+
+  const patchCode = async (code: RedemptionCodeRow, extra: Record<string, unknown> = {}) => {
+    const edits = codeEdits[code.code] || {}
+    const payload: Record<string, unknown> = { code: code.code, ...extra }
+    if ('description' in edits) payload.description = edits.description || null
+    if ('max_redemptions' in edits) payload.max_redemptions = edits.max_redemptions ? Number(edits.max_redemptions) : null
+    if ('starts_at' in edits) payload.starts_at = edits.starts_at || null
+    if ('expires_at' in edits) payload.expires_at = edits.expires_at || null
+
+    setRowSaving(prev => ({ ...prev, [code.code]: true }))
+    setError(null)
+    setSuccess(null)
+    try {
+      const res = await fetch('/api/admin/redemption-codes', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error || '更新兑换码失败')
+        return
+      }
+      setCodes(prev => prev.map(item => item.code === code.code ? data.code : item))
+      setCodeEdits(prev => {
+        const next = { ...prev }
+        delete next[code.code]
+        return next
+      })
+      setSuccess(`已更新 ${code.code}`)
+      setTimeout(() => setSuccess(null), 1600)
+    } catch {
+      setError('网络错误')
+    } finally {
+      setRowSaving(prev => ({ ...prev, [code.code]: false }))
+    }
+  }
+
+  const toggleActive = async (code: RedemptionCodeRow) => {
+    await patchCode(code, { is_active: !code.is_active })
+  }
+
+  const copyCode = async (code: string) => {
+    await navigator.clipboard?.writeText(code)
+    setSuccess(`已复制 ${code}`)
+    setTimeout(() => setSuccess(null), 1600)
+  }
+
+  const kindLabel = (kind: RedemptionCodeRow['kind']) => {
+    if (kind === 'bonus_quota') return '额外额度'
+    if (kind === 'combo') return '会员+额度'
+    return '会员天数'
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-light text-foreground">兑换码管理</h2>
+          <p className="text-sm font-light text-muted-foreground mt-1">
+            后台生成推广兑换码，和用户推荐码分开管理
+          </p>
+        </div>
+        <button
+          onClick={fetchCodes}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-card border border-border text-sm font-light text-foreground hover:bg-muted transition-all duration-300 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          刷新
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-destructive/10 border border-destructive/30 rounded-xl px-4 py-3 text-sm text-destructive font-light">
+          {error}
+        </div>
+      )}
+      {success && (
+        <div className="bg-primary/10 border border-primary/20 rounded-xl px-4 py-3 text-sm text-primary font-light">
+          {success}
+        </div>
+      )}
+
+      <form onSubmit={createCode} className="bg-card/70 backdrop-blur-sm border border-border rounded-2xl p-4 grid grid-cols-1 md:grid-cols-6 gap-3">
+        <input
+          value={form.code}
+          onChange={e => setForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
+          placeholder="兑换码（留空自动生成）"
+          className="md:col-span-2 h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <input
+          value={form.description}
+          onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
+          placeholder="用途说明"
+          className="md:col-span-2 h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <select
+          value={form.kind}
+          onChange={e => handleKindChange(e.target.value as RedemptionCodeRow['kind'])}
+          className="h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        >
+          <option value="membership_days">会员天数</option>
+          <option value="bonus_quota">额外额度</option>
+          <option value="combo">会员+额度</option>
+        </select>
+        <button
+          type="submit"
+          disabled={saving}
+          className="h-10 rounded-lg bg-primary px-4 text-sm font-light text-primary-foreground hover:opacity-90 disabled:opacity-50"
+        >
+          {saving ? '生成中...' : '生成'}
+        </button>
+
+        <input
+          type="number"
+          min={0}
+          value={form.membership_days}
+          onChange={e => setForm(prev => ({ ...prev, membership_days: e.target.value }))}
+          placeholder="会员天数"
+          className="h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <input
+          type="number"
+          min={0}
+          value={form.bonus_apple_limit}
+          onChange={e => setForm(prev => ({ ...prev, bonus_apple_limit: e.target.value }))}
+          placeholder="额外每日额度"
+          className="h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <input
+          type="number"
+          min={0}
+          value={form.bonus_days}
+          onChange={e => setForm(prev => ({ ...prev, bonus_days: e.target.value }))}
+          placeholder="额外额度天数"
+          className="h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <input
+          type="number"
+          min={1}
+          value={form.max_redemptions}
+          onChange={e => setForm(prev => ({ ...prev, max_redemptions: e.target.value }))}
+          placeholder="使用上限"
+          className="h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <input
+          type="date"
+          value={form.starts_at}
+          onChange={e => setForm(prev => ({ ...prev, starts_at: e.target.value }))}
+          title="开始日期"
+          className="h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <input
+          type="date"
+          value={form.expires_at}
+          onChange={e => setForm(prev => ({ ...prev, expires_at: e.target.value }))}
+          className="h-10 rounded-lg border border-border bg-card px-3 text-sm outline-none focus:border-primary/60"
+        />
+        <label className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-light text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={form.is_active}
+            onChange={e => setForm(prev => ({ ...prev, is_active: e.target.checked }))}
+            className="h-4 w-4"
+          />
+          立即启用
+        </label>
+        <p className="md:col-span-6 text-[11px] leading-5 font-light text-muted-foreground">
+          例：7/30 天会员，或每日额外额度 + 有效天数。
+        </p>
+      </form>
+
+      <div className="bg-card/70 backdrop-blur-sm border border-border rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">兑换码</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">类型</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">权益</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">已用 / 上限</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">有效期</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">状态</th>
+                <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && codes.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground font-light">
+                    加载中...
+                  </td>
+                </tr>
+              ) : codes.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-muted-foreground font-light">
+                    暂无兑换码
+                  </td>
+                </tr>
+              ) : (
+                codes.map(code => {
+                  const edits = codeEdits[code.code] || {}
+                  const hasEdits = Object.keys(edits).length > 0
+                  const maxRedemptionsValue =
+                    'max_redemptions' in edits
+                      ? edits.max_redemptions || ''
+                      : code.max_redemptions?.toString() || ''
+                  const startsAtValue =
+                    'starts_at' in edits
+                      ? edits.starts_at || ''
+                      : dateInputValue(code.starts_at)
+                  const expiresAtValue =
+                    'expires_at' in edits
+                      ? edits.expires_at || ''
+                      : dateInputValue(code.expires_at)
+                  const descriptionValue =
+                    'description' in edits
+                      ? edits.description || ''
+                      : code.description || ''
+
+                  return (
+                    <tr key={code.code} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <code className="text-sm text-foreground">{code.code}</code>
+                          <button
+                            onClick={() => copyCode(code.code)}
+                            className="text-muted-foreground hover:text-foreground"
+                            title="复制兑换码"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <input
+                          value={descriptionValue}
+                          onChange={e => setCodeEdit(code.code, { description: e.target.value })}
+                          placeholder="用途说明"
+                          className="mt-1 w-44 rounded-lg border border-border/50 bg-transparent px-2 py-1 text-[11px] text-muted-foreground outline-none focus:border-primary/60"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-sm font-light text-muted-foreground">
+                        {kindLabel(code.kind)}
+                      </td>
+                      <td className="px-4 py-3 text-center text-xs font-light text-muted-foreground">
+                        会员 {code.membership_days} 天 · 额外 {code.bonus_apple_limit}/天 × {code.bonus_days} 天
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-sm font-light text-foreground">{code.redeemed_count}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={maxRedemptionsValue}
+                            onChange={e => setCodeEdit(code.code, { max_redemptions: e.target.value })}
+                            placeholder="不限"
+                            className="w-20 rounded-lg border border-border/50 bg-transparent px-2 py-1 text-center text-xs text-muted-foreground outline-none focus:border-primary/60"
+                          />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <input
+                            type="date"
+                            value={startsAtValue}
+                            onChange={e => setCodeEdit(code.code, { starts_at: e.target.value })}
+                            className="w-32 rounded-lg border border-border/50 bg-transparent px-2 py-1 text-center text-[11px] text-muted-foreground outline-none focus:border-primary/60"
+                            title="开始日期"
+                          />
+                          <input
+                            type="date"
+                            value={expiresAtValue}
+                            onChange={e => setCodeEdit(code.code, { expires_at: e.target.value })}
+                            className="w-32 rounded-lg border border-border/50 bg-transparent px-2 py-1 text-center text-[11px] text-muted-foreground outline-none focus:border-primary/60"
+                            title="过期日期，留空为不限"
+                          />
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-light border ${
+                          code.is_active
+                            ? 'bg-primary/10 text-primary border-primary/25'
+                            : 'bg-muted text-muted-foreground border-border'
+                        }`}>
+                          {code.is_active ? '启用' : '停用'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <button
+                            onClick={() => toggleActive(code)}
+                            disabled={rowSaving[code.code]}
+                            className="px-3 py-1 rounded-lg border border-border bg-card text-xs font-light text-foreground hover:bg-muted disabled:opacity-50"
+                          >
+                            {code.is_active ? '停用' : '启用'}
+                          </button>
+                          <button
+                            onClick={() => patchCode(code)}
+                            disabled={!hasEdits || rowSaving[code.code]}
+                            className={`px-3 py-1 rounded-lg text-xs font-light transition-colors ${
+                              hasEdits
+                                ? 'bg-primary text-primary-foreground hover:opacity-90'
+                                : 'bg-muted text-muted-foreground/40 cursor-not-allowed'
+                            }`}
+                          >
+                            {rowSaving[code.code] ? '保存中...' : '保存'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main Admin Page ───
 
 export default function AdminPage() {
@@ -686,6 +1149,43 @@ export default function AdminPage() {
     }))
   }
 
+  const setRowEdit = (userId: string, rowEdits: RowEdits) => {
+    setEdits(prev => ({
+      ...prev,
+      [userId]: {
+        ...prev[userId],
+        ...rowEdits,
+      }
+    }))
+  }
+
+  const handleMembershipDateChange = (userId: string, value: string) => {
+    setRowEdit(userId, {
+      membership_expires_at: value || null,
+      is_paid: !!value,
+      daily_apple_limit: value ? 999 : 5,
+    })
+  }
+
+  const handleBonusLimitChange = (userId: string, value: string) => {
+    const num = parseInt(value)
+    if (isNaN(num) || num < 0) return
+    setRowEdit(userId, { bonus_apple_limit: num })
+  }
+
+  const handleBonusDateChange = (userId: string, value: string) => {
+    setRowEdit(userId, { bonus_expires_at: value || null })
+  }
+
+  const handleReferralCodeChange = (userId: string, value: string) => {
+    setRowEdit(userId, { referral_code: value.toUpperCase().replace(/[^A-Z0-9]/g, '') })
+  }
+
+  const copyToClipboard = async (text: string) => {
+    if (!text) return
+    await navigator.clipboard?.writeText(text)
+  }
+
   const handleSave = async (userId: string) => {
     const rowEdits = edits[userId]
     if (!rowEdits) return
@@ -713,6 +1213,13 @@ export default function AdminPage() {
             ...u,
             is_paid: rowEdits.is_paid ?? u.is_paid,
             daily_apple_limit: rowEdits.daily_apple_limit ?? u.daily_apple_limit,
+            membership_expires_at: rowEdits.membership_expires_at ?? u.membership_expires_at,
+            bonus_apple_limit: rowEdits.bonus_apple_limit ?? u.bonus_apple_limit,
+            bonus_expires_at: rowEdits.bonus_expires_at ?? u.bonus_expires_at,
+            referral_code: rowEdits.referral_code ?? u.referral_code,
+            invite_link: rowEdits.referral_code
+              ? `${window.location.origin}/?ref=${encodeURIComponent(rowEdits.referral_code)}`
+              : u.invite_link,
             has_quota_record: true,
           }
         }
@@ -784,7 +1291,8 @@ export default function AdminPage() {
   }
 
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
-    { key: 'quotas', label: '配额管理', icon: <Users className="w-4 h-4" /> },
+    { key: 'quotas', label: '用户管理', icon: <Users className="w-4 h-4" /> },
+    { key: 'codes', label: '兑换码', icon: <Ticket className="w-4 h-4" /> },
     { key: 'stats', label: '流量统计', icon: <BarChart3 className="w-4 h-4" /> },
   ]
 
@@ -811,6 +1319,8 @@ export default function AdminPage() {
       {/* Tab Content */}
       {activeTab === 'stats' ? (
         <TrafficStats />
+      ) : activeTab === 'codes' ? (
+        <RedemptionCodesAdmin />
       ) : (
         <>
           {/* Title bar */}
@@ -818,7 +1328,7 @@ export default function AdminPage() {
             <div>
               <h2 className="text-2xl font-light text-foreground">配额管理</h2>
               <p className="text-sm font-light text-muted-foreground mt-1">
-                管理用户的苹果配额和付费状态
+                管理用户苹果会员周期、推荐码/邀请链接和每日额度
               </p>
             </div>
             <button
@@ -847,22 +1357,26 @@ export default function AdminPage() {
                     <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">邮箱</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">昵称</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">付费</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">会员到期</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">每日额度</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">额外额度</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">今日已用</th>
-                    <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">重置日期</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">推荐码 / 链接</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">推荐</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">兑换</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && users.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground font-light">
+                      <td colSpan={11} className="px-4 py-12 text-center text-sm text-muted-foreground font-light">
                         加载中...
                       </td>
                     </tr>
                   ) : users.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground font-light">
+                      <td colSpan={11} className="px-4 py-12 text-center text-sm text-muted-foreground font-light">
                         暂无用户数据
                       </td>
                     </tr>
@@ -871,6 +1385,10 @@ export default function AdminPage() {
                       const hasEdits = !!edits[u.user_id]
                       const displayPaid = getDisplayValue(u, 'is_paid') as boolean
                       const displayLimit = getDisplayValue(u, 'daily_apple_limit') as number
+                      const displayMembershipExpiresAt = getDisplayValue(u, 'membership_expires_at') as string | null
+                      const displayBonusLimit = getDisplayValue(u, 'bonus_apple_limit') as number
+                      const displayBonusExpiresAt = getDisplayValue(u, 'bonus_expires_at') as string | null
+                      const displayReferralCode = getDisplayValue(u, 'referral_code') as string
 
                       return (
                         <tr key={u.user_id} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
@@ -900,6 +1418,15 @@ export default function AdminPage() {
 
                           <td className="px-4 py-3 text-center">
                             <input
+                              type="date"
+                              value={dateInputValue(displayMembershipExpiresAt)}
+                              onChange={(e) => handleMembershipDateChange(u.user_id, e.target.value)}
+                              className="w-36 text-center text-xs font-light bg-transparent border border-border/50 rounded-lg px-2 py-1 text-foreground focus:outline-none focus:border-primary/60 transition-all"
+                            />
+                          </td>
+
+                          <td className="px-4 py-3 text-center">
+                            <input
                               type="number"
                               min={0}
                               value={displayLimit}
@@ -909,11 +1436,62 @@ export default function AdminPage() {
                           </td>
 
                           <td className="px-4 py-3 text-center">
-                            <span className="text-sm font-light text-muted-foreground">{u.apples_used_today}</span>
+                            <div className="flex flex-col items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                value={displayBonusLimit}
+                                onChange={(e) => handleBonusLimitChange(u.user_id, e.target.value)}
+                                className="w-20 text-center text-sm font-light bg-transparent border border-border/50 rounded-lg px-2 py-1 text-foreground focus:outline-none focus:border-primary/60 transition-all"
+                              />
+                              <input
+                                type="date"
+                                value={dateInputValue(displayBonusExpiresAt)}
+                                onChange={(e) => handleBonusDateChange(u.user_id, e.target.value)}
+                                className="w-32 text-center text-[11px] font-light bg-transparent border border-border/50 rounded-lg px-2 py-1 text-muted-foreground focus:outline-none focus:border-primary/60 transition-all"
+                              />
+                            </div>
                           </td>
 
                           <td className="px-4 py-3 text-center">
-                            <span className="text-xs font-light text-muted-foreground">{u.last_reset_date || '-'}</span>
+                            <span className="text-sm font-light text-muted-foreground">{u.apples_used_today}</span>
+                            <p className="text-[10px] text-muted-foreground/60">{u.last_reset_date || '-'}</p>
+                          </td>
+
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex flex-col items-center gap-1">
+                              <div className="flex items-center gap-1">
+                                <input
+                                  value={displayReferralCode}
+                                  onChange={(e) => handleReferralCodeChange(u.user_id, e.target.value)}
+                                  className="w-28 text-center text-xs font-light bg-transparent border border-border/50 rounded-lg px-2 py-1 text-foreground focus:outline-none focus:border-primary/60 transition-all"
+                                />
+                                <button
+                                  onClick={() => copyToClipboard(displayReferralCode)}
+                                  className="text-muted-foreground hover:text-foreground"
+                                  title="复制推荐码"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <button
+                                onClick={() => copyToClipboard(u.invite_link)}
+                                className="text-[10px] text-muted-foreground hover:text-foreground"
+                              >
+                                复制邀请链接
+                              </button>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-sm font-light text-foreground">{u.referral_count}</span>
+                            <p className="text-[10px] text-muted-foreground/60">
+                              来自 {u.referred_by_email || '-'}
+                            </p>
+                          </td>
+
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-sm font-light text-foreground">{u.redemption_count}</span>
                           </td>
 
                           <td className="px-4 py-3 text-center">
@@ -947,7 +1525,7 @@ export default function AdminPage() {
           </div>
 
           <p className="text-xs font-light text-muted-foreground/50 text-center">
-            共 {users.length} 个用户 · 切换付费状态会自动设置额度（VIP: 999, 免费: 5），也可手动修改
+            共 {users.length} 个用户 · 设置会员到期日会自动切换为 VIP 并使用 999 每日额度；额外额度只在到期日前叠加
           </p>
         </>
       )}

@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react"
 import { Calendar, X, ChevronDown, MapPin } from "lucide-react"
 import { OptimizedSelect } from "./optimized-select"
+import { BAZI_HOUR_GROUPS, normalizeBaziHourValue } from "@/lib/bazi-time-options"
+import { loadGeodata, type LocationData } from "@/lib/geodata-client"
 
 interface BaziData {
   year: string;
@@ -23,17 +25,11 @@ interface BaziDialogProps {
   initialData?: BaziData;
 }
 
-interface LocationData {
-  area: string;
-  city: string;
-  country: string;
-  lat: string;
-  lng: string;
-  province: string;
-}
-
 export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialogProps) {
-  const [baziData, setBaziData] = useState<BaziData>(initialData || {
+  const [baziData, setBaziData] = useState<BaziData>(initialData ? {
+    ...initialData,
+    hour: normalizeBaziHourValue(initialData.hour),
+  } : {
     year: '1995',
     month: '1',
     day: '1',
@@ -56,7 +52,10 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
   // 当 initialData 变化时更新 baziData
   useEffect(() => {
     if (initialData) {
-      setBaziData(initialData);
+      setBaziData({
+        ...initialData,
+        hour: normalizeBaziHourValue(initialData.hour),
+      });
     }
   }, [initialData]);
 
@@ -72,17 +71,13 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
     }));
   }, []);
 
-  // 静态时间选项 - 避免重复计算
-  const hourOptions = useMemo(() => 
-    Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')), []
-  );
-
   // 加载地理位置数据 - 只加载一次
   useEffect(() => {
     if (isOpen && locationData.length === 0) {
-      fetch('/geodata/data.json')
-        .then(response => response.json())
+      let cancelled = false
+      loadGeodata()
         .then((data: LocationData[]) => {
+          if (cancelled) return
           setLocationData(data);
           
           // 提取省份列表（去重）
@@ -94,6 +89,9 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
         .catch(error => {
           console.error('加载地理位置数据失败:', error);
         });
+      return () => {
+        cancelled = true
+      }
     }
   }, [isOpen, locationData.length]);
 
@@ -166,7 +164,10 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
   }, []);
 
   const handleTimeChange = useCallback((field: 'hour' | 'minute', value: string) => {
-    setBaziData(prev => ({ ...prev, [field]: value }));
+    setBaziData(prev => ({
+      ...prev,
+      [field]: field === 'hour' ? normalizeBaziHourValue(value) : value,
+    }));
   }, []);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
@@ -284,16 +285,20 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
             <div className="grid grid-cols-2 gap-4">
               <div className="relative">
                 <select
-                  value={baziData.hour}
+                  value={normalizeBaziHourValue(baziData.hour)}
                   onChange={(e) => handleTimeChange('hour', e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-card/60 border border-border text-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 appearance-none cursor-pointer"
                   required
                 >
                   <option value="">时</option>
-                  {hourOptions.map(hour => (
-                    <option key={hour} value={hour}>
-                      {hour}时
-                    </option>
+                  {BAZI_HOUR_GROUPS.map(group => (
+                    <optgroup key={group.label} label={`${group.label} ${group.rangeLabel}`}>
+                      {group.hours.map(hour => (
+                        <option key={hour.value} value={hour.value}>
+                          {hour.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />

@@ -9,6 +9,8 @@
 - 📊 **八字分析** - 专业八字排盘和分析
 - 💾 **云端存储** - Supabase 数据持久化
 - 🔐 **用户系统** - 完整认证和数据隔离（RLS）
+- 🎁 **推荐奖励** - 用户专属推荐码/邀请链接，新用户绑定后双方获得会员奖励
+- 🎟️ **兑换码制度** - 后台生成会员天数码、限时额外额度码，用于推广活动
 - 🎨 **现代 UI** - 简洁优雅的交互界面
 
 ---
@@ -47,6 +49,8 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 在 Supabase Dashboard 的 SQL Editor 中执行 `supabase/schema_v2_english.sql`，确保存在 `profiles` 等表（不要使用 `users` 表名）。
 
+已有线上库升级时，也可以按顺序执行 `supabase/migrations/` 中的迁移；推荐奖励与兑换码功能对应 `20260515_referrals_redemptions.sql`。
+
 ### 5. 配置 Supabase 认证回调（必做）
 
 在 **Supabase Dashboard → Authentication → URL Configuration** 中配置：
@@ -54,9 +58,11 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 - **Site URL**：开发环境填 `http://localhost:3000`，生产环境填你的域名（如 `https://your-app.vercel.app`）
 - **Redirect URLs**：添加以下地址（开发与生产各一条）  
   - `http://localhost:3000/auth/callback`  
+  - `http://localhost:3000/auth/reset-password`  
   - `https://你的生产域名/auth/callback`
+  - `https://你的生产域名/auth/reset-password`
 
-否则邮箱确认链接无法正确跳回应用，登录/注册会异常。
+否则邮箱确认和忘记密码链接无法正确跳回应用，登录/注册/重置密码会异常。
 
 ### 6. 启动开发服务器
 
@@ -135,6 +141,10 @@ pnpm dev
 | `chat_messages` | 聊天消息 |
 | `user_preferences` | 用户设置 |
 | `message_feedback` | 消息反馈 |
+| `user_quotas` | 苹果额度、会员周期、限时额外额度 |
+| `referrals` | 推荐关系与推荐奖励记录 |
+| `redemption_codes` | 后台生成的推广兑换码 |
+| `redemption_redemptions` | 用户兑换记录 |
 
 ### 关键特性
 
@@ -227,7 +237,10 @@ pnpm lint
 **A**: 确保在 Vercel Dashboard 中配置了所有环境变量。
 
 ### Q: 注册或登录失败 / 点击邮件确认链接后仍无法登录
-**A**: 1) 在 Supabase Dashboard → Authentication → URL Configuration 中添加 Redirect URL：`http://localhost:3000/auth/callback`（生产环境改为你的域名 + `/auth/callback`）。2) 确认数据库中存在 `profiles` 表（执行 `schema_v2_english.sql`），且没有使用名为 `users` 的表。
+**A**: 1) 在 Supabase Dashboard → Authentication → URL Configuration 中添加 Redirect URL：`http://localhost:3000/auth/callback`、`http://localhost:3000/auth/reset-password`（生产环境改为你的域名 + 对应路径）。2) 确认数据库中存在 `profiles` 表（执行 `schema_v2_english.sql`），且没有使用名为 `users` 的表。
+
+### Q: 忘记密码邮件打开后提示链接过期
+**A**: 确认 Supabase Redirect URLs 同时包含 `/auth/reset-password`。重置密码链接只能使用一次，通常约 1 小时过期；如果新邮件第一次打开就提示失效，多半是 Redirect URL 未放行或邮件被旧 callback 流程消费。
 
 ### Q: 登录后无法加载数据
 **A**: 检查 Supabase RLS 策略是否正确部署。在 Supabase SQL Editor 中执行 `schema_v2_english.sql`。

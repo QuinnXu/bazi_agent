@@ -23,6 +23,11 @@ import {
   takeUnicodeStreamChunk,
 } from '@/lib/text-sanitize'
 
+const VERBOSE_LLM_LOGS =
+  process.env.NODE_ENV !== 'production' ||
+  process.env.LLM_DEBUG_LOGS === '1' ||
+  process.env.LLM_DEBUG_LOGS === 'true'
+
 // ==================== Types ====================
 
 export type LlmTaskKind =
@@ -426,18 +431,20 @@ export async function callLLM(
   applyRequestOverrides(body, opts)
   normalizeReasoningParams(body)
 
-  console.log(`[LLM] Calling ${config.label} (task=${task})`)
-  console.log('[LLM] request', JSON.stringify({
-    task,
-    model: config.model,
-    stream: true,
-    temperature: body.temperature,
-    maxTokens: body.max_tokens,
-    thinking: body.thinking,
-    reasoningEffort: body.reasoning_effort || body.reasoning?.effort,
-    estimatedInputTokens: inputTokens,
-    messages: summarizeMessagesForLog(messagesWithSystem),
-  }))
+  if (VERBOSE_LLM_LOGS) {
+    console.log(`[LLM] Calling ${config.label} (task=${task})`)
+    console.log('[LLM] request', JSON.stringify({
+      task,
+      model: config.model,
+      stream: true,
+      temperature: body.temperature,
+      maxTokens: body.max_tokens,
+      thinking: body.thinking,
+      reasoningEffort: body.reasoning_effort || body.reasoning?.effort,
+      estimatedInputTokens: inputTokens,
+      messages: summarizeMessagesForLog(messagesWithSystem),
+    }))
+  }
   const response = await fetch(config.endpoint, {
     method: 'POST',
     headers,
@@ -453,7 +460,9 @@ export async function callLLM(
     )
   }
 
-  console.log(`[LLM] ${config.label} stream opened (status=${response.status})`)
+  if (VERBOSE_LLM_LOGS) {
+    console.log(`[LLM] ${config.label} stream opened (status=${response.status})`)
+  }
   return { response, config, inputTokens }
 }
 
@@ -516,20 +525,22 @@ export async function callLLMWithTools(
   applyRequestOverrides(body, opts)
   normalizeReasoningParams(body)
 
-  console.log(`[LLM] Calling ${config.label} tools (task=${task})`)
-  console.log('[LLM] tool request', JSON.stringify({
-    task,
-    model: config.model,
-    stream: false,
-    temperature: body.temperature,
-    maxTokens: body.max_tokens,
-    thinking: body.thinking,
-    reasoningEffort: body.reasoning_effort || body.reasoning?.effort,
-    toolChoice: body.tool_choice || 'auto',
-    tools: opts.tools.map(tool => tool.function.name),
-    estimatedInputTokens: inputTokens,
-    messages: summarizeMessagesForLog(messagesWithSystem),
-  }))
+  if (VERBOSE_LLM_LOGS) {
+    console.log(`[LLM] Calling ${config.label} tools (task=${task})`)
+    console.log('[LLM] tool request', JSON.stringify({
+      task,
+      model: config.model,
+      stream: false,
+      temperature: body.temperature,
+      maxTokens: body.max_tokens,
+      thinking: body.thinking,
+      reasoningEffort: body.reasoning_effort || body.reasoning?.effort,
+      toolChoice: body.tool_choice || 'auto',
+      tools: opts.tools.map(tool => tool.function.name),
+      estimatedInputTokens: inputTokens,
+      messages: summarizeMessagesForLog(messagesWithSystem),
+    }))
+  }
 
   const response = await fetch(config.endpoint, {
     method: 'POST',
@@ -555,12 +566,14 @@ export async function callLLMWithTools(
     .join('\n')
   const outputTokens = estimateTokensForText(`${content}\n${toolCallText}`.trim())
 
-  console.log('[LLM] tool response', JSON.stringify({
-    model: config.model,
-    contentLength: content.length,
-    toolCalls: toolCalls.map(call => call.function.name),
-    preview: truncateForLog(content || toolCallText, 900),
-  }))
+  if (VERBOSE_LLM_LOGS) {
+    console.log('[LLM] tool response', JSON.stringify({
+      model: config.model,
+      contentLength: content.length,
+      toolCalls: toolCalls.map(call => call.function.name),
+      preview: truncateForLog(content || toolCallText, 900),
+    }))
+  }
 
   return {
     content,
@@ -614,18 +627,20 @@ export async function callLLMTextWithUsage(
   applyRequestOverrides(body, opts)
   normalizeReasoningParams(body)
 
-  console.log(`[LLM] Calling ${config.label} text (task=${task})`)
-  console.log('[LLM] request', JSON.stringify({
-    task,
-    model: config.model,
-    stream: false,
-    temperature: body.temperature,
-    maxTokens: body.max_tokens,
-    thinking: body.thinking,
-    reasoningEffort: body.reasoning_effort || body.reasoning?.effort,
-    estimatedInputTokens: inputTokens,
-    messages: summarizeMessagesForLog(messagesWithSystem),
-  }))
+  if (VERBOSE_LLM_LOGS) {
+    console.log(`[LLM] Calling ${config.label} text (task=${task})`)
+    console.log('[LLM] request', JSON.stringify({
+      task,
+      model: config.model,
+      stream: false,
+      temperature: body.temperature,
+      maxTokens: body.max_tokens,
+      thinking: body.thinking,
+      reasoningEffort: body.reasoning_effort || body.reasoning?.effort,
+      estimatedInputTokens: inputTokens,
+      messages: summarizeMessagesForLog(messagesWithSystem),
+    }))
+  }
   const response = await fetch(config.endpoint, {
     method: 'POST',
     headers,
@@ -644,17 +659,19 @@ export async function callLLMTextWithUsage(
   const json = await response.json()
   const content = json?.choices?.[0]?.message?.content
   const text = normalizeAssistantText(content)
-  if (text) {
-    console.log('[LLM] text response', JSON.stringify({
-      model: config.model,
-      length: text.length,
-      preview: truncateForLog(text, 900),
-    }))
-  } else {
-    console.log('[LLM] text response empty', JSON.stringify({
-      model: config.model,
-      keys: Object.keys(json || {}),
-    }))
+  if (VERBOSE_LLM_LOGS) {
+    if (text) {
+      console.log('[LLM] text response', JSON.stringify({
+        model: config.model,
+        length: text.length,
+        preview: truncateForLog(text, 900),
+      }))
+    } else {
+      console.log('[LLM] text response empty', JSON.stringify({
+        model: config.model,
+        keys: Object.keys(json || {}),
+      }))
+    }
   }
   const outputTokens = estimateTokensForText(text)
   return {
@@ -738,7 +755,7 @@ export function createUnifiedStreamProcessor(
       }
 
       const logCompletion = (status: string) => {
-        if (loggedCompletion || !opts.logLabel) return
+        if (loggedCompletion || !opts.logLabel || !VERBOSE_LLM_LOGS) return
         loggedCompletion = true
         console.log('[LLM] stream completed', JSON.stringify({
           label: opts.logLabel,

@@ -3,7 +3,7 @@
 import React from 'react'
 import { Users, CalendarRange, ImageIcon, Compass } from 'lucide-react'
 import type { FeatureType } from '@/components/app-sidebar'
-import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
+import { BUBU_COPY } from '@/lib/bubu-content'
 
 interface FeatureCardItem {
   id: Exclude<FeatureType, 'chat'>
@@ -14,40 +14,25 @@ interface FeatureCardItem {
   accent: 'rose' | 'gold' | 'violet' | 'teal'
 }
 
-const ITEMS: FeatureCardItem[] = [
-  {
-    id: 'hepan',
-    title: '合盘',
-    description: '两人或多人缘分碰撞，看看彼此的能量如何流动 🌹',
-    cost: FEATURE_APPLE_COSTS.hepan,
-    icon: Users,
-    accent: 'rose',
-  },
-  {
-    id: 'fortune',
-    title: '运势',
-    description: '近期能量起伏与行事天气预报，提前看清风向 🌤️',
-    cost: FEATURE_APPLE_COSTS.fortune,
-    icon: CalendarRange,
-    accent: 'gold',
-  },
-  {
-    id: 'avatar',
-    title: '头像',
-    description: '用色彩和风格滋养你的面相，让气场更顺 🌸',
-    cost: FEATURE_APPLE_COSTS.avatar,
-    icon: ImageIcon,
-    accent: 'violet',
-  },
-  {
-    id: 'lifepath',
-    title: '人生脉络',
-    description: '铺展你的专属大运长卷，看见属于你的人生风景 📜',
-    cost: FEATURE_APPLE_COSTS.lifepath,
-    icon: Compass,
-    accent: 'teal',
-  },
-]
+const ITEM_ICONS: Record<FeatureCardItem['id'], React.ElementType> = {
+  hepan: Users,
+  fortune: CalendarRange,
+  avatar: ImageIcon,
+  lifepath: Compass,
+}
+
+const ITEM_ACCENTS: Record<FeatureCardItem['id'], FeatureCardItem['accent']> = {
+  hepan: 'rose',
+  fortune: 'gold',
+  avatar: 'violet',
+  lifepath: 'teal',
+}
+
+const ITEMS: FeatureCardItem[] = BUBU_COPY.featureCards.items.map(item => ({
+  ...item,
+  icon: ITEM_ICONS[item.id],
+  accent: ITEM_ACCENTS[item.id],
+}))
 
 const ACCENT_BG: Record<FeatureCardItem['accent'], string> = {
   rose: 'bg-[oklch(0.696_0.137_3.34)]/12 text-[oklch(0.696_0.137_3.34)] border-[oklch(0.696_0.137_3.34)]/20',

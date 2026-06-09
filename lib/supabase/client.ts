@@ -23,48 +23,28 @@ export const createBrowserClient = () => {
         '\n- NEXT_PUBLIC_SUPABASE_ANON_KEY'
       )
     }
-    const placeholder = createClient<Database>(
-      'https://placeholder.supabase.co',
-      'placeholder-key',
-      {
-        cookies: {
-          getAll() { return [] },
-          setAll() { }
-        }
-      }
-    )
+    const placeholder = createClient<Database>('https://placeholder.supabase.co', 'placeholder-key')
     if (typeof window !== 'undefined') browserClient = placeholder
     return placeholder
   }
 
-  const client = createClient<Database>(
-    supabaseUrl,
-    supabaseAnonKey,
-    {
-      cookies: {
-        getAll() {
-          if (typeof document === 'undefined') return []
-          return document.cookie.split('; ').map(cookie => {
-            const [name, ...rest] = cookie.split('=')
-            return { name, value: rest.join('=') }
-          })
-        },
-        setAll(cookiesToSet) {
-          if (typeof document === 'undefined') return
-          cookiesToSet.forEach(({ name, value, options }) => {
-            let cookie = `${name}=${value}`
-            if (options?.maxAge) cookie += `; max-age=${options.maxAge}`
-            if (options?.path) cookie += `; path=${options.path}`
-            if (options?.sameSite) cookie += `; samesite=${options.sameSite}`
-            if (options?.secure) cookie += `; secure`
-            document.cookie = cookie
-          })
-        },
-      },
-    }
-  )
+  const client = createClient<Database>(supabaseUrl, supabaseAnonKey)
   if (typeof window !== 'undefined') browserClient = client
   return client
+}
+
+export const createPasswordRecoveryClient = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co'
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key'
+
+  return createSupabaseClient<Database>(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+      flowType: 'implicit',
+      persistSession: false,
+    },
+  })
 }
 
 // 服务端使用（带 service role key）

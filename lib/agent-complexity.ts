@@ -1,4 +1,9 @@
-import type { FeatureKind } from '@/lib/feature-service'
+import {
+  AGENT_COMPLEXITY_COPY,
+  AGENT_REPORT_PREFERENCE_INSTRUCTIONS,
+  getFeatureComplexityKindHint,
+  type FeatureKind,
+} from '@/lib/bubu-content'
 
 export type AgentComplexityMode = 'instant' | 'thinking'
 export type AgentReasoningEffort = 'none' | 'high' | 'max'
@@ -27,16 +32,7 @@ export interface AgentComplexityProfile {
 
 export const DEFAULT_AGENT_COMPLEXITY: AgentComplexityMode = 'instant'
 
-const REPORT_PREFERENCE_INSTRUCTIONS: Record<AgentReportPreferenceMode, string> = {
-  concise:
-    '【报告风格：简洁结论型】此要求优先于 Agent 复杂度。输出约 300-800 中文字；最多 4 个主段：先给结论，再给关键依据、关键时间/风险、行动建议。压缩背景铺垫，不写完整逐月/逐项长章。',
-  balanced:
-    '【报告风格：均衡报告型】此要求优先于 Agent 复杂度。输出约 800-2000 中文字；保留清晰层级，兼顾命理依据、关键阶段/窗口、重点方向和行动建议。不要短成摘要，也不要铺成研究长文。',
-  detailed:
-    '【报告风格：深度展开型】此要求优先于 Agent 复杂度。输出深度长报告：近期运势按月份/阶段充分拆解，合盘强化互动模式与关键时间窗，人生脉络强化大运连续性；展开依据、阶段差异、风险点和执行清单。若内容很长，先保证结构完整和重点密度，不要为了凑满篇幅重复。',
-  custom:
-    '【报告风格：自定义】此要求优先于 Agent 复杂度。按用户补充的风格要求调整表达、篇幅和重点。',
-}
+const REPORT_PREFERENCE_INSTRUCTIONS: Record<AgentReportPreferenceMode, string> = AGENT_REPORT_PREFERENCE_INSTRUCTIONS
 
 export const AGENT_COMPLEXITY_PROFILES: Record<
   AgentComplexityMode,
@@ -44,7 +40,7 @@ export const AGENT_COMPLEXITY_PROFILES: Record<
 > = {
   instant: {
     mode: 'instant',
-    label: 'Instant',
+    label: AGENT_COMPLEXITY_COPY.instant.label,
     answerMaxTokens: 8_000,
     plannerMaxTokens: 1000,
     maxSteps: 2,
@@ -53,14 +49,12 @@ export const AGENT_COMPLEXITY_PROFILES: Record<
     analysisMaxTokens: 8_000,
     thinking: 'disabled',
     reasoningEffort: 'none',
-    plannerInstruction:
-      '当前复杂度：Instant。优先快速完成判断，只做必要澄清；若问题很轻，不调用工具，直接给简短回答；若必须调用工具，参数尽量收敛，结果要求精简。',
-    featureInstruction:
-      '【Agent 复杂度：Instant】请输出短报告：先给结论，再给关键依据和 3-5 条行动建议。不要展开长篇章节，不要逐项铺满所有维度。',
+    plannerInstruction: AGENT_COMPLEXITY_COPY.instant.plannerInstruction,
+    featureInstruction: AGENT_COMPLEXITY_COPY.instant.featureInstruction,
   },
   thinking: {
     mode: 'thinking',
-    label: 'Thinking',
+    label: AGENT_COMPLEXITY_COPY.thinking.label,
     answerMaxTokens: 64_000,
     plannerMaxTokens: 2200,
     maxSteps: 4,
@@ -69,10 +63,8 @@ export const AGENT_COMPLEXITY_PROFILES: Record<
     analysisMaxTokens: 64_000,
     thinking: 'enabled',
     reasoningEffort: 'high',
-    plannerInstruction:
-      '当前复杂度：Thinking。正常拆解问题，必要时补问，参数完整时调用结构化工具；回答深度保持均衡，给出依据、节奏和可执行建议。',
-    featureInstruction:
-      '【Agent 复杂度：Thinking】请输出中等深度报告：保留清晰层级、命理依据、关键时间窗口和行动建议；避免过短，也避免多年研究报告式铺陈。',
+    plannerInstruction: AGENT_COMPLEXITY_COPY.thinking.plannerInstruction,
+    featureInstruction: AGENT_COMPLEXITY_COPY.thinking.featureInstruction,
   },
 }
 
@@ -96,16 +88,7 @@ export function getFeatureComplexityInstruction(
   kind?: FeatureKind,
 ): string {
   const profile = getAgentComplexityProfile(mode)
-  const kindHint =
-    kind === 'avatar'
-      ? '头像分析仍需看图，但输出长度和建议数量按当前复杂度控制。'
-      : kind === 'fortune'
-      ? '运势分析按当前复杂度控制逐日/逐月展开颗粒度。'
-      : kind === 'hepan'
-      ? '合盘/应事分析按当前复杂度控制参与者互动和时间节点展开颗粒度。'
-      : kind === 'lifepath'
-      ? '人生脉络分析按当前复杂度控制大运分段展开颗粒度。'
-      : ''
+  const kindHint = getFeatureComplexityKindHint(kind)
 
   return `${profile.featureInstruction}${kindHint ? `\n${kindHint}` : ''}`
 }

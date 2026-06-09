@@ -1,12 +1,14 @@
 "use client"
 
-import React, { Suspense, useMemo, useState } from 'react'
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Lock, AlertCircle, ArrowLeft } from 'lucide-react'
+import type { User } from '@supabase/supabase-js'
 import { useAuth } from '@/contexts/auth-context'
 import { MinimalBackground } from '@/components/minimal-background'
+import { createBrowserClient } from '@/lib/supabase/client'
 
 function authErrorMessage(err: { message?: string } | null): string {
   if (!err?.message) return '哎呀，网络好像打了个小盹，稍后再试一次喔 🐘'
@@ -15,7 +17,7 @@ function authErrorMessage(err: { message?: string } | null): string {
     return '新密码不能和旧密码完全一样喔，给小象换个新的吧 🐾'
   if (msg.includes('weak') || msg.includes('password should be'))
     return '密码再壮一些会更安心，至少 6 位喔 🛡️'
-  if (msg.includes('session') || msg.includes('jwt') || msg.includes('expired'))
+  if (msg.includes('session') || msg.includes('jwt') || msg.includes('expired') || msg.includes('invalid') || msg.includes('otp') || msg.includes('code verifier') || msg.includes('auth code'))
     return '链接已经在风中走散啦，请回到登录页重新发起忘记密码 🌬️'
   return err.message
 }
@@ -51,17 +53,107 @@ function ResetPasswordForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, loading: authLoading, updatePassword } = useAuth()
+  const supabase = useMemo(() => createBrowserClient(), [])
+  const recoveryAttemptedRef = useRef(false)
 
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [recoveryError, setRecoveryError] = useState<string | null>(null)
+  const [recoveryLoading, setRecoveryLoading] = useState(true)
+  const [recoveryUser, setRecoveryUser] = useState<User | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
   const linkInvalid = useMemo(() => {
     return searchParams.get('error') === 'invalid_link'
   }, [searchParams])
+
+  useEffect(() => {
+    if (recoveryAttemptedRef.current) return
+    recoveryAttemptedRef.current = true
+
+    const cleanRecoveryUrl = () => {
+      window.history.replaceState(window.history.state, '', window.location.pathname)
+    }
+
+    const applyRecoveredUser = (nextUser: User | null | undefined, shouldCleanUrl: boolean) => {
+      if (nextUser) {
+        setRecoveryUser(nextUser)
+        if (shouldCleanUrl) cleanRecoveryUrl()
+        return true
+      }
+      return false
+    }
+
+    const establishRecoverySession = async () => {
+      try {
+        const currentUrl = new URL(window.location.href)
+        const query = currentUrl.searchParams
+        const hash = new URLSearchParams(currentUrl.hash.startsWith('#') ? currentUrl.hash.slice(1) : currentUrl.hash)
+
+        const urlError = query.get('error_description') ?? hash.get('error_description') ?? query.get('error') ?? hash.get('error')
+        if (urlError) {
+          setRecoveryError(authErrorMessage({ message: urlError }))
+          return
+        }
+
+        const accessToken = hash.get('access_token')
+        const refreshToken = hash.get('refresh_token')
+        if (accessToken && refreshToken) {
+          const { data, error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          })
+          if (sessionError) {
+            setRecoveryError(authErrorMessage(sessionError))
+            return
+          }
+          if (applyRecoveredUser(data.session?.user, true)) return
+        }
+
+        const tokenHash = query.get('token_hash') ?? hash.get('token_hash')
+        const type = query.get('type') ?? hash.get('type')
+        if (tokenHash && type === 'recovery') {
+          const { data, error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: 'recovery',
+          })
+          if (verifyError) {
+            setRecoveryError(authErrorMessage(verifyError))
+            return
+          }
+          if (applyRecoveredUser(data.session?.user ?? data.user, true)) return
+        }
+
+        const code = query.get('code')
+        if (code) {
+          const { data: existing } = await supabase.auth.getSession()
+          const liveUrl = new URL(window.location.href)
+          if (!liveUrl.searchParams.has('code') && applyRecoveredUser(existing.session?.user, true)) return
+
+          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
+          if (exchangeError) {
+            setRecoveryError(authErrorMessage(exchangeError))
+            return
+          }
+          if (applyRecoveredUser(data.session?.user, true)) return
+        }
+
+        const { data: existing } = await supabase.auth.getSession()
+        applyRecoveredUser(existing.session?.user, false)
+      } catch (caughtError) {
+        setRecoveryError(authErrorMessage({ message: caughtError instanceof Error ? caughtError.message : undefined }))
+      } finally {
+        setRecoveryLoading(false)
+      }
+    }
+
+    establishRecoverySession()
+  }, [supabase])
+
+  const activeUser = recoveryUser ?? user
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -119,8 +211,32 @@ function ResetPasswordForm() {
     )
   }
 
+  if (recoveryError) {
+    return (
+      <Shell>
+        <Header
+          title="链接已经走散啦"
+          subtitle="重置密码的链接可能已过期或被使用过，请回到登录页重新发起忘记密码"
+        />
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-destructive/10 border border-destructive/20 mb-4">
+          <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+          <p className="text-sm font-light text-destructive">
+            {recoveryError}
+          </p>
+        </div>
+        <Link
+          href="/"
+          className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 transition-all duration-300"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          回到登录页
+        </Link>
+      </Shell>
+    )
+  }
+
   // ─── 2. 等待 supabase session 初始化 ───
-  if (authLoading) {
+  if (authLoading || recoveryLoading) {
     return (
       <Shell>
         <Header title="正在让小象认出你…" subtitle="校验重置密码的安全令牌中" />
@@ -132,7 +248,7 @@ function ResetPasswordForm() {
   }
 
   // ─── 3. 没有有效 session ───
-  if (!user) {
+  if (!activeUser) {
     return (
       <Shell>
         <Header
@@ -161,7 +277,7 @@ function ResetPasswordForm() {
     <Shell>
       <Header
         title="设置一个新密码"
-        subtitle={`将为 ${user.email ?? '当前账号'} 更新登录密码`}
+        subtitle={`将为 ${activeUser.email ?? '当前账号'} 更新登录密码`}
       />
 
       <form onSubmit={handleSubmit} className="space-y-4">
