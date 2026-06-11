@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { session_id, messages } = await req.json()
+    const { session_id, messages, mode = 'classic' } = await req.json()
 
     if (!session_id || !messages || !Array.isArray(messages)) {
       return new Response(
@@ -44,15 +44,43 @@ export async function POST(req: NextRequest) {
     }
 
     // 批量插入消息
+    const requestMode: 'classic' | 'agent' = mode === 'agent' ? 'agent' : 'classic'
     const messagesData = messages.map((msg: any) => ({
       session_id: session_id,
       role: msg.role,
       content: msg.content,
+      mode: (msg.mode === 'agent' ? 'agent' : requestMode) as 'classic' | 'agent',
+      model: msg.model ?? null,
+      tokens_used:
+        typeof msg.tokens_used === 'number'
+          ? msg.tokens_used
+          : typeof msg.tokensUsed === 'number'
+          ? msg.tokensUsed
+          : null,
     }))
 
-    const { error: insertError } = await supabase
+    let { error: insertError } = await supabase
       .from('chat_messages')
       .insert(messagesData)
+
+    if (
+      insertError &&
+      (
+        String(insertError.message || '').includes('mode') ||
+        String(insertError.message || '').includes('model') ||
+        String(insertError.message || '').includes('tokens_used')
+      )
+    ) {
+      const retryMessagesData = messages.map((msg: any) => ({
+        session_id: session_id,
+        role: msg.role,
+        content: msg.content,
+      }))
+      const retry = await supabase
+        .from('chat_messages')
+        .insert(retryMessagesData)
+      insertError = retry.error
+    }
 
     if (insertError) {
       console.error('保存消息失败:', insertError)

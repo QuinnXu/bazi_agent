@@ -1,0 +1,506 @@
+"use client"
+
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import Image from 'next/image'
+import {
+  MessageCircle,
+  Bot,
+  Check,
+  Users,
+  CalendarRange,
+  ImageIcon,
+  Compass,
+  Plus,
+  Trash2,
+  X,
+  LogOut,
+  KeyRound,
+  User,
+  UserCircle,
+  ChevronDown,
+  Settings,
+  Sparkles,
+} from 'lucide-react'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarMenuAction,
+  SidebarSeparator,
+  useSidebar,
+} from '@/components/ui/sidebar'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import { createBrowserClient } from '@/lib/supabase/client'
+import { useAuth } from '@/contexts/auth-context'
+import type { ChatSession } from '@/types/database_v2'
+import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
+
+export type FeatureType = 'chat' | 'hepan' | 'fortune' | 'avatar' | 'lifepath'
+export type ChatMode = 'classic' | 'agent'
+
+interface AppSidebarProps {
+  activeFeature: FeatureType
+  activeChatMode: ChatMode
+  onFeatureChange: (feature: FeatureType) => void
+  onChatModeChange: (mode: ChatMode) => void
+  currentSessionId: string | null
+  onSelectSession: (sessionId: string, mode?: ChatMode) => void
+  onOpenAuth: () => void
+  onOpenProfiles: () => void
+  onOpenChangePassword: () => void
+  appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null
+  onOpenDonation?: () => void
+  refreshKey?: number
+}
+
+const featureItems: { id: Exclude<FeatureType, 'chat'>; label: string; cost: number; icon: React.ElementType }[] = [
+  { id: 'hepan', label: '合盘 / 应事', cost: FEATURE_APPLE_COSTS.hepan, icon: Users },
+  { id: 'fortune', label: '近期运势', cost: FEATURE_APPLE_COSTS.fortune, icon: CalendarRange },
+  { id: 'avatar', label: '头像分析', cost: FEATURE_APPLE_COSTS.avatar, icon: ImageIcon },
+  { id: 'lifepath', label: '人生脉络', cost: FEATURE_APPLE_COSTS.lifepath, icon: Compass },
+]
+
+function groupSessionsByDate(sessions: ChatSession[]) {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today.getTime() - 86400000)
+  const last7Days = new Date(today.getTime() - 7 * 86400000)
+
+  const groups: { label: string; sessions: ChatSession[] }[] = [
+    { label: '今天 ☀️', sessions: [] },
+    { label: '昨天 🌙', sessions: [] },
+    { label: '近期的足迹 🍃', sessions: [] },
+    { label: '时光收纳盒 📦', sessions: [] },
+  ]
+
+  sessions.forEach(s => {
+    const d = new Date(s.updated_at)
+    if (d >= today) groups[0].sessions.push(s)
+    else if (d >= yesterday) groups[1].sessions.push(s)
+    else if (d >= last7Days) groups[2].sessions.push(s)
+    else groups[3].sessions.push(s)
+  })
+
+  return groups.filter(g => g.sessions.length > 0)
+}
+
+export function AppSidebar({
+  activeFeature,
+  activeChatMode,
+  onFeatureChange,
+  onChatModeChange,
+  currentSessionId,
+  onSelectSession,
+  onOpenAuth,
+  onOpenProfiles,
+  onOpenChangePassword,
+  appleQuota,
+  onOpenDonation,
+  refreshKey = 0,
+}: AppSidebarProps) {
+  const { user, signOut } = useAuth()
+  const { isMobile, setOpenMobile } = useSidebar()
+  const supabase = useMemo(() => createBrowserClient(), [])
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [loadingSessions, setLoadingSessions] = useState(false)
+  const loadSessionsSeqRef = useRef(0)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const [abilitiesOpen, setAbilitiesOpen] = useState(false)
+  const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+
+  const loadSessions = useCallback(async () => {
+    if (!user) return
+    const requestSeq = loadSessionsSeqRef.current + 1
+    loadSessionsSeqRef.current = requestSeq
+    setLoadingSessions(true)
+    try {
+      const { data, error } = await supabase
+        .from('chat_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+      if (error) throw error
+      if (loadSessionsSeqRef.current === requestSeq) {
+        setSessions(data || [])
+      }
+    } catch (error) {
+      console.error('加载会话失败:', error)
+    } finally {
+      if (loadSessionsSeqRef.current === requestSeq) {
+        setLoadingSessions(false)
+      }
+    }
+  }, [supabase, user])
+
+  // 加载会话列表
+  useEffect(() => {
+    if (user) loadSessions()
+  }, [loadSessions, refreshKey, user])
+
+  useEffect(() => {
+    setAbilitiesOpen(!isMobile)
+  }, [isMobile])
+
+  useEffect(() => {
+    if (!currentSessionId) return
+    setSessions(prev =>
+      prev.map(session =>
+        session.id === currentSessionId
+          ? ({ ...session, mode: activeChatMode } as ChatSession)
+          : session,
+      ),
+    )
+  }, [activeChatMode, currentSessionId])
+
+  const requestDeleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setPendingDeleteSessionId(sessionId)
+  }
+
+  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (deletingSessionId) return
+    setDeletingSessionId(sessionId)
+    try {
+      await supabase.from('chat_messages').delete().eq('session_id', sessionId)
+      await supabase.from('chat_sessions').delete().eq('id', sessionId)
+      setSessions(prev => prev.filter(s => s.id !== sessionId))
+      setPendingDeleteSessionId(null)
+      if (currentSessionId === sessionId) {
+        onSelectSession('new', activeChatMode)
+        onFeatureChange('chat')
+      }
+    } catch (error) {
+      console.error('删除会话失败:', error)
+    } finally {
+      setDeletingSessionId(null)
+    }
+  }
+
+  const handleNewChat = () => {
+    onSelectSession('new', activeChatMode)
+    onFeatureChange('chat')
+    closeMobileSidebar()
+  }
+
+  const groupedSessions = useMemo(() => groupSessionsByDate(sessions), [sessions])
+
+  const closeMobileSidebar = () => {
+    if (isMobile) setOpenMobile(false)
+  }
+
+  const handleModeSelect = (mode: ChatMode) => {
+    onChatModeChange(mode)
+    onFeatureChange('chat')
+    closeMobileSidebar()
+  }
+
+  const handleFeatureSelect = (feature: FeatureType) => {
+    onFeatureChange(feature)
+    closeMobileSidebar()
+  }
+
+  return (
+    <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border bg-sidebar/95">
+      <SidebarHeader className="p-3 pb-2">
+        <div className="flex items-center justify-between gap-2 px-1 py-1">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="relative w-8 h-8 shrink-0">
+              <Image
+                src="/logo.jpg"
+                alt="卜卜象"
+                fill
+                className="object-contain rounded-full"
+              />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-sidebar-foreground truncate">卜卜象</p>
+              <p className="hidden text-[11px] text-muted-foreground truncate sm:block md:block">小象命理小站</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={closeMobileSidebar}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground md:hidden"
+            title="关闭侧边栏"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <button
+          onClick={handleNewChat}
+          className="mt-1.5 flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-sidebar-border bg-card/70 text-sm text-sidebar-foreground hover:bg-card transition-colors md:mt-2 md:h-9"
+        >
+          <Plus className="w-4 h-4" />
+          找小象聊聊
+        </button>
+      </SidebarHeader>
+
+      <SidebarContent className="gap-1 overflow-hidden px-2">
+        <SidebarGroup className="order-2 py-1.5 md:order-1 md:py-2">
+          <SidebarGroupLabel className="hidden h-6 px-2 text-[11px] text-muted-foreground/70 md:flex">对话模式</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-sidebar-accent/55 p-1">
+              <button
+                type="button"
+                onClick={() => handleModeSelect('agent')}
+                className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
+                  activeFeature === 'chat' && activeChatMode === 'agent'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Bot className="w-3.5 h-3.5" />
+                Agent
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeSelect('classic')}
+                className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
+                  activeFeature === 'chat' && activeChatMode === 'classic'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                经典
+              </button>
+            </div>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup className="order-3 py-1 md:order-2 md:py-2">
+          <Collapsible open={abilitiesOpen} onOpenChange={setAbilitiesOpen}>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex h-8 w-full items-center justify-between rounded-lg px-2 text-left text-[11px] text-muted-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>小象会什么</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[10px] md:hidden">{abilitiesOpen ? '收起' : `${featureItems.length} 项`}</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${abilitiesOpen ? 'rotate-180' : ''}`} />
+                </span>
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-1">
+              <SidebarGroupContent>
+                <SidebarMenu className="grid grid-cols-2 gap-1 md:flex md:flex-col">
+                  {featureItems.map(item => {
+                    const Icon = item.icon
+                    return (
+                      <SidebarMenuItem key={item.id}>
+                        <SidebarMenuButton
+                          isActive={activeFeature === item.id}
+                          onClick={() => handleFeatureSelect(item.id)}
+                          tooltip={item.label}
+                          className="h-9 gap-2 rounded-lg px-2"
+                        >
+                          <Icon className="w-4 h-4" />
+                          <span className="flex-1 truncate text-xs md:text-sm">{item.label}</span>
+                          <span className="hidden text-[10px] text-muted-foreground/70 md:inline">×{item.cost}</span>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </SidebarGroup>
+
+        <SidebarSeparator className="order-4 hidden md:block" />
+
+        <SidebarGroup className="order-1 flex-1 min-h-0 py-1 md:order-4 md:py-2">
+          <SidebarGroupLabel className="h-7 justify-between px-2 text-[11px] text-muted-foreground/70">
+            <span>聊天记录</span>
+            {user && sessions.length > 0 && (
+              <span className="rounded-full bg-sidebar-accent px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {sessions.length}
+              </span>
+            )}
+          </SidebarGroupLabel>
+          <SidebarGroupContent className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {!user ? (
+              <p className="px-3 py-6 text-xs text-muted-foreground text-center">登录后，小象才会记得你的足迹</p>
+            ) : loadingSessions ? (
+              <p className="px-3 py-6 text-xs text-muted-foreground text-center">小象在翻记录...</p>
+            ) : sessions.length === 0 ? (
+              <p className="px-3 py-6 text-xs text-muted-foreground text-center">还没有和小象聊过</p>
+            ) : (
+              <div className="space-y-3">
+                {groupedSessions.map(group => (
+                  <div key={group.label}>
+                    <p className="px-2 py-1 text-[10px] font-medium text-muted-foreground/60 uppercase tracking-wider">{group.label}</p>
+                    <SidebarMenu>
+                      {group.sessions.map(session => {
+                        const isConfirmingDelete = pendingDeleteSessionId === session.id
+                        const isDeleting = deletingSessionId === session.id
+                        return (
+                          <SidebarMenuItem key={session.id}>
+                            {isConfirmingDelete ? (
+                              <div
+                                className="flex min-h-9 w-full items-center gap-2 rounded-lg border border-destructive/25 bg-destructive/8 px-2 py-1.5"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-medium text-destructive">
+                                    真的删掉这段对话？
+                                  </p>
+                                  <p className="truncate text-[10px] text-muted-foreground">
+                                    {session.title || '新对话'}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(event) => handleDeleteSession(session.id, event)}
+                                  disabled={isDeleting}
+                                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-destructive text-destructive-foreground transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+                                  title="确认删除"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    if (!isDeleting) setPendingDeleteSessionId(null)
+                                  }}
+                                  disabled={isDeleting}
+                                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground transition-colors hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+                                  title="取消"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <SidebarMenuButton
+                                  isActive={currentSessionId === session.id}
+                                  onClick={() => {
+                                    setPendingDeleteSessionId(null)
+                                    onSelectSession(session.id, ((session as any).mode === 'agent' ? 'agent' : 'classic'))
+                                    onFeatureChange('chat')
+                                    closeMobileSidebar()
+                                  }}
+                                >
+                                  <span className="truncate text-sm flex-1">{session.title || '新对话'}</span>
+                                  {((session as any).mode === 'agent') && (
+                                    <Bot className="w-3 h-3 text-primary/70" />
+                                  )}
+                                </SidebarMenuButton>
+                                <SidebarMenuAction
+                                  showOnHover
+                                  onClick={(e) => requestDeleteSession(session.id, e)}
+                                  title="删除"
+                                  className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </SidebarMenuAction>
+                              </>
+                            )}
+                          </SidebarMenuItem>
+                        )
+                      })}
+                    </SidebarMenu>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+
+      {/* ---- Footer: 用户区域 ---- */}
+      <SidebarFooter className="p-2 border-t border-sidebar-border">
+        {/* Apple quota display */}
+        {user && appleQuota && (
+          <button
+            onClick={onOpenDonation}
+            className="w-full bg-secondary/40 rounded-lg px-3 py-2 flex items-center justify-between hover:bg-secondary/60 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm">🍎</span>
+              <span className="text-xs font-light text-sidebar-foreground">
+                今日苹果篮 {appleQuota.remaining}/{appleQuota.dailyLimit}
+              </span>
+            </div>
+            {appleQuota.isPaid && (
+              <span className="bg-accent/20 text-accent rounded-full px-2 py-0.5 text-[10px] font-light">
+                VIP
+              </span>
+            )}
+          </button>
+        )}
+        {!user ? (
+          <button
+            onClick={onOpenAuth}
+            className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all"
+          >
+            登录 / 注册
+          </button>
+        ) : (
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-sidebar-accent transition-colors"
+            >
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground shrink-0">
+                <User className="w-4 h-4" />
+              </div>
+              <span className="text-sm text-sidebar-foreground truncate flex-1 text-left">{user.email}</span>
+              <Settings className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </button>
+
+            {showUserMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+                <div className="absolute left-1 bottom-full mb-2 w-56 bg-card backdrop-blur-md border border-border rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="py-1.5">
+                    <button
+                      onClick={() => { onOpenProfiles(); setShowUserMenu(false); closeMobileSidebar() }}
+                      className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-muted transition-colors flex items-center gap-2"
+                    >
+                      <UserCircle className="w-4 h-4" />
+                      人物管理
+                    </button>
+                    <button
+                      onClick={() => { onOpenChangePassword(); setShowUserMenu(false); closeMobileSidebar() }}
+                      className="w-full px-3 py-2 text-left text-sm text-foreground hover:bg-muted transition-colors flex items-center gap-2"
+                    >
+                      <KeyRound className="w-4 h-4" />
+                      修改密码
+                    </button>
+                    <SidebarSeparator className="my-1" />
+                    <button
+                      onClick={async () => { await signOut(); setShowUserMenu(false); closeMobileSidebar() }}
+                      className="w-full px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-2"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      退出登录
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </SidebarFooter>
+    </Sidebar>
+  )
+}

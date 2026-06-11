@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react"
 import { Calendar, X, ChevronDown, MapPin } from "lucide-react"
 import { OptimizedSelect } from "./optimized-select"
+import { BAZI_HOUR_GROUPS, normalizeBaziHourValue } from "@/lib/bazi-time-options"
+import { loadGeodata, type LocationData } from "@/lib/geodata-client"
 
 interface BaziData {
   year: string;
@@ -23,17 +25,11 @@ interface BaziDialogProps {
   initialData?: BaziData;
 }
 
-interface LocationData {
-  area: string;
-  city: string;
-  country: string;
-  lat: string;
-  lng: string;
-  province: string;
-}
-
 export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialogProps) {
-  const [baziData, setBaziData] = useState<BaziData>(initialData || {
+  const [baziData, setBaziData] = useState<BaziData>(initialData ? {
+    ...initialData,
+    hour: normalizeBaziHourValue(initialData.hour),
+  } : {
     year: '1995',
     month: '1',
     day: '1',
@@ -51,11 +47,15 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
   const [selectedProvince, setSelectedProvince] = useState<string>('');
   const [selectedCity, setSelectedCity] = useState<string>('');
   const [isCustomLocation, setIsCustomLocation] = useState(false);
+  const [formNotice, setFormNotice] = useState('');
 
   // 当 initialData 变化时更新 baziData
   useEffect(() => {
     if (initialData) {
-      setBaziData(initialData);
+      setBaziData({
+        ...initialData,
+        hour: normalizeBaziHourValue(initialData.hour),
+      });
     }
   }, [initialData]);
 
@@ -71,17 +71,13 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
     }));
   }, []);
 
-  // 静态时间选项 - 避免重复计算
-  const hourOptions = useMemo(() => 
-    Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')), []
-  );
-
   // 加载地理位置数据 - 只加载一次
   useEffect(() => {
     if (isOpen && locationData.length === 0) {
-      fetch('/geodata/data.json')
-        .then(response => response.json())
+      let cancelled = false
+      loadGeodata()
         .then((data: LocationData[]) => {
+          if (cancelled) return
           setLocationData(data);
           
           // 提取省份列表（去重）
@@ -93,6 +89,9 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
         .catch(error => {
           console.error('加载地理位置数据失败:', error);
         });
+      return () => {
+        cancelled = true
+      }
     }
   }, [isOpen, locationData.length]);
 
@@ -165,15 +164,19 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
   }, []);
 
   const handleTimeChange = useCallback((field: 'hour' | 'minute', value: string) => {
-    setBaziData(prev => ({ ...prev, [field]: value }));
+    setBaziData(prev => ({
+      ...prev,
+      [field]: field === 'hour' ? normalizeBaziHourValue(value) : value,
+    }));
   }, []);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
+    setFormNotice('');
     
     // 验证必填字段
     if (!baziData.year || !baziData.month || !baziData.day || !baziData.hour) {
-      alert('请填写完整的出生日期和时间信息');
+      setFormNotice('卜卜象还差一点点出生日期和时间，补齐后我就能稳稳排盘啦。');
       return;
     }
     
@@ -205,11 +208,17 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
           <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center">
             <Calendar className="w-4 h-4 text-primary-foreground" />
           </div>
-          <h2 className="text-xl font-light text-foreground">八字排盘</h2>
+          <h2 className="text-xl font-light text-foreground">给小象补八字资料</h2>
         </div>
 
         {/* 表单 */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {formNotice && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm font-light text-foreground">
+              {formNotice}
+            </div>
+          )}
+
           {/* 日期选择 */}
           <div className="space-y-3">
             <label className="block text-sm font-light text-foreground">
@@ -276,16 +285,20 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
             <div className="grid grid-cols-2 gap-4">
               <div className="relative">
                 <select
-                  value={baziData.hour}
+                  value={normalizeBaziHourValue(baziData.hour)}
                   onChange={(e) => handleTimeChange('hour', e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-card/60 border border-border text-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300 appearance-none cursor-pointer"
                   required
                 >
                   <option value="">时</option>
-                  {hourOptions.map(hour => (
-                    <option key={hour} value={hour}>
-                      {hour}时
-                    </option>
+                  {BAZI_HOUR_GROUPS.map(group => (
+                    <optgroup key={group.label} label={`${group.label} ${group.rangeLabel}`}>
+                      {group.hours.map(hour => (
+                        <option key={hour.value} value={hour.value}>
+                          {hour.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -322,7 +335,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                 }`}
               >
                 <MapPin className="w-3 h-3" />
-                自定义经纬度
+                自己填经纬度
               </button>
             </div>
 
@@ -438,20 +451,20 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
               }}
               className="px-4 py-2 rounded-full bg-accent/20 text-accent text-sm font-light hover:bg-accent/30 transition-all duration-300"
             >
-              示例
+              小象示例
             </button>
             <button
               type="button"
               onClick={onClose}
               className="px-4 py-2 rounded-full bg-muted text-muted-foreground text-sm font-light hover:bg-muted/80 transition-all duration-300"
             >
-              取消
+              先不填
             </button>
             <button
               type="submit"
               className="px-4 py-2 rounded-full bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
             >
-              确认
+              交给小象
             </button>
           </div>
         </form>

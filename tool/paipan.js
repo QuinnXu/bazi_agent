@@ -24,7 +24,7 @@ function paipan() {
     /**
      * 四柱是否区分"早晚子"时,true则23:00-24:00算成上一日柱
      */
-    this.zwz = true;
+    this.zwz = false;
 	/**
      * 是否采用精确法"排大运",用于起运处,粗略法一年按360天算,精确法按回归年算
      */
@@ -2870,9 +2870,29 @@ function analyzeBazi(year, month, day, hour, is_solar = true, is_female = false,
 年柱：${result.sz[0]} 月柱：${result.sz[1]} 日柱：${result.sz[2]} 时柱：${result.sz[3]}
 年龄 大运 年份:
 ${dayunStr}`;
-    return output;
+
+    // 返回纯文本 + 结构化数据
+    return {
+        text: output,
+        data: {
+            gender: is_female ? '女命' : '男命',
+            fourPillars: {
+                year: result.sz[0],
+                month: result.sz[1],
+                day: result.sz[2],
+                hour: result.sz[3]
+            },
+            dayun: result.dy.map(dy => ({
+                ageStart: dy.zqage,
+                ageEnd: dy.zqage + (dy.eyear - dy.syear),
+                ganZhi: dy.zfma + dy.zfmb,
+                yearStart: dy.syear,
+                yearEnd: dy.eyear
+            }))
+        }
+    };
 }
 
-module.exports = { analyzeBazi };
+module.exports = { analyzeBazi, paipan };
 
 

@@ -5,6 +5,16 @@ import { X, MessageSquare, Trash2, Plus } from 'lucide-react'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
 import type { ChatSession } from '@/types/database_v2'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 interface ChatSessionsDialogProps {
   isOpen: boolean
@@ -21,6 +31,8 @@ export function ChatSessionsDialog({
 }: ChatSessionsDialogProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [loading, setLoading] = useState(true)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
   const { user } = useAuth()
   const supabase = createBrowserClient()
 
@@ -52,25 +64,29 @@ export function ChatSessionsDialog({
 
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    
-    if (!confirm('确定要删除这个会话吗？')) return
+    setDeleteTargetId(sessionId)
+  }
 
+  const confirmDeleteSession = async () => {
+    if (!deleteTargetId) return
     try {
       // 删除会话的所有消息
       await supabase
         .from('chat_messages')
         .delete()
-        .eq('session_id', sessionId)
+        .eq('session_id', deleteTargetId)
 
       // 删除会话
       await supabase
         .from('chat_sessions')
         .delete()
-        .eq('id', sessionId)
+        .eq('id', deleteTargetId)
 
-      setSessions(sessions.filter(s => s.id !== sessionId))
+      setSessions(sessions.filter(s => s.id !== deleteTargetId))
+      setDeleteTargetId(null)
     } catch (error) {
       console.error('删除会话失败:', error)
+      setNotice('卜卜象刚才没能收好这段对话，等网络顺一点再试一次喔。')
     }
   }
 
@@ -82,6 +98,7 @@ export function ChatSessionsDialog({
   if (!isOpen) return null
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div 
         className="fixed inset-0 bg-black/20 backdrop-blur-sm"
@@ -97,25 +114,31 @@ export function ChatSessionsDialog({
         </button>
 
         <div className="mb-6">
-          <h2 className="text-2xl font-light text-foreground mb-2">聊天记录</h2>
-          <p className="text-sm text-muted-foreground">查看和管理您的聊天会话</p>
+          <h2 className="text-2xl font-light text-foreground mb-2">小象聊天足迹</h2>
+          <p className="text-sm text-muted-foreground">查看和管理你与卜卜象的对话</p>
         </div>
+
+        {notice && (
+          <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm font-light text-foreground">
+            {notice}
+          </div>
+        )}
 
         <button
           onClick={handleCreateSession}
           className="mb-4 w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2"
         >
           <Plus className="w-4 h-4" />
-          新建会话
+          找小象开新聊
         </button>
 
         <div className="flex-1 overflow-y-auto space-y-2">
           {loading ? (
-            <div className="text-center py-8 text-muted-foreground">加载中...</div>
+            <div className="text-center py-8 text-muted-foreground">小象在翻记录...</div>
           ) : sessions.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <MessageSquare className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
-              <p>暂无聊天记录</p>
+              <p>还没有和小象聊过</p>
             </div>
           ) : (
             sessions.map((session) => (
@@ -153,5 +176,25 @@ export function ChatSessionsDialog({
         </div>
       </div>
     </div>
+    <AlertDialog open={Boolean(deleteTargetId)} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+      <AlertDialogContent className="glass-minimal bg-card/95">
+        <AlertDialogHeader>
+          <AlertDialogTitle>要把这段对话收走吗？</AlertDialogTitle>
+          <AlertDialogDescription>
+            卜卜象会把这段聊天足迹从列表里移除，删掉后就不能再翻回来啦。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>先留着</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={confirmDeleteSession}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            确认删除
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
