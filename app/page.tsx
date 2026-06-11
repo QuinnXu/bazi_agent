@@ -630,6 +630,7 @@ function HomeContent() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const stopRequestedRef = useRef(false)
   const streamHadOutputRef = useRef(false)
+  const initialPromptAppliedRef = useRef(false)
   const autoScrollRef = useRef(true)
   const autoScrollFrameRef = useRef<number | null>(null)
   const autoScrollTimeoutRef = useRef<number | null>(null)
@@ -709,6 +710,19 @@ function HomeContent() {
   useEffect(() => {
     featureContextRef.current = featureContext
   }, [featureContext])
+
+  useEffect(() => {
+    if (initialPromptAppliedRef.current) return
+    initialPromptAppliedRef.current = true
+    const url = new URL(window.location.href)
+    const prompt = url.searchParams.get('prompt')?.trim()
+    if (prompt) setInput(prompt)
+    if (url.searchParams.has('prompt')) {
+      url.searchParams.delete('prompt')
+      const nextUrl = `${url.pathname}${url.search}${url.hash}`
+      window.history.replaceState(window.history.state, '', nextUrl || '/')
+    }
+  }, [])
 
   // Fetch apple quota when user changes
   const fetchQuota = useCallback(async () => {
