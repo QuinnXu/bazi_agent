@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     console.log('Bazi Analysis Results:', JSON.stringify(result, null, 2));
 
     return new Response(
-      JSON.stringify({ baziResult: result }),
+      JSON.stringify({ baziResult: result.text, baziData: result.data }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (error) {

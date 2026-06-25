@@ -19,17 +19,31 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { title } = await req.json()
+    const { title, mode = 'classic' } = await req.json()
 
     // 创建新会话
-    const { data: session, error } = await supabase
+    let { data: session, error } = await supabase
       .from('chat_sessions')
       .insert({
         user_id: user.id,
         title: title || '新对话',
+        mode: mode === 'agent' ? 'agent' : 'classic',
       })
       .select()
       .single()
+
+    if (error && String(error.message || '').includes('mode')) {
+      const retry = await supabase
+        .from('chat_sessions')
+        .insert({
+          user_id: user.id,
+          title: title || '新对话',
+        })
+        .select()
+        .single()
+      session = retry.data
+      error = retry.error
+    }
 
     if (error) {
       console.error('创建会话失败:', error)

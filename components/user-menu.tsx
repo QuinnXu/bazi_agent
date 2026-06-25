@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react'
-import { User, LogOut, MessageSquare, Users, Sun, Moon } from 'lucide-react'
+import { User, LogOut, MessageSquare, Users, Sun, Moon, KeyRound, Gift } from 'lucide-react'
 import { useAuth } from '@/contexts/auth-context'
 import { useTheme } from 'next-themes'
 
@@ -9,9 +9,12 @@ interface UserMenuProps {
   onOpenAuth: () => void
   onOpenSessions?: () => void
   onOpenProfiles?: () => void
+  onOpenChangePassword?: () => void
+  onOpenRewards?: () => void
+  appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null
 }
 
-export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles }: UserMenuProps) {
+export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles, onOpenChangePassword, onOpenRewards, appleQuota }: UserMenuProps) {
   const { user, signOut } = useAuth()
   const [showMenu, setShowMenu] = useState(false)
   const { theme, setTheme, resolvedTheme } = useTheme()
@@ -56,7 +59,7 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles }: UserMen
 
   if (!user) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex w-max items-center gap-2">
         <ThemeToggle />
         <button
           onClick={onOpenAuth}
@@ -69,7 +72,7 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles }: UserMen
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex w-max items-center gap-2">
       <ThemeToggle />
       <div className="relative">
         <button
@@ -91,6 +94,18 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles }: UserMen
                 <p className="text-sm font-medium text-foreground truncate">
                   {user.email}
                 </p>
+                {appleQuota && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs font-light text-muted-foreground">
+                      🍎 今日剩余 {appleQuota.remaining}/{appleQuota.dailyLimit}
+                    </span>
+                    {appleQuota.isPaid ? (
+                      <span className="bg-accent/20 text-accent rounded-full px-1.5 py-0.5 text-[10px] font-light">VIP</span>
+                    ) : (
+                      <span className="bg-secondary text-muted-foreground rounded-full px-1.5 py-0.5 text-[10px] font-light">免费</span>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="py-2">
                 {onOpenProfiles && (
@@ -118,7 +133,33 @@ export function UserMenu({ onOpenAuth, onOpenSessions, onOpenProfiles }: UserMen
                     聊天记录
                   </button>
                 )}
-                
+
+                {onOpenChangePassword && (
+                  <button
+                    onClick={() => {
+                      onOpenChangePassword()
+                      setShowMenu(false)
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-foreground hover:bg-muted transition-colors flex items-center gap-2"
+                  >
+                    <KeyRound className="w-4 h-4" />
+                    修改密码
+                  </button>
+                )}
+
+                {onOpenRewards && (
+                  <button
+                    onClick={() => {
+                      onOpenRewards()
+                      setShowMenu(false)
+                    }}
+                    className="w-full px-4 py-2 text-left text-sm text-foreground hover:bg-muted transition-colors flex items-center gap-2"
+                  >
+                    <Gift className="w-4 h-4" />
+                    推荐与兑换
+                  </button>
+                )}
+
                 <button
                   onClick={handleSignOut}
                   className="w-full px-4 py-2 text-left text-sm text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-2"

@@ -9,6 +9,14 @@ interface BaziProfile {
   id: string
   profile_name: string
   bazi_result_text: string | null
+  bazi_result: {
+    fourPillars?: {
+      year: string
+      month: string
+      day: string
+      hour: string
+    }
+  } | null
 }
 
 interface ProfileSelectorProps {
@@ -41,7 +49,7 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
     try {      // @ts-ignore - Database types will be generated after schema deployment
       const { data, error } = await supabase
         .from('bazi_profiles')
-        .select('id, profile_name, bazi_result_text')
+        .select('id, profile_name, bazi_result_text, bazi_result')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
 
@@ -84,13 +92,13 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
           e.stopPropagation()
           setShowDropdown(!showDropdown)
         }}
-        className="flex items-center gap-1.5 px-3 py-2 h-10 rounded-full bg-card/80 border border-border hover:bg-card transition-all duration-300"
+        className="flex items-center gap-1.5 px-3 py-2 h-10 w-28 rounded-full bg-card/80 border border-border hover:bg-card transition-all duration-300"
       >
-        <User className="w-3.5 h-3.5 text-muted-foreground" />
-        <span className="text-sm text-foreground max-w-[80px] truncate">
-          {profiles.length === 0 ? '添加人物' : (selectedProfile ? selectedProfile.profile_name : '选择人物')}
+        <User className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+        <span className="text-sm text-foreground flex-1 truncate text-left">
+          {profiles.length === 0 ? '加人物' : (selectedProfile ? selectedProfile.profile_name : '选人物')}
         </span>
-        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground transition-transform duration-300 ${showDropdown ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-300 ${showDropdown ? 'rotate-180' : ''}`} />
       </button>
 
       {showDropdown && (
@@ -103,7 +111,7 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
             <div className="py-2 max-h-64 overflow-y-auto">
               {profiles.length === 0 ? (
                 <div className="px-4 py-3 text-sm text-muted-foreground text-center">
-                  <p>暂无人物档案</p>
+                  <p>人物册还是空的</p>
                 </div>
               ) : (
                 <>
@@ -116,22 +124,29 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
                         : 'text-foreground hover:bg-muted/50'
                     }`}
                   >
-                    不选择人物
+                    先不选人物
                   </button>
-                  {profiles.map((profile) => (
-                    <button
-                      type="button"
-                      key={profile.id}
-                      onClick={() => handleSelect(profile.id)}
-                      className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                        selectedProfileId === profile.id
-                          ? 'bg-muted text-foreground'
-                          : 'text-foreground hover:bg-muted/50'
-                      }`}
-                    >
-                      {profile.profile_name}
-                    </button>
-                  ))}
+                  {profiles.map((profile) => {
+                    const fp = profile.bazi_result?.fourPillars
+                    const pillarsText = fp ? `${fp.year} ${fp.month} ${fp.day} ${fp.hour}` : null
+                    return (
+                      <button
+                        type="button"
+                        key={profile.id}
+                        onClick={() => handleSelect(profile.id)}
+                        className={`w-full px-4 py-2 text-left transition-colors ${
+                          selectedProfileId === profile.id
+                            ? 'bg-muted text-foreground'
+                            : 'text-foreground hover:bg-muted/50'
+                        }`}
+                      >
+                        <span className="text-sm block">{profile.profile_name}</span>
+                        {pillarsText && (
+                          <span className="text-[11px] text-muted-foreground block mt-0.5">{pillarsText}</span>
+                        )}
+                      </button>
+                    )
+                  })}
                 </>
               )}
               <div className="border-t border-border mt-1 pt-1">
@@ -144,7 +159,7 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
                   className="w-full px-4 py-2 text-left text-sm text-primary hover:bg-muted/50 transition-colors flex items-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
-                  新建人物
+                  给小象加人物
                 </button>
               </div>
             </div>
