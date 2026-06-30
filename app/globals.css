@@ -232,6 +232,112 @@
   .animate-fade-in {
     animation: fade-in 0.6s ease-out;
   }
+
+  @keyframes bubu-mode-enter {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.995);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .bubu-mode-enter {
+    animation: bubu-mode-enter 240ms cubic-bezier(0.22, 0.8, 0.28, 1) both;
+  }
+
+  .bubu-empty-grid {
+    display: grid;
+    width: 100%;
+    max-width: 48rem;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows:
+      4rem
+      7.5rem
+      2rem
+      minmax(15rem, auto)
+      minmax(4.75rem, auto);
+    row-gap: 0.75rem;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .bubu-empty-logo-slot,
+  .bubu-empty-copy-slot,
+  .bubu-empty-switch-slot,
+  .bubu-empty-cards-slot,
+  .bubu-empty-footer-slot {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .bubu-empty-logo-slot,
+  .bubu-empty-switch-slot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .bubu-empty-copy-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  .bubu-empty-cards-slot,
+  .bubu-empty-footer-slot {
+    align-self: start;
+  }
+
+  .bubu-mode-switch-indicator {
+    pointer-events: none;
+    position: absolute;
+    top: 0.125rem;
+    bottom: 0.125rem;
+    left: 0.125rem;
+    width: calc((100% - 0.25rem) / 2);
+    border-radius: 999px;
+    background: var(--primary);
+    box-shadow: 0 8px 18px oklch(0.696 0.137 3.34 / 0.20);
+    transition: transform 260ms cubic-bezier(0.22, 0.8, 0.28, 1);
+  }
+
+  @media (min-width: 640px) {
+    .bubu-empty-grid {
+      grid-template-rows:
+        6rem
+        7.5rem
+        2rem
+        minmax(13.5rem, auto)
+        minmax(4.75rem, auto);
+      row-gap: 1rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .bubu-empty-grid {
+      grid-template-rows:
+        6rem
+        7.5rem
+        2rem
+        minmax(6.5rem, auto)
+        minmax(4.75rem, auto);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bubu-mode-enter {
+      animation: fade-in 80ms linear both;
+    }
+
+    .bubu-mode-switch-indicator {
+      transition-duration: 1ms;
+    }
+  }
 }
 
 /* Pink crystal selection colors */
@@ -320,4 +426,554 @@ div {
 
 .bg-turning-point {
   background-color: var(--chart-3);
+}
+
+/* LiuYao immersive ritual and casting surfaces */
+.liuyao-breathing-field {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: min(15rem, 66vw);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.liuyao-breathing-field span {
+  position: absolute;
+  inset: 18%;
+  border: 1px solid oklch(0.696 0.137 3.34 / 0.18);
+  border-radius: 999px;
+  background: radial-gradient(circle, oklch(0.696 0.137 3.34 / 0.1), transparent 68%);
+  animation: liuyao-breathe 5.4s ease-in-out infinite;
+}
+
+.liuyao-breathing-field span:nth-child(2) {
+  inset: 8%;
+  animation-delay: -1.8s;
+  opacity: 0.65;
+}
+
+.liuyao-breathing-field span:nth-child(3) {
+  inset: 0;
+  animation-delay: -3.6s;
+  opacity: 0.38;
+}
+
+@keyframes liuyao-breathe {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.08);
+  }
+}
+
+.liuyao-coin-stage {
+  background:
+    radial-gradient(circle at 50% 42%, oklch(0.88 0.085 5 / 0.4), transparent 42%),
+    linear-gradient(180deg, oklch(0.985 0.014 5 / 0.92), oklch(0.97 0.025 350 / 0.78));
+  box-shadow: inset 0 0 4rem oklch(0.696 0.137 3.34 / 0.06);
+}
+
+.dark .liuyao-coin-stage {
+  background:
+    radial-gradient(circle at 50% 42%, oklch(0.64 0.11 5 / 0.2), transparent 44%),
+    linear-gradient(180deg, oklch(0.25 0.026 350 / 0.95), oklch(0.2 0.02 285 / 0.95));
+}
+
+.liuyao-coin-set {
+  display: flex;
+  gap: 1.375rem;
+  perspective: 700px;
+}
+
+.liuyao-question-focus {
+  position: relative;
+  isolation: isolate;
+  max-width: min(34rem, 100%);
+  margin: 0 auto;
+  padding: 0.5rem 0.25rem;
+  background:
+    linear-gradient(
+      92deg,
+      oklch(0.42 0.07 342),
+      oklch(0.62 0.12 350),
+      oklch(0.72 0.10 38),
+      oklch(0.58 0.08 340),
+      oklch(0.42 0.07 342)
+    );
+  background-size: 190% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-size: 1.125rem;
+  font-weight: 500;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  text-align: center;
+  transform-origin: center;
+  animation: liuyao-question-breathe 4.8s ease-in-out infinite;
+  filter:
+    drop-shadow(0 0 0.75rem oklch(0.696 0.137 3.34 / 0.16))
+    saturate(1.02);
+  will-change: opacity, transform, background-position, filter;
+}
+
+.liuyao-question-focus::before {
+  position: absolute;
+  inset: -0.75rem -1rem;
+  z-index: -1;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at center, oklch(0.86 0.06 35 / 0.18), transparent 42%),
+    radial-gradient(ellipse at 55% 52%, oklch(0.74 0.12 350 / 0.12), transparent 68%);
+  content: "";
+  opacity: 0.48;
+  transform: scale(0.96);
+  animation: liuyao-question-halo 4.8s ease-in-out infinite;
+  filter: blur(16px);
+}
+
+.dark .liuyao-question-focus {
+  background:
+    linear-gradient(
+      92deg,
+      oklch(0.86 0.05 345),
+      oklch(0.78 0.12 350),
+      oklch(0.84 0.08 48),
+      oklch(0.82 0.06 342),
+      oklch(0.86 0.05 345)
+    );
+  background-size: 190% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter:
+    drop-shadow(0 0 0.85rem oklch(0.78 0.13 325 / 0.24))
+    saturate(1.04);
+}
+
+.dark .liuyao-question-focus::before {
+  background:
+    radial-gradient(ellipse at center, oklch(0.82 0.08 35 / 0.12), transparent 42%),
+    radial-gradient(ellipse at 55% 52%, oklch(0.78 0.13 350 / 0.16), transparent 68%);
+}
+
+@supports not ((background-clip: text) or (-webkit-background-clip: text)) {
+  .liuyao-question-focus {
+    background: none;
+    color: var(--primary);
+  }
+}
+
+.liuyao-cast-status {
+  display: block;
+  max-width: 100%;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.liuyao-cast-status.is-active {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.liuyao-cast-button {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  min-width: 10rem;
+  height: 2.75rem;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  border: 1px solid oklch(0.696 0.137 3.34 / 0.32);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 0%, oklch(0.96 0.035 3 / 0.82), transparent 58%),
+    linear-gradient(180deg, oklch(0.995 0.01 5 / 0.96), oklch(0.94 0.04 350 / 0.9));
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 0.75rem 1.75rem oklch(0.696 0.137 3.34 / 0.16);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.dark .liuyao-cast-button {
+  background:
+    radial-gradient(circle at 50% 0%, oklch(0.48 0.095 350 / 0.42), transparent 58%),
+    linear-gradient(180deg, oklch(0.25 0.026 350 / 0.96), oklch(0.19 0.02 285 / 0.96));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0.75rem 1.75rem oklch(0.12 0.02 285 / 0.28);
+}
+
+.liuyao-cast-button:not(:disabled):hover {
+  border-color: oklch(0.696 0.137 3.34 / 0.46);
+  transform: translateY(-1px);
+}
+
+.liuyao-cast-button.is-holding {
+  border-color: oklch(0.696 0.137 3.34 / 0.64);
+  box-shadow:
+    inset 0 0.25rem 0.8rem oklch(0.696 0.137 3.34 / 0.18),
+    0 0 0 5px oklch(0.696 0.137 3.34 / 0.08),
+    0 0.55rem 1.25rem oklch(0.696 0.137 3.34 / 0.14);
+  transform: translateY(2px) scale(0.985);
+}
+
+.liuyao-cast-button.is-charged {
+  color: oklch(0.6 0.17 3.34);
+}
+
+.liuyao-cast-button.is-complete {
+  cursor: default;
+  opacity: 0.78;
+}
+
+.liuyao-cast-button-glow {
+  position: absolute;
+  inset: -30%;
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(circle, oklch(0.696 0.137 3.34 / 0.34), transparent 58%);
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.liuyao-cast-button.is-holding .liuyao-cast-button-glow {
+  animation: liuyao-button-pulse 0.9s ease-in-out infinite;
+  opacity: 1;
+  transform: scale(1);
+}
+
+.liuyao-cast-button-dot {
+  position: relative;
+  z-index: 1;
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 4px oklch(0.696 0.137 3.34 / 0.12);
+}
+
+.liuyao-cast-button.is-holding .liuyao-cast-button-dot {
+  animation: liuyao-button-dot 0.72s ease-in-out infinite;
+}
+
+.liuyao-cast-progress {
+  position: relative;
+  display: block;
+  width: min(10rem, 48vw);
+  height: 0.32rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: oklch(0.696 0.137 3.34 / 0.12);
+}
+
+.liuyao-cast-progress > span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, oklch(0.696 0.137 3.34), oklch(0.73 0.12 335));
+  transform-origin: left center;
+  transition: transform 40ms linear;
+}
+
+.liuyao-coin {
+  position: relative;
+  width: 4.25rem;
+  height: 4.25rem;
+  perspective: 700px;
+}
+
+.liuyao-coin.is-pending {
+  opacity: 0.58;
+  filter: saturate(0.72);
+}
+
+.liuyao-coin-inner {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.liuyao-coin.is-charging .liuyao-coin-inner {
+  animation:
+    liuyao-coin-spin var(--liuyao-coin-spin-duration, 520ms) linear infinite,
+    liuyao-coin-hover var(--liuyao-coin-hover-duration, 860ms) ease-in-out infinite;
+}
+
+.liuyao-coin.is-bu .liuyao-coin-inner {
+  transform: rotateY(180deg);
+}
+
+.liuyao-coin.is-logo.is-revealed .liuyao-coin-inner {
+  animation: liuyao-coin-settle-logo 0.68s cubic-bezier(0.2, 0.8, 0.3, 1.15) both;
+}
+
+.liuyao-coin.is-bu.is-revealed .liuyao-coin-inner {
+  animation: liuyao-coin-settle-bu 0.68s cubic-bezier(0.2, 0.8, 0.3, 1.15) both;
+}
+
+.liuyao-coin-face {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  filter: drop-shadow(0 9px 16px rgba(231, 111, 154, 0.18));
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.liuyao-coin-face-bu {
+  transform: rotateY(180deg);
+}
+
+.liuyao-coin.is-charging .liuyao-coin-face {
+  filter: drop-shadow(0 0 20px rgba(231, 111, 154, 0.36));
+}
+
+.liuyao-coin-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  object-fit: contain;
+}
+
+@keyframes liuyao-coin-spin {
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
+@keyframes liuyao-coin-hover {
+  50% {
+    translate: 0 -4px;
+  }
+}
+
+@keyframes liuyao-button-pulse {
+  50% {
+    opacity: 0.42;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes liuyao-button-dot {
+  50% {
+    box-shadow: 0 0 0 7px oklch(0.696 0.137 3.34 / 0.08);
+    transform: scale(0.86);
+  }
+}
+
+@keyframes liuyao-question-breathe {
+  0%,
+  100% {
+    background-position: 0% 50%;
+    opacity: 0.9;
+    transform: scale(0.985);
+    filter:
+      drop-shadow(0 0 0.55rem oklch(0.696 0.137 3.34 / 0.14))
+      brightness(0.98)
+      saturate(1.01);
+  }
+  50% {
+    background-position: 100% 50%;
+    opacity: 1;
+    transform: scale(1.025);
+    filter:
+      drop-shadow(0 0 1rem oklch(0.696 0.137 3.34 / 0.2))
+      brightness(1.06)
+      saturate(1.08);
+  }
+}
+
+@keyframes liuyao-question-halo {
+  0%,
+  100% {
+    opacity: 0.34;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 0.58;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes liuyao-coin-settle-logo {
+  0% {
+    transform: translateY(-24px) rotateY(900deg) scale(0.86);
+  }
+  65% {
+    transform: translateY(3px) rotateY(0deg) scale(1.04);
+  }
+  100% {
+    transform: translateY(0) rotateY(0deg) scale(1);
+  }
+}
+
+@keyframes liuyao-coin-settle-bu {
+  0% {
+    transform: translateY(-24px) rotateY(1080deg) scale(0.86);
+  }
+  65% {
+    transform: translateY(3px) rotateY(180deg) scale(1.04);
+  }
+  100% {
+    transform: translateY(0) rotateY(180deg) scale(1);
+  }
+}
+
+.liuyao-line-glyph {
+  position: relative;
+  display: block;
+  justify-self: center;
+  width: clamp(7rem, 34vw, 10rem);
+  height: 1rem;
+}
+
+.liuyao-line-glyph.is-pair {
+  width: clamp(4.75rem, 18vw, 7rem);
+}
+
+.liuyao-line-left,
+.liuyao-line-right,
+.liuyao-line-glyph.is-pending::before {
+  position: absolute;
+  top: 50%;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, oklch(0.696 0.137 3.34), oklch(0.68 0.105 320));
+  box-shadow: 0 2px 8px oklch(0.696 0.137 3.34 / 0.15);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.liuyao-line-glyph.is-pending::before {
+  inset-inline: 0;
+  background: var(--muted);
+  box-shadow: none;
+}
+
+.liuyao-line-glyph.is-yang .liuyao-line-left {
+  inset-inline: 0;
+}
+
+.liuyao-line-glyph.is-yin .liuyao-line-left,
+.liuyao-line-glyph.is-yin .liuyao-line-right {
+  width: calc((100% - 1.25rem) / 2);
+}
+
+.liuyao-line-glyph.is-yin .liuyao-line-left {
+  left: 0;
+}
+
+.liuyao-line-glyph.is-yin .liuyao-line-right {
+  right: 0;
+}
+
+.liuyao-line-glyph.is-transition .liuyao-line-left,
+.liuyao-line-glyph.is-transition .liuyao-line-right {
+  background: linear-gradient(90deg, oklch(0.844 0.115 40.07), oklch(0.696 0.137 3.34));
+  box-shadow: 0 2px 10px oklch(0.844 0.115 40.07 / 0.18);
+}
+
+.liuyao-line-mark {
+  position: absolute;
+  top: 50%;
+  right: -1.15rem;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  transform: translateY(-52%);
+}
+
+@media (max-width: 480px) {
+  .liuyao-question-focus {
+    padding-inline: 0.25rem;
+    font-size: 1.05rem;
+    line-height: 1.65;
+  }
+
+  .liuyao-coin-set {
+    gap: 0.875rem;
+  }
+
+  .liuyao-coin {
+    width: 3.625rem;
+    height: 3.625rem;
+  }
+
+  .liuyao-line-glyph {
+    width: clamp(6.5rem, 31vw, 8rem);
+  }
+
+  .liuyao-line-glyph.is-pair {
+    width: clamp(4.35rem, 23vw, 5.8rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liuyao-breathing-field span {
+    animation: none;
+    opacity: 0.38;
+  }
+
+  .liuyao-coin.is-charging .liuyao-coin-inner {
+    animation: none;
+    transform: translateY(-3px);
+  }
+
+  .liuyao-coin.is-logo.is-revealed .liuyao-coin-inner,
+  .liuyao-coin.is-bu.is-revealed .liuyao-coin-inner {
+    animation: fade-in 0.22s ease-out both;
+  }
+
+  .liuyao-cast-button,
+  .liuyao-cast-button-glow,
+  .liuyao-cast-button-dot,
+  .liuyao-cast-progress > span,
+  .liuyao-question-focus,
+  .liuyao-question-focus::before {
+    animation: none !important;
+    transition-duration: 1ms;
+  }
+
+  .liuyao-question-focus {
+    background-position: 50% 50%;
+    filter: drop-shadow(0 0 0.6rem oklch(0.696 0.137 3.34 / 0.14));
+    opacity: 1;
+    transform: none;
+  }
+
+  .liuyao-cast-button.is-holding {
+    transform: translateY(1px);
+  }
 }

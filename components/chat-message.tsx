@@ -1,10 +1,8 @@
 "use client"
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import dynamic from "next/dynamic"
 import Image from "next/image"
-import ReactMarkdown from "react-markdown"
-import rehypeHighlight from "rehype-highlight"
-import remarkGfm from "remark-gfm"
 import {
   CalendarRange,
   Check,
@@ -26,10 +24,24 @@ import {
   getBubuStreamLabel,
 } from "@/lib/bubu-content"
 import {
-  AgentInputRequest,
   type AgentInlineInputRequest,
   type AgentInputValues,
 } from "@/components/agent-input-request"
+
+const MarkdownRenderer = dynamic(
+  () => import("@/components/markdown-renderer").then(mod => mod.MarkdownRenderer),
+  {
+    ssr: false,
+    loading: () => <MessageSkeleton />,
+  },
+)
+
+const AgentInputRequest = dynamic(
+  () => import("@/components/agent-input-request").then(mod => mod.AgentInputRequest),
+  {
+    ssr: false,
+  },
+)
 
 export type MessageRunKind = "classic" | "agent" | "feature"
 
@@ -98,89 +110,6 @@ const DEFAULT_FOLLOW_UPS = BUBU_FOLLOW_UP_DEFAULTS
 const FOLLOW_UP_LIMIT = 3
 const STREAM_REVEAL_FRAME_MS = 22
 const STREAM_REVEAL_CATCHUP_CHARS = 360
-
-const markdownComponents = {
-  h1: ({ children }: { children?: React.ReactNode }) => (
-    <h1 className="text-xl font-semibold mt-6 mb-3 text-foreground first:mt-0">{children}</h1>
-  ),
-  h2: ({ children }: { children?: React.ReactNode }) => (
-    <h2 className="text-lg font-semibold mt-5 mb-2 text-foreground first:mt-0">{children}</h2>
-  ),
-  h3: ({ children }: { children?: React.ReactNode }) => (
-    <h3 className="text-base font-semibold mt-4 mb-2 text-foreground first:mt-0">{children}</h3>
-  ),
-  h4: ({ children }: { children?: React.ReactNode }) => (
-    <h4 className="text-sm font-semibold mt-3 mb-1 text-foreground first:mt-0">{children}</h4>
-  ),
-  p: ({ children }: { children?: React.ReactNode }) => (
-    <p className="my-3 leading-relaxed first:mt-0 last:mb-0">{children}</p>
-  ),
-  ul: ({ children }: { children?: React.ReactNode }) => (
-    <ul className="my-3 ml-5 list-disc space-y-1.5 first:mt-0 last:mb-0">{children}</ul>
-  ),
-  ol: ({ children }: { children?: React.ReactNode }) => (
-    <ol className="my-3 ml-5 list-decimal space-y-1.5 first:mt-0 last:mb-0">{children}</ol>
-  ),
-  li: ({ children }: { children?: React.ReactNode }) => (
-    <li className="leading-relaxed pl-1">{children}</li>
-  ),
-  strong: ({ children }: { children?: React.ReactNode }) => (
-    <strong className="font-semibold text-accent">{children}</strong>
-  ),
-  em: ({ children }: { children?: React.ReactNode }) => (
-    <em className="italic text-muted-foreground">{children}</em>
-  ),
-  code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
-    const isInline = !className
-    if (isInline) {
-      return (
-        <code className="px-1.5 py-0.5 bg-muted text-primary rounded text-sm font-mono">
-          {children}
-        </code>
-      )
-    }
-    return <code className={className}>{children}</code>
-  },
-  pre: ({ children }: { children?: React.ReactNode }) => (
-    <pre className="my-4 p-4 bg-muted border border-border rounded-lg overflow-x-auto text-sm font-mono">
-      {children}
-    </pre>
-  ),
-  blockquote: ({ children }: { children?: React.ReactNode }) => (
-    <blockquote className="my-4 pl-4 py-2 border-l-4 border-primary bg-primary/5 text-foreground rounded-r-lg">
-      {children}
-    </blockquote>
-  ),
-  a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
-    >
-      {children}
-    </a>
-  ),
-  hr: () => <hr className="my-6 border-border" />,
-  table: ({ children }: { children?: React.ReactNode }) => (
-    <div className="my-4 overflow-x-auto rounded-lg border border-border">
-      <table className="min-w-full border-collapse">{children}</table>
-    </div>
-  ),
-  thead: ({ children }: { children?: React.ReactNode }) => <thead className="bg-muted">{children}</thead>,
-  th: ({ children }: { children?: React.ReactNode }) => (
-    <th className="px-4 py-2 border-b border-border text-left font-medium text-foreground">{children}</th>
-  ),
-  td: ({ children }: { children?: React.ReactNode }) => (
-    <td className="px-4 py-2 border-b border-border">{children}</td>
-  ),
-  tr: ({ children }: { children?: React.ReactNode }) => (
-    <tr className="hover:bg-muted/50 transition-colors">{children}</tr>
-  ),
-}
-
-const markdownRemarkPlugins = [remarkGfm]
-const markdownRehypePlugins = [rehypeHighlight]
 
 export function detectFeatureKindFromContent(content: string): FeatureKind | null {
   if (!content) return null
@@ -571,24 +500,6 @@ function FollowUp({
   )
 }
 
-const MarkdownRenderer = memo(function MarkdownRenderer({
-  content,
-  enableHighlight = true,
-}: {
-  content: string
-  enableHighlight?: boolean
-}) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={markdownRemarkPlugins}
-      rehypePlugins={enableHighlight ? markdownRehypePlugins : []}
-      components={markdownComponents}
-    >
-      {content}
-    </ReactMarkdown>
-  )
-})
-
 function MessageSkeleton() {
   return (
     <div className="space-y-3 py-1">
@@ -934,7 +845,7 @@ const ChatMessage = memo(function ChatMessage({
         >
           <div className="mb-3 flex items-center gap-2 text-[11px] text-muted-foreground">
             <span className="h-7 w-7 flex-shrink-0 overflow-hidden rounded-lg border border-primary/20 bg-card shadow-sm">
-              <Image src="/avatar.png" alt="卜卜象" width={28} height={28} className="h-full w-full object-contain" />
+              <Image src="/avatar-small.png" alt="卜卜象" width={28} height={28} className="h-full w-full object-contain" />
             </span>
             <span className="font-medium text-foreground/80">卜卜象</span>
             <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-muted/55 px-2 py-0.5 text-[10px] text-muted-foreground">

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import Image from 'next/image'
 import {
   MessageCircle,
-  Bot,
+  Coins,
   Check,
   Users,
   CalendarRange,
@@ -47,7 +47,7 @@ import type { ChatSession } from '@/types/database_v2'
 import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 
 export type FeatureType = 'chat' | 'hepan' | 'fortune' | 'avatar' | 'lifepath'
-export type ChatMode = 'classic' | 'agent'
+export type ChatMode = 'classic' | 'agent' | 'liuyao'
 
 interface AppSidebarProps {
   activeFeature: FeatureType
@@ -272,20 +272,20 @@ export function AppSidebar({
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <Bot className="w-3.5 h-3.5" />
-                Agent
+                <MessageCircle className="w-3.5 h-3.5" />
+                本命屋
               </button>
               <button
                 type="button"
-                onClick={() => handleModeSelect('classic')}
+                onClick={() => handleModeSelect('liuyao')}
                 className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
-                  activeFeature === 'chat' && activeChatMode === 'classic'
+                  activeFeature === 'chat' && activeChatMode === 'liuyao'
                     ? 'bg-card text-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <MessageCircle className="w-3.5 h-3.5" />
-                经典
+                <Coins className="w-3.5 h-3.5" />
+                卜卜卦
               </button>
             </div>
           </SidebarGroupContent>
@@ -404,14 +404,21 @@ export function AppSidebar({
                                   isActive={currentSessionId === session.id}
                                   onClick={() => {
                                     setPendingDeleteSessionId(null)
-                                    onSelectSession(session.id, ((session as any).mode === 'agent' ? 'agent' : 'classic'))
+                                    const mode = (session as any).mode
+                                    onSelectSession(
+                                      session.id,
+                                      mode === 'agent' ? 'agent' : mode === 'liuyao' ? 'liuyao' : 'classic',
+                                    )
                                     onFeatureChange('chat')
                                     closeMobileSidebar()
                                   }}
                                 >
                                   <span className="truncate text-sm flex-1">{session.title || '新对话'}</span>
                                   {((session as any).mode === 'agent') && (
-                                    <Bot className="w-3 h-3 text-primary/70" />
+                                    <MessageCircle className="w-3 h-3 text-primary/70" />
+                                  )}
+                                  {((session as any).mode === 'liuyao') && (
+                                    <Coins className="w-3 h-3 text-primary/70" />
                                   )}
                                 </SidebarMenuButton>
                                 <SidebarMenuAction

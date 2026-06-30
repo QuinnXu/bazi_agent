@@ -8,8 +8,8 @@ import {
   PanelLeftClose,
   PanelLeft,
   X,
-  Bot,
   MessageCircle,
+  Coins,
   CheckCircle2,
   Brain,
   MessageSquareText,
@@ -37,6 +37,7 @@ import { createBrowserClient } from "@/lib/supabase/client"
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar"
 import { toast } from "@/hooks/use-toast"
 import { AppSidebar, type ChatMode, type FeatureType } from "@/components/app-sidebar"
+import { BubuEmptyModeShell } from "@/components/bubu-empty-mode-shell"
 import { FeatureCards } from "@/components/feature-cards"
 import { FeatureLauncherButton } from "@/components/feature-launcher-button"
 import { detectFeatureKindFromContent } from "@/components/chat-message"
@@ -75,6 +76,7 @@ const HepanPage = dynamic(() => import("@/components/features/hepan-page").then(
 const FortunePage = dynamic(() => import("@/components/features/fortune-page").then(mod => mod.FortunePage), { ssr: false })
 const AvatarPage = dynamic(() => import("@/components/features/avatar-page").then(mod => mod.AvatarPage), { ssr: false })
 const LifePathPage = dynamic(() => import("@/components/features/lifepath-page").then(mod => mod.LifePathPage), { ssr: false })
+const LiuYaoChat = dynamic(() => import("@/components/liuyao-chat").then(mod => mod.LiuYaoChat), { ssr: false })
 
 interface Message {
   id: string;
@@ -707,6 +709,7 @@ function HomeContent() {
   const autoScrollTimeoutRef = useRef<number | null>(null)
   const lastAutoScrollAtRef = useRef(0)
   const lastScrollTopRef = useRef(0)
+  const scrollFrameRef = useRef<number | null>(null)
   const { user, loading: authLoading } = useAuth()
   const supabase = useMemo(() => createBrowserClient(), [])
   const { toggleSidebar, open: sidebarOpen } = useSidebar()
@@ -719,6 +722,7 @@ function HomeContent() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const [currentSessionMode, setCurrentSessionMode] = useState<ChatMode>('agent')
   const [activeChatMode, setActiveChatMode] = useState<ChatMode>('agent')
+  const [liuYaoResetKey, setLiuYaoResetKey] = useState(0)
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
   const [agentComplexity, setAgentComplexity] = useState<AgentComplexityMode>('instant')
   const [messages, setMessages] = useState<Message[]>([])
@@ -785,6 +789,8 @@ function HomeContent() {
 
   const messagesRef = useRef<Message[]>([])
   const featureContextRef = useRef<FeatureContext | null>(null)
+  const guestTranscriptPayloadRef = useRef<GuestTranscriptPayload | null>(null)
+  const guestTranscriptSaveTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     messagesRef.current = messages
@@ -793,6 +799,39 @@ function HomeContent() {
   useEffect(() => {
     featureContextRef.current = featureContext
   }, [featureContext])
+
+  const flushGuestTranscriptPayload = useCallback(() => {
+    if (typeof window === 'undefined') return
+    if (guestTranscriptSaveTimerRef.current !== null) {
+      window.clearTimeout(guestTranscriptSaveTimerRef.current)
+      guestTranscriptSaveTimerRef.current = null
+    }
+    const payload = guestTranscriptPayloadRef.current
+    try {
+      if (!payload) {
+        window.localStorage.removeItem(GUEST_TRANSCRIPT_STORAGE_KEY)
+        return
+      }
+      window.localStorage.setItem(GUEST_TRANSCRIPT_STORAGE_KEY, JSON.stringify(payload))
+    } catch (error) {
+      console.warn('[guest-trial] 保存本地试用记录失败:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const flushOnVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushGuestTranscriptPayload()
+      }
+    }
+    window.addEventListener('pagehide', flushGuestTranscriptPayload)
+    document.addEventListener('visibilitychange', flushOnVisibilityChange)
+    return () => {
+      window.removeEventListener('pagehide', flushGuestTranscriptPayload)
+      document.removeEventListener('visibilitychange', flushOnVisibilityChange)
+    }
+  }, [flushGuestTranscriptPayload])
 
   const markGuestTrialFinalAnswerUsed = useCallback(() => {
     setGuestFinalAnswerUsed(true)
@@ -804,7 +843,18 @@ function HomeContent() {
   }, [])
 
   useEffect(() => {
-    if (typeof window === 'undefined' || user) return
+    if (typeof window === 'undefined') return
+    if (user) {
+      if (guestTranscriptPayloadRef.current) {
+        flushGuestTranscriptPayload()
+      } else if (guestTranscriptSaveTimerRef.current !== null) {
+        window.clearTimeout(guestTranscriptSaveTimerRef.current)
+        guestTranscriptSaveTimerRef.current = null
+      }
+      guestTranscriptPayloadRef.current = null
+      return
+    }
+
     const transcriptMessages: GuestTranscriptMessage[] = messages
       .filter(message => (
         (message.role === 'user' || message.role === 'assistant') &&
@@ -820,11 +870,12 @@ function HomeContent() {
       }))
 
     if (transcriptMessages.length === 0) {
-      window.localStorage.removeItem(GUEST_TRANSCRIPT_STORAGE_KEY)
+      guestTranscriptPayloadRef.current = null
+      flushGuestTranscriptPayload()
       return
     }
 
-    const payload: GuestTranscriptPayload = {
+    guestTranscriptPayloadRef.current = {
       version: 1,
       messages: transcriptMessages,
       activeChatMode: 'agent',
@@ -835,15 +886,20 @@ function HomeContent() {
       selectedProfile,
       baziAnalysisResult,
     }
-    try {
-      window.localStorage.setItem(GUEST_TRANSCRIPT_STORAGE_KEY, JSON.stringify(payload))
-    } catch (error) {
-      console.warn('[guest-trial] 保存本地试用记录失败:', error)
+
+    const timerId = window.setTimeout(flushGuestTranscriptPayload, 350)
+    guestTranscriptSaveTimerRef.current = timerId
+    return () => {
+      if (guestTranscriptSaveTimerRef.current === timerId) {
+        window.clearTimeout(timerId)
+        guestTranscriptSaveTimerRef.current = null
+      }
     }
   }, [
     activeChatMode,
     baziAnalysisResult,
     featureContext,
+    flushGuestTranscriptPayload,
     guestFinalAnswerUsed,
     guestOnboardingQuestion,
     messages,
@@ -1191,6 +1247,14 @@ function HomeContent() {
     setSessionListRefreshKey(key => key + 1)
   }, [])
 
+  const handleLiuYaoSessionCreated = useCallback((sessionId: string) => {
+    beginSessionView(sessionId)
+    setCurrentSessionId(sessionId)
+    setCurrentSessionMode('liuyao')
+    setActiveChatMode('liuyao')
+    refreshSessionList()
+  }, [beginSessionView, refreshSessionList])
+
   useEffect(() => {
     if (!user || typeof window === 'undefined' || guestTranscriptMigrationRef.current) return
     const raw = window.localStorage.getItem(GUEST_TRANSCRIPT_STORAGE_KEY)
@@ -1335,28 +1399,41 @@ function HomeContent() {
     if (!container) return
 
     const handleScroll = () => {
-      // Show button when scrolled down more than 300px
-      setShowScrollTop(container.scrollTop > 300)
-      const distanceFromBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight
-      const isNearBottom = distanceFromBottom < 96
-      const scrollingUp = container.scrollTop < lastScrollTopRef.current - 4
-      lastScrollTopRef.current = container.scrollTop
+      if (scrollFrameRef.current !== null) return
+      scrollFrameRef.current = window.requestAnimationFrame(() => {
+        scrollFrameRef.current = null
+        // Show button when scrolled down more than 300px
+        setShowScrollTop(prev => {
+          const next = container.scrollTop > 300
+          return prev === next ? prev : next
+        })
+        const distanceFromBottom =
+          container.scrollHeight - container.scrollTop - container.clientHeight
+        const isNearBottom = distanceFromBottom < 96
+        const scrollingUp = container.scrollTop < lastScrollTopRef.current - 4
+        lastScrollTopRef.current = container.scrollTop
 
-      if (isNearBottom) {
-        autoScrollRef.current = true
-        setShowJumpLatest(false)
-        return
-      }
+        if (isNearBottom) {
+          autoScrollRef.current = true
+          setShowJumpLatest(prev => prev ? false : prev)
+          return
+        }
 
-      if (isLoading || scrollingUp) {
-        autoScrollRef.current = false
-        if (isLoading) setShowJumpLatest(true)
-      }
+        if (isLoading || scrollingUp) {
+          autoScrollRef.current = false
+          if (isLoading) setShowJumpLatest(prev => prev ? prev : true)
+        }
+      })
     }
 
     container.addEventListener('scroll', handleScroll)
-    return () => container.removeEventListener('scroll', handleScroll)
+    return () => {
+      container.removeEventListener('scroll', handleScroll)
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
+      }
+    }
   }, [isLoading])
 
   const cancelScheduledAutoScroll = useCallback(() => {
@@ -1597,6 +1674,7 @@ function HomeContent() {
       const nextMode = modeHint || activeChatMode
       setCurrentSessionMode(nextMode)
       setActiveChatMode(nextMode)
+      if (nextMode === 'liuyao') setLiuYaoResetKey(key => key + 1)
       setFeatureContext(null)
       setSessionSummary(null)
       setAgentPendingConfirmation(null)
@@ -1620,8 +1698,33 @@ function HomeContent() {
         .eq('id', sessionId)
         .single()
       if (sessionError) throw sessionError
+      const storedMode = (sessionData as any)?.mode
       const sessionMode: ChatMode =
-        ((sessionData as any)?.mode === 'agent' ? 'agent' : modeHint || 'classic')
+        storedMode === 'agent'
+          ? 'agent'
+          : storedMode === 'liuyao'
+            ? 'liuyao'
+            : modeHint || 'classic'
+
+      if (sessionMode === 'liuyao') {
+        if (!isLatestSessionLoad()) return
+        startTransition(() => {
+          setMessages([])
+          setCurrentSessionMode('liuyao')
+          setActiveChatMode('liuyao')
+          setFeatureContext(null)
+          setSessionSummary((sessionData as any)?.summary || null)
+          setAgentPendingConfirmation(null)
+          setAgentParticipants([])
+          setAgentTimeRanges([])
+          setAgentReportPreference(null)
+          setMentionOpen(false)
+          setIsSessionLoading(false)
+        })
+        selectedSessionIdRef.current = sessionId
+        setCurrentSessionId(sessionId)
+        return
+      }
 
       const { data, error } = await supabase
         .from('chat_messages')
@@ -1963,6 +2066,28 @@ function HomeContent() {
       return
     }
     if (mode === activeChatMode) return
+    if (mode === 'liuyao') {
+      beginSessionView(null)
+      selectedSessionIdRef.current = null
+      setCurrentSessionId(null)
+      setActiveChatMode('liuyao')
+      setCurrentSessionMode('liuyao')
+      setMentionOpen(false)
+      setComposerModeOpen(false)
+      setLiuYaoResetKey(key => key + 1)
+      return
+    }
+    if (activeChatMode === 'liuyao' || currentSessionMode === 'liuyao') {
+      beginSessionView(null)
+      selectedSessionIdRef.current = null
+      setCurrentSessionId(null)
+      setMessages([])
+      setActiveChatMode(mode)
+      setCurrentSessionMode(mode)
+      setMentionOpen(false)
+      setComposerModeOpen(false)
+      return
+    }
     setActiveChatMode(mode)
     setCurrentSessionMode(mode)
     setMentionOpen(false)
@@ -1978,7 +2103,7 @@ function HomeContent() {
           }
         })
     }
-  }, [activeChatMode, currentSessionId, isTemporaryChat, supabase, user])
+  }, [activeChatMode, beginSessionView, currentSessionId, currentSessionMode, isTemporaryChat, supabase, user])
 
   const handleTemporaryChatToggle = useCallback(() => {
     if (!user || isLoading || isAnalyzing) return
@@ -2582,16 +2707,23 @@ function HomeContent() {
     streamHadOutputRef.current = false
 
     const isNewSession = !currentSessionId
+    let userPersistPromise: Promise<void> = Promise.resolve()
     if (shouldPersistChat) {
       sessionId = await ensureSession(effectiveChatMode)
       if (sessionId) {
-        await saveMessage(sessionId, 'user', userMessage.content, effectiveChatMode)
-        // 新建会话时，用第一条消息作为标题
-        if (isNewSession) {
-          const titleText = userMessage.content.slice(0, 30) + (userMessage.content.length > 30 ? '...' : '')
-          await supabase.from('chat_sessions').update({ title: titleText }).eq('id', sessionId)
-          refreshSessionList()
-        }
+        userPersistPromise = (async () => {
+          try {
+            await saveMessage(sessionId!, 'user', userMessage.content, effectiveChatMode)
+            // 新建会话时，用第一条消息作为标题
+            if (isNewSession) {
+              const titleText = userMessage.content.slice(0, 30) + (userMessage.content.length > 30 ? '...' : '')
+              await supabase.from('chat_sessions').update({ title: titleText }).eq('id', sessionId!)
+              refreshSessionList()
+            }
+          } catch (error) {
+            console.error('保存用户消息失败:', error)
+          }
+        })()
       }
     }
 
@@ -2880,6 +3012,7 @@ function HomeContent() {
           })
         }
         if (shouldPersistChat && sessionId && finalContent) {
+          await userPersistPromise
           await saveMessage(sessionId, 'assistant', finalContent, effectiveChatMode, {
             model: llmMeta.model,
             tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
@@ -2986,6 +3119,7 @@ function HomeContent() {
           })
         }
         if (shouldPersistChat && sessionId && finalContent) {
+          await userPersistPromise
           await saveMessage(sessionId, 'assistant', finalContent, effectiveChatMode, {
             model: llmMeta.model,
             tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
@@ -3029,6 +3163,7 @@ function HomeContent() {
           setMessages(prev => [...prev, stoppedMessage])
         }
         if (shouldPersistChat && sessionId && stoppedContent) {
+          await userPersistPromise
           await saveMessage(sessionId, 'assistant', stoppedContent, effectiveChatMode)
         }
         return
@@ -3056,6 +3191,7 @@ function HomeContent() {
         setMessages(prev => [...prev, errorMessage]);
       }
       if (shouldPersistChat && sessionId) {
+        await userPersistPromise
         await saveMessage(sessionId, 'assistant', BUBU_EMPTY_RESPONSE.genericError, effectiveChatMode)
       }
     } finally {
@@ -3176,15 +3312,22 @@ function HomeContent() {
     streamHadOutputRef.current = false
 
     const isNewSession = !currentSessionId
+    let userPersistPromise: Promise<void> = Promise.resolve()
     if (user) {
       sessionId = await ensureSession(activeChatMode)
       if (sessionId) {
-        await saveMessage(sessionId, 'user', userMessage.content, activeChatMode)
-        if (isNewSession) {
-          const titleText = summary.slice(0, 30) + (summary.length > 30 ? '...' : '')
-          await supabase.from('chat_sessions').update({ title: titleText }).eq('id', sessionId)
-          refreshSessionList()
-        }
+        userPersistPromise = (async () => {
+          try {
+            await saveMessage(sessionId!, 'user', userMessage.content, activeChatMode)
+            if (isNewSession) {
+              const titleText = summary.slice(0, 30) + (summary.length > 30 ? '...' : '')
+              await supabase.from('chat_sessions').update({ title: titleText }).eq('id', sessionId!)
+              refreshSessionList()
+            }
+          } catch (error) {
+            console.error('保存功能请求失败:', error)
+          }
+        })()
       }
     }
 
@@ -3305,6 +3448,7 @@ function HomeContent() {
           })
         }
         if (user && sessionId && finalContent) {
+          await userPersistPromise
           await saveMessage(sessionId, 'assistant', finalContent, activeChatMode, {
             model: llmMeta.model,
             tokensUsed: llmMeta.inputTokens + estimateTokensForText(finalContent),
@@ -3364,6 +3508,7 @@ function HomeContent() {
           setMessages(prev => [...prev, stoppedMessage])
         }
         if (user && sessionId && stoppedContent) {
+          await userPersistPromise
           await saveMessage(sessionId, 'assistant', stoppedContent, activeChatMode)
         }
         fetchQuota()
@@ -3392,6 +3537,7 @@ function HomeContent() {
         setMessages(prev => [...prev, errorMessage])
       }
       if (user && sessionId) {
+        await userPersistPromise
         await saveMessage(sessionId, 'assistant', BUBU_EMPTY_RESPONSE.featureError, activeChatMode)
       }
       // Server-side refund already happened; refresh quota to reflect
@@ -3529,7 +3675,7 @@ function HomeContent() {
       const infoMessage: Message = {
         id: createBubuMessageId('assistant'),
         role: 'assistant',
-        content: '小象已经把这个人物收进资料里啦。需要分析时，在人物管理或 Agent 上下文里选 TA，我就能结合命盘继续看。',
+        content: '小象已经把这个人物收进资料里啦。需要分析时，在人物管理或本命屋上下文里选 TA，我就能结合命盘继续看。',
         createdAt: new Date(),
         mode: activeChatMode,
       };
@@ -3912,8 +4058,8 @@ function HomeContent() {
   const composerModeTitle =
     activeChatMode === 'agent'
       ? agentComplexity === 'instant'
-        ? 'Agent Instant，快速编排'
-        : `Agent ${composerModeLabel}，提高规划和报告上限`
+        ? '本命屋 Instant，快速编排'
+        : `本命屋 ${composerModeLabel}，提高规划和报告上限`
       : isUltraMode
       ? `经典投喂模式，每次消耗 ${CLASSIC_CHAT_APPLE_COST} 个苹果`
       : '经典聊天，不消耗苹果'
@@ -3924,6 +4070,30 @@ function HomeContent() {
       : selectedProfile
       ? [selectedProfile]
       : []
+
+  const chatRenderItems = useMemo(() => {
+    let previousUserContent: string | undefined
+    let previousReportType: FeatureKind | undefined
+
+    return messages.map((message, index) => {
+      if (message.role === 'user') {
+        previousUserContent = message.content
+        previousReportType = detectFeatureKindFromContent(message.content) || undefined
+        return {
+          message,
+          previousUserContent: undefined,
+          reportType: undefined,
+          isLastAssistant: false,
+        }
+      }
+      return {
+        message,
+        previousUserContent,
+        reportType: previousReportType,
+        isLastAssistant: index === messages.length - 1,
+      }
+    })
+  }, [messages])
 
   const renderComposerModeMenu = () => (
     !user ? (
@@ -3961,7 +4131,7 @@ function HomeContent() {
         {composerModeOpen && (
           <div className="glass-minimal absolute bottom-full right-0 z-50 mb-3 w-60 overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl">
             <div className="px-3 pb-2 pt-1 text-xs text-muted-foreground">
-              {activeChatMode === 'agent' ? 'Agent 深度' : '经典选项'}
+              {activeChatMode === 'agent' ? '本命屋深度' : '经典选项'}
             </div>
             {activeChatMode === 'classic' ? (
               <>
@@ -4023,32 +4193,38 @@ function HomeContent() {
   )
 
   const renderModeSwitch = () => (
-    <div className="inline-grid h-8 grid-cols-2 rounded-full border border-border/70 bg-muted/45 p-0.5 shadow-sm">
+    <div className="bubu-mode-switch relative grid h-8 w-[11.5rem] grid-cols-2 rounded-full border border-border/70 bg-muted/45 p-0.5 shadow-sm">
+      <span
+        aria-hidden="true"
+        className={`bubu-mode-switch-indicator ${
+          activeChatMode === 'liuyao' ? 'translate-x-full' : 'translate-x-0'
+        }`}
+      />
       <button
         type="button"
         onClick={() => handleChatModeChange('agent')}
-        className={`h-7 px-3 rounded-full text-xs font-light flex items-center justify-center gap-1.5 transition-all ${
+        className={`relative z-10 h-7 rounded-full px-3 text-xs font-light flex items-center justify-center gap-1.5 transition-colors ${
           activeChatMode === 'agent'
-            ? 'bg-primary text-primary-foreground'
+            ? 'text-primary-foreground'
             : 'text-muted-foreground hover:text-foreground'
         }`}
-        title="Agent 对话"
+        title="本命屋"
       >
-        <Bot className="w-3.5 h-3.5" />
-        Agent
+        <MessageCircle className="w-3.5 h-3.5" />
+        本命屋
       </button>
       <button
         type="button"
-        onClick={() => handleChatModeChange('classic')}
-        className={`h-7 px-3 rounded-full text-xs font-light flex items-center justify-center gap-1.5 transition-all ${
-          activeChatMode === 'classic'
-            ? 'bg-primary text-primary-foreground'
+        onClick={() => handleChatModeChange('liuyao')}
+        className={`relative z-10 h-7 rounded-full px-3 text-xs font-light flex items-center justify-center gap-1.5 transition-colors ${
+          activeChatMode === 'liuyao'
+            ? 'text-primary-foreground'
             : 'text-muted-foreground hover:text-foreground'
         }`}
-        title="经典聊天"
+        title="卜卜卦"
       >
-        <MessageCircle className="w-3.5 h-3.5" />
-        经典
+        <Coins className="w-3.5 h-3.5" />
+        卜卜卦
       </button>
     </div>
   )
@@ -4074,35 +4250,16 @@ function HomeContent() {
               <div className="ml-auto h-10 w-64 max-w-[82%] rounded-2xl bg-primary/18 md:rounded-lg" />
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex min-h-[calc(100dvh-14rem)] items-center justify-center py-6 md:py-8">
-              <div className="w-full space-y-5 text-center md:space-y-7">
-                <div className="space-y-3 md:space-y-4">
-                  <div className="flex justify-center">
-                    <div className="relative h-16 w-16 sm:h-24 sm:w-24">
-                      <Image
-                        src="/logo.jpg"
-                        alt="卜卜象"
-                        fill
-                        className="object-contain rounded-full shadow-sm"
-                        priority
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <h1 className="text-3xl font-light leading-tight text-foreground sm:text-4xl md:text-5xl">
-                      卜卜象陪你卜卜象
-                    </h1>
-                    <p className="mx-auto max-w-xl px-4 text-sm font-light leading-relaxed text-muted-foreground md:text-base">
-                      {activeChatMode === 'agent'
-                        ? 'Agent 会判断问题、补问关键信息，并在需要时调用结构化分析。'
-                        : '可以直接提问八字命理，也可以从下方选择一个结构化功能开始 🐘'}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap justify-center gap-2">
-                    {renderModeSwitch()}
-                  </div>
-                </div>
-
+            <BubuEmptyModeShell
+              modeKey={activeChatMode}
+              title="卜卜象陪你卜卜象"
+              description={
+                activeChatMode === 'agent'
+                  ? '本命屋会判断问题、补问关键信息，并在需要时调用结构化分析。'
+                  : '可以直接提问八字命理，也可以从下方选择一个结构化功能开始 🐘'
+              }
+              modeSwitch={renderModeSwitch()}
+              cards={(
                 <FeatureCards
                   onPick={(kind) => {
                     if (!user) {
@@ -4113,39 +4270,24 @@ function HomeContent() {
                     setActiveFeature(kind as FeatureType)
                   }}
                 />
-
-                {!user && (
-                  <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-lg border border-border bg-card/70 px-4 py-3 text-center backdrop-blur-sm">
-                    <p className="text-xs sm:text-sm text-muted-foreground font-light">
-                      可以先试用一次简洁回答；登录后可保存人物档案、同步聊天记录，并继续对话。
-                    </p>
-                    <button
-                      onClick={() => setShowAuthDialog(true)}
-                      className="h-9 rounded-lg bg-primary px-5 text-sm font-light text-primary-foreground hover:opacity-90 transition-all"
-                    >
-                      登录 / 注册
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+              )}
+              footer={!user && (
+                <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-lg border border-border bg-card/70 px-4 py-3 text-center backdrop-blur-sm">
+                  <p className="text-xs sm:text-sm text-muted-foreground font-light">
+                    可以先试用一次简洁回答；登录后可保存人物档案、同步聊天记录，并继续对话。
+                  </p>
+                  <button
+                    onClick={() => setShowAuthDialog(true)}
+                    className="h-9 rounded-lg bg-primary px-5 text-sm font-light text-primary-foreground hover:opacity-90 transition-all"
+                  >
+                    登录 / 注册
+                  </button>
+                </div>
+              )}
+            />
           ) : (
             <div className="space-y-4 py-3 md:space-y-6 md:py-4">
-              {messages.map((message, idx) => {
-                let reportType: FeatureKind | undefined
-                let previousUserContent: string | undefined
-                if (message.role === 'assistant') {
-                  for (let i = idx - 1; i >= 0; i--) {
-                    if (messages[i].role === 'user') {
-                      previousUserContent = messages[i].content
-                      const k = detectFeatureKindFromContent(messages[i].content)
-                      if (k) reportType = k
-                      break
-                    }
-                  }
-                }
-                const isLastAssistant =
-                  message.role === 'assistant' && idx === messages.length - 1
+              {chatRenderItems.map(({ message, reportType, previousUserContent, isLastAssistant }) => {
                 return (
                   <div
                     key={message.id}
@@ -4255,7 +4397,7 @@ function HomeContent() {
               <div className="glass-minimal absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-h-[min(26rem,calc(100dvh-12rem))] max-w-xl overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
                 <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2 text-xs text-muted-foreground">
                   <Plus className="w-3.5 h-3.5" />
-                  添加 Agent 上下文
+                  添加本命屋上下文
                 </div>
                 <div className="max-h-96 overflow-y-auto py-1">
                   <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground/70">
@@ -4497,7 +4639,7 @@ function HomeContent() {
                     }}
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card/80 text-muted-foreground hover:bg-card hover:text-foreground transition-all"
                     disabled={isLoading || isAnalyzing}
-                    title="添加 Agent 上下文"
+                    title="添加本命屋上下文"
                   >
                     <Plus className={`w-4 h-4 transition-transform ${mentionOpen ? 'rotate-45' : ''}`} />
                   </button>
@@ -4582,7 +4724,17 @@ function HomeContent() {
   const renderFeatureContent = () => {
     switch (activeFeature) {
       case 'chat':
-        return renderChatArea()
+        return activeChatMode === 'liuyao'
+          ? (
+            <LiuYaoChat
+              resetKey={liuYaoResetKey}
+              currentSessionId={currentSessionId}
+              modeSwitch={renderModeSwitch()}
+              onSessionCreated={handleLiuYaoSessionCreated}
+              onSessionListRefresh={refreshSessionList}
+            />
+          )
+          : renderChatArea()
       case 'hepan':
         return (
           <HepanPage
@@ -4653,7 +4805,7 @@ function HomeContent() {
           <div className="pointer-events-none absolute inset-x-16 top-3 z-20 flex h-10 items-center justify-center md:hidden">
             <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-border/55 bg-card/80 px-3 py-1.5 shadow-sm backdrop-blur-xl">
               <span className="relative h-5 w-5 overflow-hidden rounded-full">
-                <Image src="/avatar.png" alt="卜卜象" fill className="object-contain" />
+                <Image src="/avatar-small.png" alt="卜卜象" fill className="object-contain" />
               </span>
               <span className="truncate text-sm font-medium text-foreground">卜卜象</span>
             </div>

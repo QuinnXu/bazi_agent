@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
     -- Session metadata
     title TEXT DEFAULT 'New Conversation',
     summary TEXT,
-    mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent')),
+    mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent', 'liuyao')),
     
     -- Session statistics
     message_count INTEGER DEFAULT 0,
@@ -140,11 +140,12 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
     -- Message content
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
     content TEXT NOT NULL,
-    mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent')),
+    mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent', 'liuyao')),
     
     -- Message metadata
     model TEXT,
     tokens_used INTEGER,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
     
     -- Message status
     is_edited BOOLEAN DEFAULT FALSE,
@@ -157,16 +158,30 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
 
 -- Minimal dual-mode extension for existing deployments.
 ALTER TABLE public.chat_sessions
-    ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent'));
+    ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent', 'liuyao'));
 
 ALTER TABLE public.chat_messages
-    ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent'));
+    ADD COLUMN IF NOT EXISTS mode TEXT DEFAULT 'classic' CHECK (mode IN ('classic', 'agent', 'liuyao'));
 
 ALTER TABLE public.chat_messages
     ADD COLUMN IF NOT EXISTS model TEXT;
 
 ALTER TABLE public.chat_messages
     ADD COLUMN IF NOT EXISTS tokens_used INTEGER;
+
+ALTER TABLE public.chat_messages
+    ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::JSONB;
+
+CREATE TABLE IF NOT EXISTS public.chat_session_contexts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES public.chat_sessions(id) ON DELETE CASCADE,
+    context_type TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    payload JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (session_id, context_type)
+);
 
 -- ============================================
 -- 4b. LLM Usage Events Table
@@ -452,6 +467,7 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON public.chat_messages(
 CREATE INDEX IF NOT EXISTS idx_chat_messages_role ON public.chat_messages(session_id, role);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_mode ON public.chat_messages(session_id, mode);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_tokens ON public.chat_messages(session_id, tokens_used);
+CREATE INDEX IF NOT EXISTS idx_chat_session_contexts_session ON public.chat_session_contexts(session_id);
 
 -- Message Feedback indexes
 CREATE INDEX IF NOT EXISTS idx_message_feedback_user_id ON public.message_feedback(user_id);
@@ -493,6 +509,7 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bazi_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chat_session_contexts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.message_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.llm_usage_events ENABLE ROW LEVEL SECURITY;
@@ -618,6 +635,57 @@ CREATE POLICY "Users can delete own chat messages"
     );
 
 -- ============================================
+-- Chat Session Contexts Table Policies
+-- ============================================
+
+CREATE POLICY "Users can view own chat session contexts"
+    ON public.chat_session_contexts FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.chat_sessions
+            WHERE chat_sessions.id = chat_session_contexts.session_id
+            AND chat_sessions.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can insert own chat session contexts"
+    ON public.chat_session_contexts FOR INSERT
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.chat_sessions
+            WHERE chat_sessions.id = chat_session_contexts.session_id
+            AND chat_sessions.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can update own chat session contexts"
+    ON public.chat_session_contexts FOR UPDATE
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.chat_sessions
+            WHERE chat_sessions.id = chat_session_contexts.session_id
+            AND chat_sessions.user_id = auth.uid()
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.chat_sessions
+            WHERE chat_sessions.id = chat_session_contexts.session_id
+            AND chat_sessions.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Users can delete own chat session contexts"
+    ON public.chat_session_contexts FOR DELETE
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.chat_sessions
+            WHERE chat_sessions.id = chat_session_contexts.session_id
+            AND chat_sessions.user_id = auth.uid()
+        )
+    );
+
+-- ============================================
 -- LLM Usage Events Table Policies
 -- ============================================
 
@@ -732,6 +800,11 @@ CREATE TRIGGER update_guest_trial_usage_updated_at
 
 CREATE TRIGGER update_chat_sessions_updated_at
     BEFORE UPDATE ON public.chat_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_chat_session_contexts_updated_at
+    BEFORE UPDATE ON public.chat_session_contexts
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 

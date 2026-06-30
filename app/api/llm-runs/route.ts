@@ -111,7 +111,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ runs: [] })
     }
 
-    const { data: activeRuns, error } = await serviceSupabase
+    const activeRunsQuery = serviceSupabase
       .from('llm_runs')
       .select(RUN_SELECT_FIELDS)
       .eq('user_id', user.id)
@@ -119,15 +119,9 @@ export async function GET(req: Request) {
       .in('status', [...ACTIVE_STATUSES])
       .order('created_at', { ascending: false })
       .limit(3)
-    if (error) {
-      if (isDurableRunsSchemaUnavailable(error)) {
-        return NextResponse.json({ runs: [], available: false, reason: 'schema_unavailable' })
-      }
-      throw error
-    }
 
     const completedSince = new Date(Date.now() - RECENT_COMPLETED_LOOKBACK_MS).toISOString()
-    const { data: completedRuns, error: completedError } = await serviceSupabase
+    const completedRunsQuery = serviceSupabase
       .from('llm_runs')
       .select(RUN_SELECT_FIELDS)
       .eq('user_id', user.id)
@@ -136,6 +130,18 @@ export async function GET(req: Request) {
       .gte('updated_at', completedSince)
       .order('updated_at', { ascending: false })
       .limit(3)
+
+    const [
+      { data: activeRuns, error },
+      { data: completedRuns, error: completedError },
+    ] = await Promise.all([activeRunsQuery, completedRunsQuery])
+    if (error) {
+      if (isDurableRunsSchemaUnavailable(error)) {
+        return NextResponse.json({ runs: [], available: false, reason: 'schema_unavailable' })
+      }
+      throw error
+    }
+
     if (completedError) {
       if (isDurableRunsSchemaUnavailable(completedError)) {
         return NextResponse.json({ runs: [], available: false, reason: 'schema_unavailable' })

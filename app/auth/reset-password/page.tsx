@@ -39,7 +39,7 @@ function Header({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="mb-6 flex items-start gap-3">
       <span className="h-11 w-11 flex-shrink-0 overflow-hidden rounded-xl border border-primary/20 bg-card shadow-sm">
-        <Image src="/avatar.png" alt="卜卜象" width={44} height={44} className="h-full w-full object-contain" />
+        <Image src="/avatar-small.png" alt="卜卜象" width={44} height={44} className="h-full w-full object-contain" />
       </span>
       <div className="min-w-0">
         <h1 className="text-2xl font-light text-foreground mb-2">{title}</h1>

@@ -77,7 +77,7 @@ const KV_SECTIONS = [
     id: "能力",
     kicker: "AI 陪伴",
     title: "日常问题直接问，系统会判断下一步。",
-    description: "事业、关系、选择、状态复盘都可以先用自然语言说清楚。简洁 Agent 和经典聊天适合轻量试用，深度报告再进入结构化流程。",
+    description: "事业、关系、选择、状态复盘都可以先用自然语言说清楚。本命屋适合自然对话，卜卜卦则用完整六爻流程起卦解卦。",
     image: "/landing/insight-kv.png",
     alt: "抽象玻璃界面展示结构化洞察和 AI 分析",
   },
@@ -280,7 +280,7 @@ export default function LandingPage() {
               轻量先试，深度能力再消耗苹果。
             </h2>
             <p className="mt-4 text-sm font-light leading-7 text-muted-foreground sm:text-base">
-              经典聊天和简洁 Agent 可先试用；结构化能力按当前配置每次消耗 1 个苹果。所有入口都会继续进入主 chat，而不是在首页收集个人信息。
+              本命屋可先试用简洁回答；登录后还可以进入卜卜卦完成六次起爻与解卦。所有入口都会继续进入主 chat，而不是在首页收集个人信息。
             </p>
             <Button
               type="button"

@@ -4,6 +4,9 @@ export const runtime = 'nodejs'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { NextRequest } from 'next/server'
 
+const CHAT_SESSION_SELECT =
+  'id, user_id, bazi_profile_id, title, summary, mode, message_count, status, created_at, updated_at, last_message_at'
+
 // 创建新会话
 export async function POST(req: NextRequest) {
   try {
@@ -22,15 +25,17 @@ export async function POST(req: NextRequest) {
     const { title, mode = 'classic' } = await req.json()
 
     // 创建新会话
-    let { data: session, error } = await supabase
+    const created = await supabase
       .from('chat_sessions')
       .insert({
         user_id: user.id,
         title: title || '新对话',
-        mode: mode === 'agent' ? 'agent' : 'classic',
+        mode: mode === 'agent' || mode === 'liuyao' ? mode : 'classic',
       })
-      .select()
+      .select(CHAT_SESSION_SELECT)
       .single()
+    let session: any = created.data
+    let error = created.error
 
     if (error && String(error.message || '').includes('mode')) {
       const retry = await supabase
@@ -39,7 +44,7 @@ export async function POST(req: NextRequest) {
           user_id: user.id,
           title: title || '新对话',
         })
-        .select()
+        .select('id, user_id, title, summary, created_at, updated_at')
         .single()
       session = retry.data
       error = retry.error
@@ -84,7 +89,7 @@ export async function GET(req: NextRequest) {
     // 获取用户的所有会话
     const { data: sessions, error } = await supabase
       .from('chat_sessions')
-      .select('*')
+      .select(CHAT_SESSION_SELECT)
       .eq('user_id', user.id)
       .order('updated_at', { ascending: false })
 

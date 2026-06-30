@@ -56,7 +56,7 @@ export function FeatureCards({ onPick, showCost = true }: FeatureCardsProps) {
             <button
               key={item.id}
               onClick={() => onPick(item.id)}
-              className="group min-h-[82px] min-w-0 rounded-lg border border-border bg-card/76 p-2.5 text-left backdrop-blur-sm transition-all duration-200 hover:border-primary/35 hover:bg-card hover:shadow-sm sm:min-h-[104px] sm:p-3"
+              className="group h-[132px] min-w-0 rounded-lg border border-border bg-card/76 p-3 text-left backdrop-blur-sm transition-all duration-200 hover:border-primary/35 hover:bg-card hover:shadow-sm sm:h-[132px]"
             >
               <div className="flex h-full flex-col justify-between gap-3">
                 <div className="flex items-center justify-between gap-2">
@@ -75,7 +75,7 @@ export function FeatureCards({ onPick, showCost = true }: FeatureCardsProps) {
                   <h3 className="text-sm font-medium text-foreground leading-snug truncate">
                     {item.title}
                   </h3>
-                  <p className="mt-1 line-clamp-1 text-[11px] font-light leading-snug text-muted-foreground sm:text-xs">
+                  <p className="mt-1 line-clamp-2 text-[11px] font-light leading-snug text-muted-foreground sm:text-xs">
                     {item.description}
                   </p>
                 </div>

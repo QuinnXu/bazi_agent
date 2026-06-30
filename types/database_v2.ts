@@ -129,7 +129,7 @@ export interface Database {
           bazi_profile_id: string | null
           title: string
           summary: string | null
-          mode: 'classic' | 'agent'
+          mode: 'classic' | 'agent' | 'liuyao'
           message_count: number
           status: 'active' | 'archived' | 'deleted'
           created_at: string
@@ -142,7 +142,7 @@ export interface Database {
           bazi_profile_id?: string | null
           title?: string
           summary?: string | null
-          mode?: 'classic' | 'agent'
+          mode?: 'classic' | 'agent' | 'liuyao'
           message_count?: number
           status?: 'active' | 'archived' | 'deleted'
           created_at?: string
@@ -153,7 +153,7 @@ export interface Database {
           bazi_profile_id?: string | null
           title?: string
           summary?: string | null
-          mode?: 'classic' | 'agent'
+          mode?: 'classic' | 'agent' | 'liuyao'
           message_count?: number
           status?: 'active' | 'archived' | 'deleted'
           updated_at?: string
@@ -171,9 +171,10 @@ export interface Database {
           session_id: string
           role: 'user' | 'assistant' | 'system'
           content: string
-          mode: 'classic' | 'agent'
+          mode: 'classic' | 'agent' | 'liuyao'
           model: string | null
           tokens_used: number | null
+          metadata: Record<string, unknown>
           is_edited: boolean
           is_deleted: boolean
           created_at: string
@@ -184,9 +185,10 @@ export interface Database {
           session_id: string
           role: 'user' | 'assistant' | 'system'
           content: string
-          mode?: 'classic' | 'agent'
+          mode?: 'classic' | 'agent' | 'liuyao'
           model?: string | null
           tokens_used?: number | null
+          metadata?: Record<string, unknown>
           is_edited?: boolean
           is_deleted?: boolean
           created_at?: string
@@ -195,12 +197,41 @@ export interface Database {
         Update: {
           role?: 'user' | 'assistant' | 'system'
           content?: string
-          mode?: 'classic' | 'agent'
+          mode?: 'classic' | 'agent' | 'liuyao'
           model?: string | null
           tokens_used?: number | null
+          metadata?: Record<string, unknown>
           is_edited?: boolean
           is_deleted?: boolean
           edited_at?: string | null
+        }
+        Relationships: []
+      }
+
+      chat_session_contexts: {
+        Row: {
+          id: string
+          session_id: string
+          context_type: string
+          version: number
+          payload: Record<string, unknown>
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          session_id: string
+          context_type: string
+          version?: number
+          payload?: Record<string, unknown>
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          context_type?: string
+          version?: number
+          payload?: Record<string, unknown>
+          updated_at?: string
         }
         Relationships: []
       }
@@ -885,6 +916,7 @@ export type Profile = Database['public']['Tables']['profiles']['Row']
 export type BaziProfile = Database['public']['Tables']['bazi_profiles']['Row']
 export type ChatSession = Database['public']['Tables']['chat_sessions']['Row']
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row']
+export type ChatSessionContext = Database['public']['Tables']['chat_session_contexts']['Row']
 export type LlmUsageEvent = Database['public']['Tables']['llm_usage_events']['Row']
 export type GuestTrialUsage = Database['public']['Tables']['guest_trial_usage']['Row']
 export type Referral = Database['public']['Tables']['referrals']['Row']
@@ -902,6 +934,7 @@ export type ProfileInsert = Database['public']['Tables']['profiles']['Insert']
 export type BaziProfileInsert = Database['public']['Tables']['bazi_profiles']['Insert']
 export type ChatSessionInsert = Database['public']['Tables']['chat_sessions']['Insert']
 export type ChatMessageInsert = Database['public']['Tables']['chat_messages']['Insert']
+export type ChatSessionContextInsert = Database['public']['Tables']['chat_session_contexts']['Insert']
 export type LlmUsageEventInsert = Database['public']['Tables']['llm_usage_events']['Insert']
 export type GuestTrialUsageInsert = Database['public']['Tables']['guest_trial_usage']['Insert']
 export type ReferralInsert = Database['public']['Tables']['referrals']['Insert']
@@ -919,6 +952,7 @@ export type ProfileUpdate = Database['public']['Tables']['profiles']['Update']
 export type BaziProfileUpdate = Database['public']['Tables']['bazi_profiles']['Update']
 export type ChatSessionUpdate = Database['public']['Tables']['chat_sessions']['Update']
 export type ChatMessageUpdate = Database['public']['Tables']['chat_messages']['Update']
+export type ChatSessionContextUpdate = Database['public']['Tables']['chat_session_contexts']['Update']
 export type LlmUsageEventUpdate = Database['public']['Tables']['llm_usage_events']['Update']
 export type GuestTrialUsageUpdate = Database['public']['Tables']['guest_trial_usage']['Update']
 export type ReferralUpdate = Database['public']['Tables']['referrals']['Update']

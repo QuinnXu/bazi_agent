@@ -39,6 +39,7 @@ const FEATURE_KIND_WHITELIST = new Set<string>([
   'hepan',
   'avatar',
   'lifepath',
+  'liuyao',
 ])
 
 function normaliseFeatureKind(value?: string | null): string | null {

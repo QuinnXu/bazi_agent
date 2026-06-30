@@ -22,15 +22,31 @@ export async function GET(
     const afterSeq = Number(searchParams.get('after_seq') || '0')
     const eventsOnly = searchParams.get('events_only') === '1'
 
-    const { data: run, error: runError } = await serviceSupabase
+    const runQuery = serviceSupabase
       .from('llm_runs')
       .select('id, session_id, kind, status, final_metadata, assistant_message_id, model, task, input_tokens, apple_cost, error_message, started_at, completed_at, canceled_at, created_at, updated_at')
       .eq('id', id)
       .eq('user_id', user.id)
       .single()
+
+    let eventsQuery = serviceSupabase
+      .from('llm_run_events')
+      .select('seq, event_type, content, payload, created_at')
+      .eq('run_id', id)
+      .order('seq', { ascending: true })
+      .limit(200)
+    if (Number.isFinite(afterSeq) && afterSeq > 0) {
+      eventsQuery = eventsQuery.gt('seq', afterSeq)
+    }
+
+    const [
+      { data: run, error: runError },
+      { data: events, error: eventsError },
+    ] = await Promise.all([runQuery, eventsQuery])
     if (runError || !run) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 })
     }
+    if (eventsError) throw eventsError
 
     const includeOutputText = !eventsOnly || ['completed', 'failed', 'canceled'].includes(String(run.status))
     let outputText = ''
@@ -44,18 +60,6 @@ export async function GET(
       if (outputError) throw outputError
       outputText = String(outputRow?.output_text || '')
     }
-
-    let eventsQuery = serviceSupabase
-      .from('llm_run_events')
-      .select('seq, event_type, content, payload, created_at')
-      .eq('run_id', id)
-      .order('seq', { ascending: true })
-      .limit(200)
-    if (Number.isFinite(afterSeq) && afterSeq > 0) {
-      eventsQuery = eventsQuery.gt('seq', afterSeq)
-    }
-    const { data: events, error: eventsError } = await eventsQuery
-    if (eventsError) throw eventsError
 
     return NextResponse.json({
       id: run.id,

@@ -697,7 +697,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
     >
       <div className="flex items-start gap-3">
         <div className="w-8 h-8 rounded-lg border border-primary/20 bg-card flex items-center justify-center flex-shrink-0 overflow-hidden">
-          <Image src="/avatar.png" alt="卜卜象" width={32} height={32} className="h-full w-full object-contain" />
+          <Image src="/avatar-small.png" alt="卜卜象" width={32} height={32} className="h-full w-full object-contain" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-foreground">{request.title}</p>

@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     // 验证会话属于当前用户
     const { data: session, error: sessionError } = await supabase
       .from('chat_sessions')
-      .select('*')
+      .select('id')
       .eq('id', session_id)
       .eq('user_id', user.id)
       .single()
@@ -44,13 +44,17 @@ export async function POST(req: NextRequest) {
     }
 
     // 批量插入消息
-    const requestMode: 'classic' | 'agent' = mode === 'agent' ? 'agent' : 'classic'
+    const requestMode: 'classic' | 'agent' | 'liuyao' =
+      mode === 'agent' || mode === 'liuyao' ? mode : 'classic'
     const messagesData = messages.map((msg: any) => ({
       session_id: session_id,
       role: msg.role,
       content: msg.content,
-      mode: (msg.mode === 'agent' ? 'agent' : requestMode) as 'classic' | 'agent',
+      mode: (
+        msg.mode === 'agent' || msg.mode === 'liuyao' ? msg.mode : requestMode
+      ) as 'classic' | 'agent' | 'liuyao',
       model: msg.model ?? null,
+      metadata: msg.metadata && typeof msg.metadata === 'object' ? msg.metadata : {},
       tokens_used:
         typeof msg.tokens_used === 'number'
           ? msg.tokens_used
@@ -137,7 +141,7 @@ export async function GET(req: NextRequest) {
     // 验证会话属于当前用户
     const { data: session, error: sessionError } = await supabase
       .from('chat_sessions')
-      .select('*')
+      .select('id')
       .eq('id', session_id)
       .eq('user_id', user.id)
       .single()
