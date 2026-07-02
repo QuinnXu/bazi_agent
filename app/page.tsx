@@ -65,6 +65,7 @@ import {
   isGuestFirstQaFlow,
   isGuestFirstQaRequestId,
 } from "@/lib/guest-first-qa-flow"
+import { DEFAULT_BIRTH_LOCATION } from "@/lib/birth-location"
 
 const BaziDialog = dynamic(() => import("@/components/bazi-dialog").then(mod => mod.BaziDialog), { ssr: false })
 const DonationDialog = dynamic(() => import("@/components/donation-button").then(mod => mod.DonationDialog), { ssr: false })
@@ -196,6 +197,7 @@ interface AgentPendingConfirmation {
 }
 
 interface BaziData {
+  profileName?: string;
   year: string;
   month: string;
   day: string;
@@ -205,6 +207,7 @@ interface BaziData {
   isFemale: boolean;
   longitude: string;
   latitude: string;
+  locationName?: string;
 }
 
 interface SelectedProfileContext {
@@ -335,6 +338,7 @@ const AGENT_COMPLEXITY_OPTIONS: Array<{
 ]
 
 const EMPTY_BAZI_FORM_DATA: BaziData = {
+  profileName: '',
   year: '',
   month: '1',
   day: '1',
@@ -342,8 +346,9 @@ const EMPTY_BAZI_FORM_DATA: BaziData = {
   minute: '',
   isSolar: true,
   isFemale: false,
-  longitude: '121.5',
-  latitude: '31.2',
+  longitude: String(DEFAULT_BIRTH_LOCATION.longitude),
+  latitude: String(DEFAULT_BIRTH_LOCATION.latitude),
+  locationName: DEFAULT_BIRTH_LOCATION.name,
 }
 
 function normalizeAgentBaziFormData(data?: Partial<BaziData>): BaziData {
@@ -395,6 +400,7 @@ function legacyBaziEventToHumanInput(event: AgentBaziFormEvent): AgentInlineInpu
           { label: copy.genderOptions.female, value: 'female' },
         ],
       },
+      { name: 'locationName', label: '出生地点', inputType: 'text', value: data.locationName || DEFAULT_BIRTH_LOCATION.name },
       { name: 'longitude', label: copy.fields.longitude, inputType: 'number', required: true, value: data.longitude },
       { name: 'latitude', label: copy.fields.latitude, inputType: 'number', required: true, value: data.latitude },
     ],
@@ -3632,6 +3638,7 @@ function HomeContent() {
           gender: data.isFemale ? 'female' : 'male',
           birth_longitude: parseFloat(data.longitude),
           birth_latitude: parseFloat(data.latitude),
+          birth_location_name: data.locationName?.trim() || null,
           bazi_result_text: result.baziResult,
           bazi_result_json: result.baziData,
         }),
@@ -3666,7 +3673,7 @@ function HomeContent() {
 
   const handleBaziSubmit = async (data: BaziData) => {
     try {
-      await createAndSaveBaziProfile(data, '新人物', null, {
+      await createAndSaveBaziProfile(data, data.profileName?.trim() || '新人物', null, {
         updateCurrent: false,
         addToAgentContext: false,
       })
@@ -3739,8 +3746,9 @@ function HomeContent() {
             minute: batchValueText('minute', '0'),
             isSolar: values[`profiles.${index}.isSolar`] === 'solar' || values[`profiles.${index}.isSolar`] === true,
             isFemale: values[`profiles.${index}.gender`] === 'female' || values[`profiles.${index}.isFemale`] === true,
-            longitude: batchValueText('longitude', '121.5'),
-            latitude: batchValueText('latitude', '31.2'),
+            longitude: batchValueText('longitude', String(DEFAULT_BIRTH_LOCATION.longitude)),
+            latitude: batchValueText('latitude', String(DEFAULT_BIRTH_LOCATION.latitude)),
+            locationName: batchValueText('locationName', DEFAULT_BIRTH_LOCATION.name),
           }
           const profileName = batchValueText('profileName', profile.profileName || `人物${index + 1}`) || `人物${index + 1}`
           const savedProfile = await createAndSaveBaziProfile(data, profileName, null, {
@@ -3807,8 +3815,9 @@ function HomeContent() {
           minute: valueText('minute', '0'),
           isSolar: values.isSolar === 'solar' || values.isSolar === true,
           isFemale: values.gender === 'female' || values.isFemale === true,
-          longitude: valueText('longitude', '121.5'),
-          latitude: valueText('latitude', '31.2'),
+          longitude: valueText('longitude', String(DEFAULT_BIRTH_LOCATION.longitude)),
+          latitude: valueText('latitude', String(DEFAULT_BIRTH_LOCATION.latitude)),
+          locationName: valueText('locationName', DEFAULT_BIRTH_LOCATION.name),
         }
         const profileName = valueText('profileName', '新人物') || '新人物'
         const savedProfile = await createAndSaveBaziProfile(data, profileName, null, {

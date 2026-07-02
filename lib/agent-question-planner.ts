@@ -18,6 +18,7 @@ import {
   isPartnerArchetypeQuestion,
   parseAskedTime,
 } from '@/lib/agent-slot-extractor'
+import { DEFAULT_BIRTH_LOCATION } from '@/lib/birth-location'
 
 type AgentFieldOptions = NonNullable<AgentHumanInputField['options']>
 
@@ -30,8 +31,9 @@ const DEFAULT_BAZI_FORM_DATA: AgentBaziFormData = {
   minute: '',
   isSolar: true,
   isFemale: false,
-  longitude: '121.5',
-  latitude: '31.2',
+  longitude: String(DEFAULT_BIRTH_LOCATION.longitude),
+  latitude: String(DEFAULT_BIRTH_LOCATION.latitude),
+  locationName: DEFAULT_BIRTH_LOCATION.name,
 }
 
 function newRequestId(kind: string): string {
@@ -72,6 +74,7 @@ function baziDataToFields(data: AgentBaziFormData): AgentHumanInputField[] {
         { label: '女', value: 'female' },
       ],
     },
+    { name: 'locationName', label: '出生地点', inputType: 'text', value: data.locationName || DEFAULT_BIRTH_LOCATION.name },
     { name: 'longitude', label: '出生地经度', inputType: 'number', required: true, value: data.longitude },
     { name: 'latitude', label: '出生地纬度', inputType: 'number', required: true, value: data.latitude },
   ]

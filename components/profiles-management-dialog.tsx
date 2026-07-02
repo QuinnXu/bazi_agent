@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react'
 import { X, User, Plus, Trash2, Edit2, ArrowLeft } from 'lucide-react'
 import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
-import { BaziDialog } from './bazi-dialog'
+import { BaziDialog, type BaziData } from './bazi-dialog'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,22 +29,11 @@ interface BaziProfile {
   gender: 'male' | 'female' | 'other' | null
   birth_longitude: number
   birth_latitude: number
+  birth_location_name: string | null
   bazi_result_text: string | null
   bazi_result: any | null
   created_at: string
   updated_at: string
-}
-
-interface BaziData {
-  year: string
-  month: string
-  day: string
-  hour: string
-  minute: string
-  isSolar: boolean
-  isFemale: boolean
-  longitude: string
-  latitude: string
 }
 
 interface BaziResultData {
@@ -73,10 +62,9 @@ interface ProfilesManagementDialogProps {
 export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: ProfilesManagementDialogProps) {
   const [profiles, setProfiles] = useState<BaziProfile[]>([])
   const [loading, setLoading] = useState(true)
-  const [dialogStep, setDialogStep] = useState<'list' | 'name' | 'bazi' | 'detail'>('list')
+  const [dialogStep, setDialogStep] = useState<'list' | 'bazi' | 'detail'>('list')
   const [editingProfile, setEditingProfile] = useState<BaziProfile | null>(null)
   const [viewingProfile, setViewingProfile] = useState<BaziProfile | null>(null)
-  const [profileName, setProfileName] = useState('')
   const [notice, setNotice] = useState('')
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const { user } = useAuth()
@@ -94,7 +82,6 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       setDialogStep('list')
       setEditingProfile(null)
       setViewingProfile(null)
-      setProfileName('')
       setNotice('')
       setDeleteTargetId(null)
     }
@@ -130,14 +117,12 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
   const handleAddProfile = () => {
     setEditingProfile(null)
     setViewingProfile(null)
-    setProfileName('')
-    setDialogStep('name')
+    setDialogStep('bazi')
   }
 
   const handleEditProfile = (profile: BaziProfile) => {
     setEditingProfile(profile)
-    setProfileName(profile.profile_name)
-    setDialogStep('name')
+    setDialogStep('bazi')
   }
 
   const handleViewProfile = (profile: BaziProfile) => {
@@ -145,27 +130,16 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
     setDialogStep('detail')
   }
 
-  const handleNextToBazi = () => {
-    if (!profileName.trim()) {
-      setNotice('卜卜象还不知道这位是谁，先给 TA 起个好认的名字吧。')
-      return
-    }
-    setNotice('')
-    setDialogStep('bazi')
-  }
-
   const handleBackToList = () => {
     setDialogStep('list')
     setEditingProfile(null)
     setViewingProfile(null)
-    setProfileName('')
   }
 
   const handleBackToDetail = () => {
     if (viewingProfile) {
       setDialogStep('detail')
       setEditingProfile(null)
-      setProfileName('')
     } else {
       handleBackToList()
     }
@@ -199,7 +173,8 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
 
   const handleBaziSubmit = async (data: BaziData) => {
     if (!user) return
-    if (!profileName.trim()) {
+    const nextProfileName = data.profileName?.trim() || editingProfile?.profile_name || ''
+    if (!nextProfileName) {
       setNotice('卜卜象还不知道这位是谁，先给 TA 起个好认的名字吧。')
       return
     }
@@ -229,7 +204,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
       }
 
       const profileData = {
-        profile_name: profileName.trim(),
+        profile_name: nextProfileName,
         birth_year: parseInt(data.year),
         birth_month: parseInt(data.month),
         birth_day: parseInt(data.day),
@@ -239,6 +214,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
         gender: data.isFemale ? 'female' : 'male',
         birth_longitude: parseFloat(data.longitude),
         birth_latitude: parseFloat(data.latitude),
+        birth_location_name: data.locationName?.trim() || null,
         bazi_result_text: result.baziResult,
         bazi_result: result.baziData,
       }
@@ -272,12 +248,10 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
         }
         setDialogStep('detail')
         setEditingProfile(null)
-        setProfileName('')
       } else {
         setDialogStep('list')
         setEditingProfile(null)
         setViewingProfile(null)
-        setProfileName('')
       }
     } catch (error) {
       console.error('保存人物失败:', error)
@@ -354,6 +328,11 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
                           <p className="text-xs text-muted-foreground mt-1">
                             {profile.is_solar_calendar ? '阳历' : '阴历'} · {profile.gender === 'female' ? '女' : '男'}
                           </p>
+                          {profile.birth_location_name && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              出生地 · {profile.birth_location_name}
+                            </p>
+                          )}
                           {fp && (
                             <p className="text-xs text-primary/70 mt-1.5 font-medium tracking-wider">
                               {fp.year}  {fp.month}  {fp.day}  {fp.hour}
@@ -426,6 +405,11 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
                   <p className="text-xs text-muted-foreground mt-1">
                     {viewingProfile.is_solar_calendar ? '阳历' : '阴历'} · {viewingProfile.gender === 'female' ? '女' : '男'}
                   </p>
+                  {viewingProfile.birth_location_name && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      出生地 · {viewingProfile.birth_location_name}
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={() => handleEditProfile(viewingProfile)}
@@ -499,76 +483,14 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
         </div>
       )}
 
-      {/* Step 3: 输入人物名称 */}
-      {dialogStep === 'name' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div 
-            className="fixed inset-0 bg-black/20 backdrop-blur-sm"
-            onClick={viewingProfile ? handleBackToDetail : handleBackToList}
-          />
-          
-          <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-md w-full shadow-xl glass-minimal">
-            <button
-              onClick={viewingProfile ? handleBackToDetail : handleBackToList}
-              className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
-            >
-              <X className="w-4 h-4 text-muted-foreground" />
-            </button>
-
-            <h3 className="text-lg font-light text-foreground mb-4">
-              {editingProfile ? '帮小象更新人物' : '给小象添加人物'}
-            </h3>
-
-            {notice && (
-              <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm font-light text-foreground">
-                {notice}
-              </div>
-            )}
-            
-            <div className="mb-4">
-              <label className="block text-sm font-light text-foreground mb-2">
-                人物名称
-              </label>
-              <input
-                type="text"
-                value={profileName}
-                onChange={(e) => setProfileName(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' && profileName.trim()) {
-                    handleNextToBazi()
-                  }
-                }}
-                className="w-full px-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
-                placeholder="例如：本人、伴侣、朋友的名字"
-                autoFocus
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={viewingProfile ? handleBackToDetail : handleBackToList}
-                className="flex-1 px-4 py-2 rounded-lg bg-muted text-muted-foreground text-sm font-light hover:bg-muted/80 transition-all duration-300"
-              >
-                先不填
-              </button>
-              <button
-                onClick={handleNextToBazi}
-                className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300"
-              >
-                继续补资料
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Step 4: 输入八字信息 */}
+      {/* Step 3: 输入完整人物资料 */}
       {dialogStep === 'bazi' && (
         <BaziDialog
           isOpen={true}
           onClose={viewingProfile ? handleBackToDetail : handleBackToList}
           onSubmit={handleBaziSubmit}
           initialData={editingProfile ? {
+            profileName: editingProfile.profile_name,
             year: editingProfile.birth_year.toString(),
             month: editingProfile.birth_month.toString(),
             day: editingProfile.birth_day.toString(),
@@ -578,6 +500,7 @@ export function ProfilesManagementDialog({ isOpen, onClose, onProfileSaved }: Pr
             isFemale: editingProfile.gender === 'female',
             longitude: editingProfile.birth_longitude.toString(),
             latitude: editingProfile.birth_latitude.toString(),
+            locationName: editingProfile.birth_location_name || undefined,
           } : undefined}
         />
       )}

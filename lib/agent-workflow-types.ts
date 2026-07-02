@@ -216,6 +216,7 @@ export interface AgentBaziFormData {
   isFemale: boolean
   longitude: string
   latitude: string
+  locationName?: string
 }
 
 export interface AgentHumanInputRequestUiEvent {

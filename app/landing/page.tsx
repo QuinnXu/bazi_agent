@@ -4,7 +4,9 @@ import React, { useMemo, useState } from "react"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
 import {
+  ArrowRight,
   CalendarRange,
+  ChevronRight,
   Compass,
   HeartHandshake,
   ImageIcon,
@@ -18,19 +20,23 @@ import {
 
 import { AuthDialog } from "@/components/auth-dialog"
 import { Button } from "@/components/ui/button"
-import type { FeatureKind } from "@/lib/feature-types"
 import { buildFeatureCardItems } from "@/lib/bubu-content"
 import { GUEST_FIRST_QA_FLOW } from "@/lib/guest-first-qa-flow"
+import type { FeatureKind } from "@/lib/feature-types"
 import { cn } from "@/lib/utils"
 
-const NAV_ITEMS = ["产品", "能力", "场景", "定价", "关于"] as const
+const NAV_ITEMS = [
+  { label: "开始", href: "#start" },
+  { label: "功能", href: "#features" },
+  { label: "路径", href: "#path" },
+  { label: "边界", href: "#safety" },
+] as const
 
 const QUICK_PROMPTS = [
   { label: "今日运势", prompt: "请帮我看看今天的整体运势和行动建议", icon: Sparkles },
-  { label: "事业建议", prompt: "我想看看近期事业发展和职业选择建议", icon: CalendarRange },
-  { label: "关系洞察", prompt: "请帮我分析一段关系里的相处节奏和磨合点", icon: HeartHandshake },
+  { label: "事业节奏", prompt: "我想看看近期事业发展和职业选择建议", icon: CalendarRange },
+  { label: "关系相处", prompt: "请帮我分析一段关系里的相处节奏和磨合点", icon: HeartHandshake },
   { label: "性格画像", prompt: "请帮我做一份性格画像和成长建议", icon: UserRound },
-  { label: "AI 解读", prompt: "我想让卜卜象帮我做一次综合命理分析", icon: Sparkles },
 ] as const
 
 const FEATURE_ICONS: Record<FeatureKind, React.ElementType> = {
@@ -47,48 +53,54 @@ const FEATURE_PROMPTS: Record<FeatureKind, string> = {
   lifepath: "我想做人生脉络分析，请引导我选择命主并开始分析",
 }
 
-const FEATURE_ACCENTS: Record<FeatureKind, string> = {
-  hepan: "text-primary bg-primary/10 border-primary/20",
-  fortune: "text-[oklch(0.62_0.115_40.07)] bg-accent/18 border-accent/30",
-  avatar: "text-[oklch(0.660_0.116_243.69)] bg-[oklch(0.660_0.116_243.69)]/10 border-[oklch(0.660_0.116_243.69)]/25",
-  lifepath: "text-[oklch(0.50_0.075_171.34)] bg-[oklch(0.762_0.060_171.34)]/16 border-[oklch(0.762_0.060_171.34)]/30",
+const FEATURE_STYLES: Record<FeatureKind, string> = {
+  hepan: "border-primary/22 bg-primary/10 text-primary",
+  fortune: "border-accent/36 bg-accent/18 text-[oklch(0.53_0.105_40.07)]",
+  avatar: "border-[oklch(0.72_0.070_245)]/34 bg-[oklch(0.72_0.070_245)]/13 text-[oklch(0.52_0.090_245)]",
+  lifepath: "border-[oklch(0.762_0.060_171.34)]/36 bg-[oklch(0.762_0.060_171.34)]/16 text-[oklch(0.43_0.075_171.34)]",
 }
 
-const HOW_IT_WORKS = [
-  {
-    label: "01",
-    title: "先问一句",
-    description: "不用先登录，也不用一开始就填出生信息。把你的问题放进对话框，卜卜象会先判断适合从哪里开始。",
+const FEATURE_DETAILS: Record<
+  FeatureKind,
+  { image: string; line: string; cta: string; imageAlt: string }
+> = {
+  hepan: {
+    image: "/landing/bubu-theme-relationship.png",
+    line: "关系、合作、相处节奏。",
+    cta: "看关系",
+    imageAlt: "卜卜象关系合盘主题图",
   },
-  {
-    label: "02",
-    title: "需要命盘时再补资料",
-    description: "合盘、运势、人生脉络等深度能力才会引导你创建人物档案，出生时间和地点只在需要排盘时填写。",
+  fortune: {
+    image: "/landing/bubu-theme-fortune.png",
+    line: "近期窗口、行动节奏。",
+    cta: "看运势",
+    imageAlt: "卜卜象近期运势主题图",
   },
-  {
-    label: "03",
-    title: "登录后保存上下文",
-    description: "登录后可以保存聊天记录和人物档案，下次继续分析时不用重复补充背景。",
+  avatar: {
+    image: "/landing/bubu-theme-avatar.png",
+    line: "头像气质、风格建议。",
+    cta: "看头像",
+    imageAlt: "卜卜象头像分析主题图",
   },
+  lifepath: {
+    image: "/landing/bubu-theme-lifepath.png",
+    line: "长期阶段、人生地图。",
+    cta: "看脉络",
+    imageAlt: "卜卜象人生脉络主题图",
+  },
+}
+
+const PATH_STEPS = [
+  { label: "问", text: "先说真实问题" },
+  { label: "选", text: "自动找到入口" },
+  { label: "补", text: "只补必要资料" },
+  { label: "答", text: "得到行动建议" },
 ] as const
 
-const KV_SECTIONS = [
-  {
-    id: "能力",
-    kicker: "AI 陪伴",
-    title: "日常问题直接问，系统会判断下一步。",
-    description: "事业、关系、选择、状态复盘都可以先用自然语言说清楚。本命屋适合自然对话，卜卜卦则用完整六爻流程起卦解卦。",
-    image: "/landing/insight-kv.png",
-    alt: "抽象玻璃界面展示结构化洞察和 AI 分析",
-  },
-  {
-    id: "场景",
-    kicker: "渐进资料",
-    title: "个人信息不放在首页收集，只在真正需要时出现。",
-    description: "当你进入合盘、近期运势或人生脉络等流程，卜卜象才会解释为什么需要出生信息，并把资料保存到可管理的人物档案。",
-    image: "/landing/profile-kv.png",
-    alt: "柔和笔记本视觉表示人物档案和隐私资料",
-  },
+const SAFETY_POINTS = [
+  { text: "首页不收集出生信息", icon: LockKeyhole },
+  { text: "只给趋势与参考", icon: ShieldCheck },
+  { text: "重要问题回到专业意见", icon: HeartHandshake },
 ] as const
 
 export default function LandingPage() {
@@ -116,31 +128,31 @@ export default function LandingPage() {
   }
 
   return (
-    <main className="relative min-h-dvh overflow-x-hidden bg-background text-foreground">
-      <div className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,oklch(0.992_0.004_80)_0%,oklch(0.986_0.006_80)_42%,oklch(0.965_0.011_250)_100%)]" />
-      <div className="absolute inset-0 -z-10 opacity-[0.28] [background-image:linear-gradient(to_right,oklch(0.895_0.012_250/0.55)_1px,transparent_1px),linear-gradient(to_bottom,oklch(0.895_0.012_250/0.45)_1px,transparent_1px)] [background-size:48px_48px] [mask-image:linear-gradient(to_bottom,transparent,black_18%,black_76%,transparent)]" />
+    <main className="relative min-h-dvh overflow-x-hidden bg-[oklch(0.985_0.006_82)] text-foreground">
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_0%,oklch(0.945_0.032_6.5)_0%,transparent_34%),linear-gradient(180deg,oklch(0.995_0.003_82)_0%,oklch(0.982_0.006_82)_54%,oklch(0.962_0.012_250)_100%)]" />
+      <div className="absolute inset-x-0 top-0 -z-10 h-[42rem] opacity-45 [background-image:linear-gradient(to_right,oklch(0.84_0.010_250/0.42)_1px,transparent_1px),linear-gradient(to_bottom,oklch(0.84_0.010_250/0.34)_1px,transparent_1px)] [background-size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent)]" />
 
-      <header className="sticky top-0 z-30 border-b border-border/55 bg-background/78 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+      <header className="sticky top-0 z-30 border-b border-border/55 bg-[oklch(0.985_0.006_82/0.82)] backdrop-blur-xl">
+        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6">
           <button
             type="button"
             onClick={() => goToChat()}
             className="flex min-w-0 items-center gap-3 text-left"
             aria-label="回到卜卜象聊天"
           >
-            <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full border border-primary/15 bg-card shadow-sm">
+            <span className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full border border-foreground/10 bg-card shadow-sm">
               <Image src="/logo.jpg" alt="卜卜象" fill className="object-contain" priority />
             </span>
             <span className="min-w-0">
               <span className="block truncate text-base font-semibold leading-tight text-foreground">卜卜象</span>
-              <span className="block truncate text-xs font-light text-muted-foreground">AI 陪伴 · 看见更多可能</span>
+              <span className="block truncate text-xs font-light text-muted-foreground">AI 命理分析</span>
             </span>
           </button>
 
-          <nav className="hidden items-center gap-8 text-sm text-foreground/86 lg:flex">
+          <nav className="hidden items-center gap-7 text-sm text-foreground/72 lg:flex">
             {NAV_ITEMS.map(item => (
-              <a key={item} href={`#${item}`} className="hover:text-primary">
-                {item}
+              <a key={item.label} href={item.href} className="hover:text-foreground">
+                {item.label}
               </a>
             ))}
           </nav>
@@ -150,173 +162,104 @@ export default function LandingPage() {
               type="button"
               variant="outline"
               onClick={() => setShowAuthDialog(true)}
-              className="h-9 rounded-full border-primary/25 bg-primary/8 px-3 text-sm font-light text-primary shadow-sm hover:border-primary/40 hover:bg-primary/12 sm:px-6"
+              className="hidden h-9 rounded-full border-foreground/12 bg-card/70 px-3 text-sm font-light text-foreground/74 shadow-sm hover:bg-card sm:inline-flex sm:px-5"
             >
               登录
             </Button>
             <Button
               type="button"
               onClick={() => goToChat()}
-              className="h-9 rounded-full border border-primary/30 bg-primary px-3 text-sm font-light text-primary-foreground shadow-[0_10px_24px_oklch(0.696_0.137_3.34/0.20)] hover:bg-primary/92 sm:px-5"
+              className="h-9 rounded-full border border-primary/30 bg-primary px-3 text-sm font-light text-primary-foreground shadow-[0_12px_28px_oklch(0.696_0.137_3.34/0.18)] hover:bg-primary/92 sm:px-5"
             >
-              <span className="hidden sm:inline">立即体验</span>
-              <span className="sm:hidden">体验</span>
+              体验
               <Sparkles className="h-4 w-4" />
             </Button>
           </div>
         </div>
       </header>
 
-      <section id="产品" className="mx-auto w-full max-w-6xl px-4 pb-8 pt-8 sm:px-6 sm:pb-10 sm:pt-10 lg:flex lg:min-h-[calc(100dvh-4rem)] lg:flex-col lg:pb-14">
-        <div className="grid gap-8 lg:flex-1 lg:grid-cols-[minmax(0,0.9fr)_minmax(22rem,1.1fr)] lg:items-center">
-          <div className="mx-auto w-full max-w-3xl text-center lg:mx-0 lg:text-left">
-            <p className="text-sm font-light text-primary">给第一次来的你</p>
-            <h1 className="mt-3 text-4xl font-light leading-tight text-foreground sm:text-5xl lg:text-6xl">
-              先问一句，再看见<span className="text-primary">更多可能</span>
-            </h1>
-            <p className="mt-4 max-w-2xl text-sm font-light leading-7 text-muted-foreground sm:text-base lg:mx-0">
-              卜卜象是你的 AI 命理陪伴助手。你可以先从一个问题开始；真的需要命盘时，再按步骤补充资料。
-            </p>
-
-            <form onSubmit={handleSubmit} className="mt-6 w-full max-w-2xl lg:mt-7">
-              <div className="relative min-h-24 rounded-2xl border border-primary/30 bg-card/90 p-3 pb-12 shadow-[0_14px_40px_oklch(0.696_0.137_3.34/0.09)] backdrop-blur-xl [view-transition-name:bubu-composer] focus-within:border-primary/60 sm:min-h-28 sm:rounded-xl sm:p-4 sm:pb-12">
-                <textarea
-                  value={prompt}
-                  onChange={event => setPrompt(event.target.value)}
-                  placeholder="先问一句试试：事业、运势、关系或日常选择..."
-                  rows={2}
-                  className="min-h-12 w-full resize-none bg-transparent pr-1 text-sm font-light leading-6 text-foreground outline-none placeholder:text-muted-foreground/75 focus:outline-none sm:min-h-14 sm:text-base"
-                />
-                <Button
-                  type="submit"
-                  size="icon"
-                  aria-label="发送给卜卜象"
-                  className="absolute bottom-2.5 right-2.5 h-9 w-9 rounded-full shadow-[0_8px_20px_oklch(0.696_0.137_3.34/0.22)] sm:bottom-3 sm:right-3 sm:h-10 sm:w-10"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-            </form>
-
-            <div className="mt-4 flex max-w-2xl flex-wrap justify-center gap-2 lg:justify-start">
-              {QUICK_PROMPTS.map(item => {
-                const Icon = item.icon
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => goToChat(item.prompt)}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border/85 bg-card/78 px-3 text-xs font-light text-muted-foreground shadow-sm backdrop-blur-sm hover:border-primary/25 hover:bg-card hover:text-foreground sm:text-sm"
-                  >
-                    <Icon className="h-3.5 w-3.5 text-primary/80" />
-                    <span>{item.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs font-light text-muted-foreground lg:justify-start">
-              <span className="inline-flex items-center gap-1.5">
-                <ShieldCheck className="h-4 w-4 text-primary/80" />
-                不在首页收集出生信息
-              </span>
-              <span className="hidden h-3 w-px bg-border sm:inline-block" />
-              <span>对话和人物资料只用于你的分析体验</span>
-            </div>
-          </div>
-
-          <div className="relative min-h-40 overflow-hidden rounded-xl border border-border/55 bg-card/40 shadow-[0_18px_70px_oklch(0.245_0.012_255/0.12)] sm:min-h-[28rem] lg:min-h-[34rem]">
+      <section id="start" className="mx-auto grid w-full max-w-6xl gap-8 px-4 pb-14 pt-10 sm:px-6 sm:pb-18 sm:pt-14 lg:grid-cols-[minmax(19rem,0.92fr)_minmax(0,1.08fr)] lg:items-center lg:pb-20 lg:pt-18">
+        <div className="mx-auto w-full max-w-[34rem] lg:mx-0">
+          <div className="relative mx-auto aspect-square w-full max-w-[30rem] overflow-hidden rounded-[2rem] border border-primary/14 bg-card/72 shadow-[0_28px_90px_oklch(0.245_0.012_255/0.13)] lg:max-w-none">
             <Image
-              src="/landing/hero-kv.png"
-              alt="粉色水晶球和柔和星图组成的卜卜象主视觉"
+              src="/landing/bubu-theme-question.png"
+              alt="卜卜象引导问题进入分析路径"
               fill
+              sizes="(min-width: 1024px) 44vw, 92vw"
               className="object-cover"
               priority
+              unoptimized
             />
           </div>
         </div>
-      </section>
 
-      <section className="border-y border-border/55 bg-background/52">
-        <div className="mx-auto grid max-w-6xl gap-0 px-4 sm:px-6 lg:grid-cols-3">
-          {HOW_IT_WORKS.map((item, index) => (
-            <div
-              key={item.title}
-              className={cn(
-                "py-7 lg:px-6 lg:py-9",
-                index > 0 && "border-t border-border/55 lg:border-l lg:border-t-0",
-              )}
+        <div className="mx-auto w-full max-w-2xl text-center lg:mx-0 lg:text-left">
+          <p className="inline-flex items-center gap-2 rounded-full border border-primary/18 bg-card/76 px-3 py-1 text-sm font-light text-muted-foreground shadow-sm backdrop-blur-sm">
+            <span className="relative h-5 w-5 overflow-hidden rounded-full">
+              <Image src="/avatar-small.png" alt="卜卜象头像" fill className="object-contain" priority />
+            </span>
+            小象式陪伴分析
+          </p>
+
+          <h1 className="mt-5 text-4xl font-light leading-[1.08] tracking-normal text-foreground sm:text-6xl lg:text-7xl">
+            先问一句，
+            <span className="block text-primary">小象带路。</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-[19rem] text-sm font-light leading-6 text-muted-foreground sm:max-w-[32rem] sm:text-lg sm:leading-7 lg:mx-0">
+            从问题出发，找到合适入口，再给你清楚的下一步。
+          </p>
+
+          <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start">
+            <Button
+              type="button"
+              onClick={() => goToChat("我第一次使用卜卜象，请先帮我判断适合从哪里开始")}
+              className="h-12 w-full rounded-full border border-primary/30 bg-primary px-7 text-base font-light text-primary-foreground shadow-[0_16px_34px_oklch(0.696_0.137_3.34/0.22)] hover:bg-primary/92 sm:w-auto"
             >
-              <p className="text-xs font-light text-primary">{item.label}</p>
-              <h2 className="mt-3 text-xl font-light leading-tight text-foreground">{item.title}</h2>
-              <p className="mt-3 text-sm font-light leading-6 text-muted-foreground">{item.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {KV_SECTIONS.map((section, index) => (
-        <section
-          key={section.id}
-          id={section.id}
-          className="mx-auto grid max-w-6xl items-center gap-8 border-b border-border/55 px-4 py-12 sm:px-6 sm:py-16 lg:grid-cols-2"
-        >
-          <div className={cn("max-w-xl", index % 2 === 1 && "lg:order-2 lg:ml-auto")}>
-            <p className="text-sm font-light text-primary">{section.kicker}</p>
-            <h2 className="mt-3 text-3xl font-light leading-tight text-foreground sm:text-4xl">{section.title}</h2>
-            <p className="mt-4 text-sm font-light leading-7 text-muted-foreground sm:text-base">{section.description}</p>
-          </div>
-          <div className="relative min-h-[16rem] overflow-hidden rounded-xl border border-border/55 bg-card/38 shadow-sm sm:min-h-[24rem]">
-            <Image src={section.image} alt={section.alt} fill className="object-cover" />
-          </div>
-        </section>
-      ))}
-
-      <section className="mx-auto max-w-6xl border-b border-border/55 px-4 py-12 sm:px-6 sm:py-16">
-        <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr]">
-          <div id="定价" className="max-w-xl">
-            <p className="text-sm font-light text-primary">能力入口</p>
-            <h2 className="mt-3 text-3xl font-light leading-tight text-foreground sm:text-4xl">
-              轻量先试，深度能力再消耗苹果。
-            </h2>
-            <p className="mt-4 text-sm font-light leading-7 text-muted-foreground sm:text-base">
-              本命屋可先试用简洁回答；登录后还可以进入卜卜卦完成六次起爻与解卦。所有入口都会继续进入主 chat，而不是在首页收集个人信息。
-            </p>
+              开始体验
+              <ArrowRight className="h-4 w-4" />
+            </Button>
             <Button
               type="button"
               variant="outline"
-              onClick={() => goToChat("我第一次使用卜卜象，请先帮我判断适合从哪里开始")}
-              className="mt-5 h-9 rounded-full border-primary/25 bg-card/72 px-4 text-sm font-light text-primary hover:bg-primary/8"
+              onClick={() => setShowAuthDialog(true)}
+              className="h-12 w-full rounded-full border-foreground/12 bg-card/72 px-7 text-base font-light text-foreground/78 shadow-sm hover:bg-card sm:w-auto"
             >
-              帮我选择入口
+              登录保存
             </Button>
           </div>
 
-          <div className="divide-y divide-border/55">
-            {featureCards.map(item => {
-              const Icon = FEATURE_ICONS[item.id]
+          <form onSubmit={handleSubmit} className="mx-auto mt-6 w-full max-w-2xl min-w-0 lg:mx-0">
+            <div className="relative min-h-24 rounded-2xl border border-primary/24 bg-card/92 p-4 pb-13 shadow-[0_22px_70px_oklch(0.245_0.012_255/0.10)] backdrop-blur-xl [view-transition-name:bubu-composer] focus-within:border-primary/58">
+              <textarea
+                value={prompt}
+                onChange={event => setPrompt(event.target.value)}
+                placeholder="试试：我最近适合把重点放在哪里？"
+                rows={2}
+                className="min-h-12 w-full resize-none bg-transparent pr-1 text-sm font-light leading-6 text-foreground outline-none placeholder:text-muted-foreground/70 focus:outline-none sm:text-base"
+              />
+              <Button
+                type="submit"
+                size="icon"
+                aria-label="发送给卜卜象"
+                className="absolute bottom-3 right-3 h-10 w-10 rounded-full shadow-[0_12px_28px_oklch(0.696_0.137_3.34/0.22)]"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </form>
+
+          <div className="mx-auto mt-4 flex w-full max-w-[19.5rem] flex-wrap justify-center gap-2 sm:max-w-2xl lg:mx-0 lg:justify-start">
+            {QUICK_PROMPTS.map(item => {
+              const Icon = item.icon
               return (
                 <button
-                  key={item.id}
+                  key={item.label}
                   type="button"
-                  onClick={() => goToChat(FEATURE_PROMPTS[item.id])}
-                  className="group grid w-full grid-cols-[auto_1fr] gap-4 py-5 text-left transition-colors hover:text-primary sm:grid-cols-[auto_1fr_auto]"
+                  onClick={() => goToChat(item.prompt)}
+                  className="inline-flex h-9 basis-[calc(50%-0.25rem)] items-center justify-center gap-1.5 rounded-full border border-foreground/10 bg-card/74 px-2 text-xs font-light text-muted-foreground shadow-sm backdrop-blur-sm hover:border-foreground/18 hover:bg-card hover:text-foreground sm:basis-auto sm:px-3 sm:text-sm"
                 >
-                  <span
-                    className={cn(
-                      "flex h-10 w-10 items-center justify-center rounded-md border",
-                      FEATURE_ACCENTS[item.id],
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-base font-medium text-foreground group-hover:text-primary">{item.title}</span>
-                    <span className="mt-1 line-clamp-2 block text-sm font-light leading-6 text-muted-foreground">
-                      {item.description}
-                    </span>
-                  </span>
-                  <span className="hidden self-center text-xs font-light text-muted-foreground sm:block">进入主 chat</span>
+                  <Icon className="h-3.5 w-3.5 text-primary/76" />
+                  <span>{item.label}</span>
                 </button>
               )
             })}
@@ -324,23 +267,131 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <footer id="关于" className="mx-auto flex max-w-6xl flex-col gap-5 px-4 py-8 text-xs font-light text-muted-foreground sm:px-6 sm:py-10 md:flex-row md:items-center md:justify-between">
+      <section id="features" className="border-y border-border/60 bg-[oklch(0.994_0.003_82/0.58)]">
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-18">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-light text-primary">功能就是品牌</p>
+            <h2 className="mt-3 text-3xl font-light leading-tight text-foreground sm:text-5xl">
+              想看的事，直接选。
+            </h2>
+          </div>
+
+          <div className="mt-9 grid gap-4 md:grid-cols-2">
+            {featureCards.map(item => {
+              const Icon = FEATURE_ICONS[item.id]
+              const detail = FEATURE_DETAILS[item.id]
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => goToChat(FEATURE_PROMPTS[item.id])}
+                  className="group grid min-w-0 grid-cols-[7.5rem_minmax(0,1fr)] gap-4 rounded-[1.5rem] border border-foreground/10 bg-card/88 p-3 text-left shadow-[0_18px_60px_oklch(0.245_0.012_255/0.08)] transition hover:-translate-y-0.5 hover:border-primary/24 hover:shadow-[0_24px_70px_oklch(0.245_0.012_255/0.12)] sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:p-4"
+                >
+                  <span className="relative aspect-square min-w-0 overflow-hidden rounded-[1.15rem] bg-[oklch(0.985_0.004_82)]">
+                    <Image src={detail.image} alt={detail.imageAlt} fill sizes="180px" className="object-cover" unoptimized />
+                  </span>
+                  <span className="flex min-w-0 flex-col justify-center py-1">
+                    <span className={cn("flex h-9 w-9 items-center justify-center rounded-full border", FEATURE_STYLES[item.id])}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="mt-3 text-xl font-medium leading-tight text-foreground group-hover:text-primary">
+                      {item.title}
+                    </span>
+                    <span className="mt-2 text-sm font-light leading-6 text-muted-foreground">{detail.line}</span>
+                    <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary">
+                      {detail.cta}
+                      <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section id="path" className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-18">
+        <div className="grid gap-8 lg:grid-cols-[0.84fr_1.16fr] lg:items-center">
+          <div className="max-w-xl">
+            <p className="text-sm font-light text-primary">像陪练一样推进</p>
+            <h2 className="mt-3 text-3xl font-light leading-tight text-foreground sm:text-4xl lg:text-5xl">
+              不是填表，是一步步说清楚。
+            </h2>
+            <p className="mt-4 text-base font-light leading-7 text-muted-foreground">
+              首页先不收集出生信息。需要命盘时，小象再提醒你补。
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-4">
+            {PATH_STEPS.map((step, index) => (
+              <div
+                key={step.label}
+                className="relative overflow-hidden rounded-[1.4rem] border border-foreground/10 bg-card/82 p-4 shadow-sm"
+              >
+                <span className="flex h-11 w-11 items-center justify-center rounded-full border border-primary/18 bg-primary/10 text-lg font-medium text-primary">
+                  {step.label}
+                </span>
+                <p className="mt-5 min-h-12 text-base font-light leading-6 text-foreground">{step.text}</p>
+                <p className="mt-4 text-xs font-light text-muted-foreground">0{index + 1}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="safety" className="border-y border-border/60 bg-[oklch(0.970_0.004_82/0.62)]">
+        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+          <div>
+            <p className="text-sm font-light text-primary">温柔也要有边界</p>
+            <h2 className="mt-3 text-3xl font-light leading-tight text-foreground sm:text-5xl">
+              给参考，不替你下结论。
+            </h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {SAFETY_POINTS.map(item => {
+              const Icon = item.icon
+              return (
+                <div key={item.text} className="rounded-[1.25rem] border border-foreground/10 bg-card/76 p-4 shadow-sm">
+                  <Icon className="h-5 w-5 text-primary" />
+                  <p className="mt-4 text-sm font-light leading-6 text-muted-foreground">{item.text}</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-18">
+        <div className="grid gap-6 rounded-[1.75rem] border border-primary/18 bg-card/86 p-6 shadow-[0_22px_80px_oklch(0.245_0.012_255/0.10)] sm:p-8 md:grid-cols-[1fr_auto] md:items-center">
+          <div className="max-w-2xl">
+            <p className="text-sm font-light text-primary">Start with one sentence</p>
+            <h2 className="mt-2 text-2xl font-light leading-tight text-foreground sm:text-4xl">
+              不确定从哪开始，就先问卜卜象。
+            </h2>
+          </div>
+          <Button
+            type="button"
+            onClick={() => goToChat()}
+            className="h-11 w-fit rounded-full border border-primary/30 bg-primary px-6 text-sm font-light text-primary-foreground shadow-[0_12px_28px_oklch(0.696_0.137_3.34/0.18)] hover:bg-primary/92"
+          >
+            开始体验
+            <Sparkles className="h-4 w-4" />
+          </Button>
+        </div>
+      </section>
+
+      <footer className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-xs font-light text-muted-foreground sm:px-6 sm:py-10 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-sm font-medium text-foreground">卜卜象</p>
-          <p className="mt-1">AI 陪伴 · 看见更多可能</p>
+          <p className="mt-1">AI 命理分析 · 看见更多可能</p>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <span className="inline-flex items-center gap-1.5">
             <ShieldCheck className="h-4 w-4" />
-            隐私安全优先
+            隐私优先
           </span>
           <span className="hidden h-3 w-px bg-border sm:inline-block" />
-          <span>登录后保存聊天和人物档案</span>
-          <span className="hidden h-3 w-px bg-border sm:inline-block" />
-          <span className="inline-flex items-center gap-1.5">
-            <LockKeyhole className="h-4 w-4" />
-            出生信息只在需要命盘时填写
-          </span>
+          <span>登录后保存上下文</span>
         </div>
       </footer>
 

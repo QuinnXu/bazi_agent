@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 :root {
   /* —— Base surfaces —— */
@@ -215,6 +216,24 @@
 
   .animate-float-gentle {
     animation: float-gentle 8s ease-in-out infinite;
+  }
+
+  .bubu-map-marker {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    border-radius: 9999px;
+    background: oklch(0.696 0.137 3.34 / 0.18);
+    border: 1px solid oklch(0.696 0.137 3.34 / 0.45);
+    box-shadow: 0 0 0 8px oklch(0.696 0.137 3.34 / 0.10);
+  }
+
+  .bubu-map-marker span {
+    position: absolute;
+    inset: 8px;
+    border-radius: 9999px;
+    background: var(--primary);
+    box-shadow: 0 4px 12px oklch(0.245 0.012 255.00 / 0.24);
   }
 
   /* Subtle fade in animation */
