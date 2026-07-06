@@ -90,12 +90,7 @@ const FEATURE_DETAILS: Record<
   },
 }
 
-const PATH_STEPS = [
-  { label: "问", text: "先说真实问题" },
-  { label: "选", text: "自动找到入口" },
-  { label: "补", text: "只补必要资料" },
-  { label: "答", text: "得到行动建议" },
-] as const
+const PATH_STEPS = GUEST_FIRST_QA_FLOW.copy.tutorialSteps
 
 const SAFETY_POINTS = [
   { text: "首页不收集出生信息", icon: LockKeyhole },
@@ -109,11 +104,18 @@ export default function LandingPage() {
   const [showAuthDialog, setShowAuthDialog] = useState(false)
   const featureCards = useMemo(() => buildFeatureCardItems(), [])
 
-  const goToChat = (nextPrompt?: string) => {
+  const buildTrialUrl = (nextPrompt?: string) => {
     const value = (nextPrompt ?? prompt).trim()
-    const nextUrl = value
-      ? `/?prompt=${encodeURIComponent(value)}&from=landing&trialFlow=${GUEST_FIRST_QA_FLOW.id}`
-      : "/?from=landing"
+    const params = new URLSearchParams({
+      from: "landing",
+      trialFlow: GUEST_FIRST_QA_FLOW.id,
+    })
+    if (value) params.set("prompt", value)
+    return `/?${params.toString()}`
+  }
+
+  const goToChat = (nextPrompt?: string) => {
+    const nextUrl = buildTrialUrl(nextPrompt)
     const navigate = () => router.push(nextUrl)
     if (typeof document !== "undefined" && "startViewTransition" in document) {
       ;(document as Document & { startViewTransition: (callback: () => void) => void }).startViewTransition(navigate)
@@ -171,7 +173,7 @@ export default function LandingPage() {
               onClick={() => goToChat()}
               className="h-9 rounded-full border border-primary/30 bg-primary px-3 text-sm font-light text-primary-foreground shadow-[0_12px_28px_oklch(0.696_0.137_3.34/0.18)] hover:bg-primary/92 sm:px-5"
             >
-              体验
+              免费先看
               <Sparkles className="h-4 w-4" />
             </Button>
           </div>
@@ -198,15 +200,15 @@ export default function LandingPage() {
             <span className="relative h-5 w-5 overflow-hidden rounded-full">
               <Image src="/avatar-small.png" alt="卜卜象头像" fill className="object-contain" priority />
             </span>
-            小象式陪伴分析
+            {GUEST_FIRST_QA_FLOW.copy.landing.badge}
           </p>
 
           <h1 className="mt-5 text-4xl font-light leading-[1.08] tracking-normal text-foreground sm:text-6xl lg:text-7xl">
-            先问一句，
-            <span className="block text-primary">小象带路。</span>
+            {GUEST_FIRST_QA_FLOW.copy.landing.headlineLead}
+            <span className="block text-primary">{GUEST_FIRST_QA_FLOW.copy.landing.headlineAccent}</span>
           </h1>
           <p className="mx-auto mt-5 max-w-[19rem] text-sm font-light leading-6 text-muted-foreground sm:max-w-[32rem] sm:text-lg sm:leading-7 lg:mx-0">
-            从问题出发，找到合适入口，再给你清楚的下一步。
+            {GUEST_FIRST_QA_FLOW.copy.landing.description}
           </p>
 
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row lg:justify-start">
@@ -215,7 +217,7 @@ export default function LandingPage() {
               onClick={() => goToChat("我第一次使用卜卜象，请先帮我判断适合从哪里开始")}
               className="h-12 w-full rounded-full border border-primary/30 bg-primary px-7 text-base font-light text-primary-foreground shadow-[0_16px_34px_oklch(0.696_0.137_3.34/0.22)] hover:bg-primary/92 sm:w-auto"
             >
-              开始体验
+              {GUEST_FIRST_QA_FLOW.copy.landing.primaryCta}
               <ArrowRight className="h-4 w-4" />
             </Button>
             <Button
@@ -224,7 +226,7 @@ export default function LandingPage() {
               onClick={() => setShowAuthDialog(true)}
               className="h-12 w-full rounded-full border-foreground/12 bg-card/72 px-7 text-base font-light text-foreground/78 shadow-sm hover:bg-card sm:w-auto"
             >
-              登录保存
+              {GUEST_FIRST_QA_FLOW.copy.landing.secondaryCta}
             </Button>
           </div>
 
@@ -233,7 +235,7 @@ export default function LandingPage() {
               <textarea
                 value={prompt}
                 onChange={event => setPrompt(event.target.value)}
-                placeholder="试试：我最近适合把重点放在哪里？"
+                placeholder={GUEST_FIRST_QA_FLOW.copy.landing.inputPlaceholder}
                 rows={2}
                 className="min-h-12 w-full resize-none bg-transparent pr-1 text-sm font-light leading-6 text-foreground outline-none placeholder:text-muted-foreground/70 focus:outline-none sm:text-base"
               />
@@ -247,6 +249,17 @@ export default function LandingPage() {
               </Button>
             </div>
           </form>
+
+          <div className="mx-auto mt-3 flex w-full max-w-2xl flex-wrap justify-center gap-2 lg:mx-0 lg:justify-start">
+            {GUEST_FIRST_QA_FLOW.copy.landing.trialPoints.map(item => (
+              <span
+                key={item}
+                className="inline-flex h-7 items-center rounded-full border border-primary/14 bg-card/70 px-3 text-xs font-light text-muted-foreground shadow-sm backdrop-blur-sm"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
 
           <div className="mx-auto mt-4 flex w-full max-w-[19.5rem] flex-wrap justify-center gap-2 sm:max-w-2xl lg:mx-0 lg:justify-start">
             {QUICK_PROMPTS.map(item => {
@@ -331,7 +344,8 @@ export default function LandingPage() {
                 <span className="flex h-11 w-11 items-center justify-center rounded-full border border-primary/18 bg-primary/10 text-lg font-medium text-primary">
                   {step.label}
                 </span>
-                <p className="mt-5 min-h-12 text-base font-light leading-6 text-foreground">{step.text}</p>
+                <p className="mt-5 text-base font-light leading-6 text-foreground">{step.title}</p>
+                <p className="mt-2 min-h-12 text-xs font-light leading-5 text-muted-foreground">{step.description}</p>
                 <p className="mt-4 text-xs font-light text-muted-foreground">0{index + 1}</p>
               </div>
             ))}
@@ -364,9 +378,9 @@ export default function LandingPage() {
       <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-18">
         <div className="grid gap-6 rounded-[1.75rem] border border-primary/18 bg-card/86 p-6 shadow-[0_22px_80px_oklch(0.245_0.012_255/0.10)] sm:p-8 md:grid-cols-[1fr_auto] md:items-center">
           <div className="max-w-2xl">
-            <p className="text-sm font-light text-primary">Start with one sentence</p>
+            <p className="text-sm font-light text-primary">{GUEST_FIRST_QA_FLOW.copy.landing.finalCtaEyebrow}</p>
             <h2 className="mt-2 text-2xl font-light leading-tight text-foreground sm:text-4xl">
-              不确定从哪开始，就先问卜卜象。
+              {GUEST_FIRST_QA_FLOW.copy.landing.finalCtaTitle}
             </h2>
           </div>
           <Button
@@ -374,7 +388,7 @@ export default function LandingPage() {
             onClick={() => goToChat()}
             className="h-11 w-fit rounded-full border border-primary/30 bg-primary px-6 text-sm font-light text-primary-foreground shadow-[0_12px_28px_oklch(0.696_0.137_3.34/0.18)] hover:bg-primary/92"
           >
-            开始体验
+            {GUEST_FIRST_QA_FLOW.copy.landing.primaryCta}
             <Sparkles className="h-4 w-4" />
           </Button>
         </div>

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Map, MapPin, X } from "lucide-react"
 import { loadGeodata, type LocationData } from "@/lib/geodata-client"
 import {
+  DEFAULT_BIRTH_LOCATION,
   coerceBirthLocation,
   formatBirthLocationName,
   type BirthLocation,
@@ -45,6 +46,15 @@ function sameStoredLocation(item: LocationData, value: BirthLocation) {
   )
 }
 
+function isDefaultLocation(value: BirthLocation | null) {
+  if (!value) return false
+  return (
+    value.name === DEFAULT_BIRTH_LOCATION.name &&
+    Math.abs(value.latitude - DEFAULT_BIRTH_LOCATION.latitude) < 0.000001 &&
+    Math.abs(value.longitude - DEFAULT_BIRTH_LOCATION.longitude) < 0.000001
+  )
+}
+
 export function BirthLocationPicker({
   value,
   onChange,
@@ -60,6 +70,7 @@ export function BirthLocationPicker({
   const [selectedProvince, setSelectedProvince] = useState("")
   const [selectedCity, setSelectedCity] = useState("")
   const [mapOpen, setMapOpen] = useState(false)
+  const [editing, setEditing] = useState(() => !value || isDefaultLocation(value))
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
 
@@ -89,6 +100,12 @@ export function BirthLocationPicker({
     setSelectedCity(matched.city)
   }, [locations, selectedCity, selectedProvince, value])
 
+  useEffect(() => {
+    if (!value) {
+      setEditing(true)
+    }
+  }, [value])
+
   const provinces = useMemo(() => unique(locations.map(item => item.province)), [locations])
   const cities = useMemo(() => {
     if (!selectedProvince) return []
@@ -103,13 +120,17 @@ export function BirthLocationPicker({
   function chooseCity(city: string) {
     setSelectedCity(city)
     const location = locations.find(item => item.province === selectedProvince && item.city === city)
-    if (location) onChange(toBirthLocation(location))
+    if (location) {
+      onChange(toBirthLocation(location))
+      setEditing(false)
+    }
   }
 
   function chooseFromMap(location: BirthLocation) {
     setSelectedProvince("")
     setSelectedCity("")
     onChange(coerceBirthLocation(location.longitude, location.latitude, location.name))
+    setEditing(false)
     setMapOpen(false)
   }
 
@@ -131,24 +152,26 @@ export function BirthLocationPicker({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <OptimizedSelect
-          value={selectedProvince}
-          onChange={event => chooseProvince(event.target.value)}
-          options={provinces}
-          placeholder={loading ? "正在加载省份" : "请选择省份"}
-          disabled={disabled || loading || Boolean(loadError)}
-        />
-        <OptimizedSelect
-          value={selectedCity}
-          onChange={event => chooseCity(event.target.value)}
-          options={cities}
-          placeholder={selectedProvince ? "请选择城市" : "先选省份"}
-          disabled={disabled || loading || Boolean(loadError) || !selectedProvince}
-        />
-      </div>
+      {editing && (
+        <div className="grid grid-cols-2 gap-3">
+          <OptimizedSelect
+            value={selectedProvince}
+            onChange={event => chooseProvince(event.target.value)}
+            options={provinces}
+            placeholder={loading ? "正在加载省份" : "请选择省份"}
+            disabled={disabled || loading || Boolean(loadError)}
+          />
+          <OptimizedSelect
+            value={selectedCity}
+            onChange={event => chooseCity(event.target.value)}
+            options={cities}
+            placeholder={selectedProvince ? "请选择城市" : "先选省份"}
+            disabled={disabled || loading || Boolean(loadError) || !selectedProvince}
+          />
+        </div>
+      )}
 
-      {loadError && (
+      {editing && loadError && (
         <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {loadError}
         </p>
@@ -159,6 +182,16 @@ export function BirthLocationPicker({
           <MapPin className="h-4 w-4 flex-shrink-0 text-primary" />
           <span className="min-w-0 flex-1 truncate">{value.name}</span>
           <span className="hidden text-xs text-muted-foreground sm:inline">方位已入盘</span>
+          {!editing && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              disabled={disabled}
+              className="rounded-full border border-primary/20 bg-card px-2.5 py-1 text-xs text-primary transition-colors hover:border-primary/45 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              修改
+            </button>
+          )}
         </div>
       )}
 

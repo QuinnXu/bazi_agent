@@ -2,9 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
-import { Check, ChevronDown, Loader2, Minus, Plus } from "lucide-react"
+import { Check, Loader2, Minus, Plus } from "lucide-react"
+import { BirthDatePicker, BirthTimePicker } from "@/components/birth-date-time-picker"
 import { BirthLocationPicker } from "@/components/birth-location-picker"
-import { BAZI_HOUR_GROUPS, normalizeBaziHourValue } from "@/lib/bazi-time-options"
+import { normalizeBaziHourValue } from "@/lib/bazi-time-options"
 import {
   DEFAULT_BIRTH_LOCATION,
   coerceBirthLocation,
@@ -82,11 +83,6 @@ function initialValueFor(field: AgentInputField): AgentInputValue {
   if (field.inputType === 'boolean') return false
   return ''
 }
-
-const MONTH_OPTIONS = [
-  '一月', '二月', '三月', '四月', '五月', '六月',
-  '七月', '八月', '九月', '十月', '十一月', '十二月',
-].map((label, index) => ({ value: String(index + 1), label }))
 
 function hasInputValue(value: AgentInputValue): boolean {
   if (Array.isArray(value)) return value.some(item => String(item).trim())
@@ -327,6 +323,15 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
       updateValue(nameFor('latitude'), String(location.latitude))
       updateValue(nameFor('locationName'), location.name)
     }
+    const handleDateChange = (date: { year: string; month: string; day: string }) => {
+      updateValue(nameFor('year'), date.year)
+      updateValue(nameFor('month'), date.month)
+      updateValue(nameFor('day'), date.day)
+    }
+    const handleTimeChange = (time: { hour: string; minute: string }) => {
+      updateValue(nameFor('hour'), normalizeBaziHourValue(time.hour))
+      updateValue(nameFor('minute'), time.minute)
+    }
 
     return (
       <div className="space-y-4">
@@ -343,94 +348,20 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
           />
         </label>
 
-        <div className="space-y-2">
-          <p className="text-sm font-light text-foreground">出生日期</p>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="relative">
-              <input
-                type="number"
-                value={String(values[nameFor('year')] ?? '')}
-                disabled={disabled || isSubmitting}
-                required
-                placeholder="1995"
-                onChange={event => updateValue(nameFor('year'), event.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 pr-8 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-                年
-              </span>
-            </div>
-            <label className="relative">
-              <select
-                value={String(values[nameFor('month')] ?? '1')}
-                disabled={disabled || isSubmitting}
-                onChange={event => updateValue(nameFor('month'), event.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80 appearance-none cursor-pointer"
-              >
-                {MONTH_OPTIONS.map(month => (
-                  <option key={month.value} value={month.value}>
-                    {month.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                value={String(values[nameFor('day')] ?? '')}
-                disabled={disabled || isSubmitting}
-                required
-                placeholder="1"
-                onChange={event => updateValue(nameFor('day'), event.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 pr-8 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-                日
-              </span>
-            </div>
-          </div>
-        </div>
+        <BirthDatePicker
+          year={String(values[nameFor('year')] ?? '')}
+          month={String(values[nameFor('month')] ?? '1')}
+          day={String(values[nameFor('day')] ?? '1')}
+          onChange={handleDateChange}
+          disabled={disabled || isSubmitting}
+        />
 
-        <div className="space-y-2">
-          <p className="text-sm font-light text-foreground">出生时间</p>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="relative">
-              <select
-                value={normalizeBaziHourValue(String(values[nameFor('hour')] ?? ''))}
-                disabled={disabled || isSubmitting}
-                required
-                onChange={event => updateValue(nameFor('hour'), event.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80 appearance-none cursor-pointer"
-              >
-                <option value="">时</option>
-                {BAZI_HOUR_GROUPS.map(group => (
-                  <optgroup key={group.label} label={`${group.label} ${group.rangeLabel}`}>
-                    {group.hours.map(hour => (
-                      <option key={hour.value} value={hour.value}>
-                        {hour.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-            </label>
-            <div className="relative">
-              <input
-                type="number"
-                value={String(values[nameFor('minute')] ?? '0')}
-                disabled={disabled || isSubmitting}
-                placeholder="00"
-                onChange={event => updateValue(nameFor('minute'), event.target.value)}
-                className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 pr-8 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
-              />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">
-                分
-              </span>
-            </div>
-          </div>
-        </div>
+        <BirthTimePicker
+          hour={String(values[nameFor('hour')] ?? '')}
+          minute={String(values[nameFor('minute')] ?? '0')}
+          onChange={handleTimeChange}
+          disabled={disabled || isSubmitting}
+        />
 
         <BirthLocationPicker
           value={currentLocation}

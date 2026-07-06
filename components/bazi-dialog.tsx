@@ -1,9 +1,10 @@
 "use client"
 
 import React, { useCallback, useEffect, useMemo, useState } from "react"
-import { Calendar, ChevronDown, X } from "lucide-react"
+import { Calendar, X } from "lucide-react"
+import { BirthDatePicker, BirthTimePicker } from "@/components/birth-date-time-picker"
 import { BirthLocationPicker } from "@/components/birth-location-picker"
-import { BAZI_HOUR_GROUPS, normalizeBaziHourValue } from "@/lib/bazi-time-options"
+import { normalizeBaziHourValue } from "@/lib/bazi-time-options"
 import {
   DEFAULT_BIRTH_LOCATION,
   coerceBirthLocation,
@@ -67,17 +68,6 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
     setFormNotice("")
   }, [initialData])
 
-  const monthOptions = useMemo(() => {
-    const months = [
-      "一月", "二月", "三月", "四月", "五月", "六月",
-      "七月", "八月", "九月", "十月", "十一月", "十二月",
-    ]
-    return months.map((month, index) => ({
-      value: String(index + 1),
-      label: month,
-    }))
-  }, [])
-
   const birthLocation = useMemo<BirthLocation>(() => (
     coerceBirthLocation(baziData.longitude, baziData.latitude, baziData.locationName)
   ), [baziData.latitude, baziData.locationName, baziData.longitude])
@@ -92,10 +82,15 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
     setBaziData(prev => ({ ...prev, isFemale }))
   }, [])
 
-  const handleTimeChange = useCallback((field: "hour" | "minute", value: string) => {
+  const handleDateChange = useCallback((value: { year: string; month: string; day: string }) => {
+    setBaziData(prev => ({ ...prev, ...value }))
+  }, [])
+
+  const handleTimeChange = useCallback((value: { hour: string; minute: string }) => {
     setBaziData(prev => ({
       ...prev,
-      [field]: field === "hour" ? normalizeBaziHourValue(value) : value,
+      hour: normalizeBaziHourValue(value.hour),
+      minute: value.minute,
     }))
   }, [])
 
@@ -178,100 +173,18 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
             />
           </label>
 
-          <div className="space-y-3">
-            <label className="block text-sm font-light text-foreground">
-              出生日期
-            </label>
-            <div className="grid grid-cols-3 gap-3 sm:gap-4">
-              <div className="relative">
-                <input
-                  type="number"
-                  name="year"
-                  value={baziData.year}
-                  onChange={handleInputChange}
-                  className="w-full rounded-lg border border-border bg-card/60 px-3 py-2 pr-8 text-foreground placeholder-muted-foreground transition-all duration-300 focus:border-primary/60 focus:bg-card/80 focus:outline-none"
-                  placeholder="1995"
-                  required
-                />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-light text-muted-foreground">
-                  年
-                </span>
-              </div>
+          <BirthDatePicker
+            year={baziData.year}
+            month={baziData.month}
+            day={baziData.day}
+            onChange={handleDateChange}
+          />
 
-              <div className="relative">
-                <select
-                  name="month"
-                  value={baziData.month}
-                  onChange={handleInputChange}
-                  className="w-full cursor-pointer appearance-none rounded-lg border border-border bg-card/60 px-3 py-2 text-foreground transition-all duration-300 focus:border-primary/60 focus:bg-card/80 focus:outline-none"
-                  required
-                >
-                  {monthOptions.map(month => (
-                    <option key={month.value} value={month.value}>
-                      {month.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              </div>
-
-              <div className="relative">
-                <input
-                  type="number"
-                  name="day"
-                  value={baziData.day}
-                  onChange={handleInputChange}
-                  className="w-full rounded-lg border border-border bg-card/60 px-3 py-2 pr-8 text-foreground placeholder-muted-foreground transition-all duration-300 focus:border-primary/60 focus:bg-card/80 focus:outline-none"
-                  placeholder="1"
-                  required
-                />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-light text-muted-foreground">
-                  日
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <label className="block text-sm font-light text-foreground">
-              出生时间
-            </label>
-            <div className="grid grid-cols-2 gap-3 sm:gap-4">
-              <div className="relative">
-                <select
-                  value={normalizeBaziHourValue(baziData.hour)}
-                  onChange={(e) => handleTimeChange("hour", e.target.value)}
-                  className="w-full cursor-pointer appearance-none rounded-lg border border-border bg-card/60 px-3 py-2 text-foreground transition-all duration-300 focus:border-primary/60 focus:bg-card/80 focus:outline-none"
-                  required
-                >
-                  <option value="">时</option>
-                  {BAZI_HOUR_GROUPS.map(group => (
-                    <optgroup key={group.label} label={`${group.label} ${group.rangeLabel}`}>
-                      {group.hours.map(hour => (
-                        <option key={hour.value} value={hour.value}>
-                          {hour.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              </div>
-              <div className="relative">
-                <input
-                  type="number"
-                  value={baziData.minute}
-                  onChange={(e) => handleTimeChange("minute", e.target.value)}
-                  className="w-full rounded-lg border border-border bg-card/60 px-3 py-2 pr-8 text-foreground placeholder-muted-foreground transition-all duration-300 focus:border-primary/60 focus:bg-card/80 focus:outline-none"
-                  placeholder="00"
-                  required
-                />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm font-light text-muted-foreground">
-                  分
-                </span>
-              </div>
-            </div>
-          </div>
+          <BirthTimePicker
+            hour={baziData.hour}
+            minute={baziData.minute}
+            onChange={handleTimeChange}
+          />
 
           <BirthLocationPicker value={birthLocation} onChange={handleLocationChange} />
 

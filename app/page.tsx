@@ -285,6 +285,7 @@ const RUN_POLL_MAX_DELAY_MS = 650
 const RUN_POLL_BACKOFF_MS = 80
 const GUEST_TRANSCRIPT_STORAGE_KEY = 'bubu_guest_trial_transcript_v1'
 const GUEST_TRIAL_USED_STORAGE_KEY = 'bubu_guest_trial_final_used_v1'
+const NEW_USER_TUTORIAL_DISMISSED_STORAGE_KEY = 'bubu_new_user_tutorial_dismissed_v1'
 
 interface GuestTranscriptMessage {
   role: 'user' | 'assistant'
@@ -723,6 +724,7 @@ function HomeContent() {
   const [showBaziDialog, setShowBaziDialog] = useState(false)
   const [agentBaziInitialData, setAgentBaziInitialData] = useState<BaziData | undefined>()
   const [showAuthDialog, setShowAuthDialog] = useState(false)
+  const [authDialogMode, setAuthDialogMode] = useState<'signin' | 'signup'>('signin')
   const [showProfilesDialog, setShowProfilesDialog] = useState(false)
   const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
@@ -778,11 +780,10 @@ function HomeContent() {
   const [showQuotaExhausted, setShowQuotaExhausted] = useState(false)
   const [showLandingAuthHint, setShowLandingAuthHint] = useState(false)
   const [landingComposerPulse, setLandingComposerPulse] = useState(false)
-  const [guestFinalAnswerUsed, setGuestFinalAnswerUsed] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.localStorage.getItem(GUEST_TRIAL_USED_STORAGE_KEY) === '1'
-  })
+  const [guestFinalAnswerUsed, setGuestFinalAnswerUsed] = useState(false)
+  const [guestTrialStateHydrated, setGuestTrialStateHydrated] = useState(false)
   const [guestOnboardingQuestion, setGuestOnboardingQuestion] = useState<string | null>(null)
+  const [showNewUserTutorial, setShowNewUserTutorial] = useState(false)
   const [pendingPostRegistrationFollowUp, setPendingPostRegistrationFollowUp] = useState<{
     sessionId: string
     question: string
@@ -805,6 +806,17 @@ function HomeContent() {
   useEffect(() => {
     featureContextRef.current = featureContext
   }, [featureContext])
+
+  useEffect(() => {
+    try {
+      setGuestFinalAnswerUsed(window.localStorage.getItem(GUEST_TRIAL_USED_STORAGE_KEY) === '1')
+      setShowNewUserTutorial(window.localStorage.getItem(NEW_USER_TUTORIAL_DISMISSED_STORAGE_KEY) !== '1')
+    } catch {
+      setShowNewUserTutorial(true)
+    } finally {
+      setGuestTrialStateHydrated(true)
+    }
+  }, [])
 
   const flushGuestTranscriptPayload = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -845,6 +857,15 @@ function HomeContent() {
       window.localStorage.setItem(GUEST_TRIAL_USED_STORAGE_KEY, '1')
     } catch {
       // Local persistence is best-effort; the server-side counter remains authoritative.
+    }
+  }, [])
+
+  const dismissNewUserTutorial = useCallback(() => {
+    setShowNewUserTutorial(false)
+    try {
+      window.localStorage.setItem(NEW_USER_TUTORIAL_DISMISSED_STORAGE_KEY, '1')
+    } catch {
+      // Tutorial dismissal is a convenience preference; ignore storage failures.
     }
   }, [])
 
@@ -916,20 +937,21 @@ function HomeContent() {
 
   useEffect(() => {
     if (authLoading) return
+    if (!guestTrialStateHydrated) return
     if (initialPromptAppliedRef.current) return
     initialPromptAppliedRef.current = true
     const url = new URL(window.location.href)
     const prompt = url.searchParams.get('prompt')?.trim()
     const fromLanding = url.searchParams.get('from') === 'landing'
     const trialFlow = url.searchParams.get('trialFlow')
+    const fromLandingTrial = fromLanding && isGuestFirstQaFlow(trialFlow)
     const shouldStartGuestOnboarding =
       !user &&
-      fromLanding &&
-      isGuestFirstQaFlow(trialFlow) &&
-      Boolean(prompt) &&
+      fromLandingTrial &&
       !guestFinalAnswerUsed
 
-    if (shouldStartGuestOnboarding && prompt) {
+    if (shouldStartGuestOnboarding) {
+      const landingPrompt = prompt || ''
       const sessionId = guestSessionIdRef.current
       const assistantMessage: Message = {
         id: createBubuMessageId('assistant'),
@@ -937,26 +959,17 @@ function HomeContent() {
         content: GUEST_FIRST_QA_FLOW.copy.assistantIntro,
         createdAt: new Date(),
         mode: 'agent',
-        agentUi: createGuestOnboardingProfileRequest(prompt),
+        agentUi: createGuestOnboardingProfileRequest(landingPrompt),
         agentUiStatus: 'pending',
       }
-      landingGuestQuestionRef.current = prompt
+      landingGuestQuestionRef.current = landingPrompt
       selectedSessionIdRef.current = sessionId
-      setGuestOnboardingQuestion(prompt)
+      setGuestOnboardingQuestion(landingPrompt || null)
       setCurrentSessionId(null)
       setCurrentSessionMode('agent')
       setActiveChatMode('agent')
       setInput('')
-      setMessages([
-        {
-          id: createBubuMessageId('user'),
-          role: 'user',
-          content: prompt,
-          createdAt: new Date(),
-          mode: 'agent',
-        },
-        assistantMessage,
-      ])
+      setMessages([assistantMessage])
       setAgentPendingConfirmation(null)
       setAgentParticipants([])
       setAgentTimeRanges([])
@@ -966,6 +979,7 @@ function HomeContent() {
     } else if (prompt) {
       setInput(prompt)
       if (!user && guestFinalAnswerUsed) {
+        setAuthDialogMode('signup')
         setShowAuthDialog(true)
       }
     }
@@ -973,6 +987,11 @@ function HomeContent() {
       setShowLandingAuthHint(true)
       setLandingComposerPulse(true)
       window.setTimeout(() => setLandingComposerPulse(false), 1800)
+      if (!prompt && !user && fromLandingTrial && !guestFinalAnswerUsed) {
+        setActiveChatMode('agent')
+        setCurrentSessionMode('agent')
+        window.setTimeout(() => composerTextareaRef.current?.focus(), 120)
+      }
     }
     if (url.searchParams.has('prompt') || url.searchParams.has('from') || url.searchParams.has('trialFlow')) {
       url.searchParams.delete('prompt')
@@ -981,7 +1000,7 @@ function HomeContent() {
       const nextUrl = `${url.pathname}${url.search}${url.hash}`
       window.history.replaceState(window.history.state, '', nextUrl || '/')
     }
-  }, [authLoading, guestFinalAnswerUsed, user])
+  }, [authLoading, guestFinalAnswerUsed, guestTrialStateHydrated, user])
 
   // Fetch apple quota when user changes
   const fetchQuota = useCallback(async () => {
@@ -2610,6 +2629,7 @@ function HomeContent() {
       setShowLandingAuthHint(true)
       setLandingComposerPulse(true)
       window.setTimeout(() => setLandingComposerPulse(false), 1400)
+      setAuthDialogMode('signup')
       setShowAuthDialog(true)
       return
     }
@@ -2834,6 +2854,7 @@ function HomeContent() {
           if (errorData.error === 'guest_trial_exhausted') {
             markGuestTrialFinalAnswerUsed()
             setShowLandingAuthHint(true)
+            setAuthDialogMode('signup')
             setShowAuthDialog(true)
             if (!foregroundRun || isForegroundRunVisible(foregroundRun)) {
               setMessages(prev => prev.filter(m => m.id !== userMessage.id && m.id !== assistantMessage.id))
@@ -3840,10 +3861,11 @@ function HomeContent() {
         const nameCorrection = originalProfileName && originalProfileName !== savedProfile.name
           ? `\n人物名修正：${originalProfileName} -> ${savedProfile.name}`
           : ''
-        const onboardingQuestion = isGuestOnboardingProfileRequest(request)
-          ? (landingGuestQuestionRef.current || guestOnboardingQuestion || '')
+        const isGuestOnboardingRequest = isGuestOnboardingProfileRequest(request)
+        const onboardingQuestion = isGuestOnboardingRequest
+          ? (landingGuestQuestionRef.current ?? guestOnboardingQuestion ?? '')
           : ''
-        const resumeText = onboardingQuestion
+        const resumeText = isGuestOnboardingRequest
           ? buildGuestOnboardingAnswerPrompt(onboardingQuestion, savedProfile.name)
           : `${request.resumeIntent || '请继续刚才的问题'}\n已创建八字人物：${savedProfile.name}。${nameCorrection}`
         const event = {
@@ -3852,7 +3874,7 @@ function HomeContent() {
           __selectedProfileOverride: nextSelectedProfile,
           __selectedParticipantsOverride: nextParticipants,
           __preserveCurrentProfile: true,
-          ...(onboardingQuestion
+          ...(isGuestOnboardingRequest
             ? {
                 __guestOnboarding: true,
                 __guestOnboardingQuestion: onboardingQuestion,
@@ -4108,7 +4130,7 @@ function HomeContent() {
     !user ? (
       <div
         className="flex h-8 flex-shrink-0 items-center justify-center rounded-full bg-muted/70 px-2.5 text-xs font-light text-muted-foreground"
-        title="游客试用默认使用快速简洁回答"
+        title="游客试用默认先看「我」的入门画像"
       >
         试用
       </div>
@@ -4239,6 +4261,7 @@ function HomeContent() {
   )
 
   // ---- 渲染主聊天区域 ----
+  const hasPendingAgentUi = messages.some(message => message.agentUiStatus === 'pending')
   const renderChatArea = () => (
     <>
       <div ref={messagesContainerRef} className="relative flex-1 overflow-y-auto px-3 pb-6 pt-16 [scrollbar-gutter:stable] md:px-6 md:pb-8">
@@ -4283,10 +4306,13 @@ function HomeContent() {
               footer={!user && (
                 <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-lg border border-border bg-card/70 px-4 py-3 text-center backdrop-blur-sm">
                   <p className="text-xs sm:text-sm text-muted-foreground font-light">
-                    可以先试用一次简洁回答；登录后可保存人物档案、同步聊天记录，并继续对话。
+                    可以先看一次「我」的入门画像；登录后可保存人物档案、同步聊天记录，并继续对话。
                   </p>
                   <button
-                    onClick={() => setShowAuthDialog(true)}
+                    onClick={() => {
+                      setAuthDialogMode('signup')
+                      setShowAuthDialog(true)
+                    }}
                     className="h-9 rounded-lg bg-primary px-5 text-sm font-light text-primary-foreground hover:opacity-90 transition-all"
                   >
                     登录 / 注册
@@ -4365,6 +4391,40 @@ function HomeContent() {
             </div>
           )}
 
+          {!user && showNewUserTutorial && activeChatMode === 'agent' && !guestOnboardingQuestion && !guestFinalAnswerUsed && !hasPendingAgentUi && (
+            <div className="mb-2 rounded-lg border border-primary/20 bg-card/88 px-4 py-3 shadow-sm backdrop-blur-sm animate-fade-in relative">
+              <button
+                type="button"
+                onClick={dismissNewUserTutorial}
+                className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md bg-muted/60 text-muted-foreground transition-colors hover:text-foreground"
+                title={GUEST_FIRST_QA_FLOW.copy.tutorialDismissLabel}
+              >
+                <X className="h-3 w-3" />
+              </button>
+              <div className="pr-7">
+                <p className="text-sm font-medium text-foreground">
+                  {GUEST_FIRST_QA_FLOW.copy.tutorialTitle}
+                </p>
+                <p className="mt-1 text-xs font-light leading-5 text-muted-foreground">
+                  {GUEST_FIRST_QA_FLOW.copy.tutorialDescription}
+                </p>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                {GUEST_FIRST_QA_FLOW.copy.tutorialSteps.map(step => (
+                  <div key={step.label} className="rounded-lg border border-border/70 bg-background/42 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-xs font-medium text-primary">
+                        {step.label}
+                      </span>
+                      <p className="min-w-0 truncate text-xs font-medium text-foreground">{step.title}</p>
+                    </div>
+                    <p className="mt-1.5 text-[11px] font-light leading-4 text-muted-foreground">{step.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!user && showLandingAuthHint && (
             <div className="mb-2 rounded-lg border border-primary/25 bg-card/88 px-4 py-3 shadow-sm backdrop-blur-sm animate-fade-in relative">
               <button
@@ -4379,20 +4439,23 @@ function HomeContent() {
                 <p className="text-sm font-medium text-foreground">
                   {guestFinalAnswerUsed
                     ? GUEST_FIRST_QA_FLOW.copy.authHintTitle.completed
-                    : guestOnboardingQuestion
+                    : guestOnboardingQuestion || hasPendingAgentUi
                     ? GUEST_FIRST_QA_FLOW.copy.authHintTitle.collecting
-                    : '你的问题已经带过来了'}
+                    : GUEST_FIRST_QA_FLOW.copy.authHintTitle.ready}
                 </p>
                 <p className="mt-1 text-xs font-light leading-5 text-muted-foreground">
                   {guestFinalAnswerUsed
                     ? GUEST_FIRST_QA_FLOW.copy.authHintDescription.completed
-                    : guestOnboardingQuestion
+                    : guestOnboardingQuestion || hasPendingAgentUi
                     ? GUEST_FIRST_QA_FLOW.copy.authHintDescription.collecting
-                    : '可以先试用一次简洁回答；登录后会保存聊天记录，并在需要深度分析时创建人物档案。出生信息会在功能流程中按需填写。'}
+                    : GUEST_FIRST_QA_FLOW.copy.authHintDescription.ready}
                 </p>
                 <button
                   type="button"
-                  onClick={() => setShowAuthDialog(true)}
+                  onClick={() => {
+                    setAuthDialogMode(guestFinalAnswerUsed ? 'signup' : 'signin')
+                    setShowAuthDialog(true)
+                  }}
                   className="mt-2 h-8 rounded-lg bg-primary px-3 text-xs font-light text-primary-foreground transition-all hover:opacity-90"
                 >
                   {guestFinalAnswerUsed ? '登录 / 注册继续' : '登录后保存记录'}
@@ -4694,7 +4757,7 @@ function HomeContent() {
                   value={input}
                   onChange={handleInputChange}
                   onKeyDown={handleComposerKeyDown}
-                  placeholder={user ? (activeChatMode === 'agent' ? '想聊什么？随便问吧' : '想聊什么？随便问吧') : guestFinalAnswerUsed ? '登录后继续和卜卜象聊' : '先问一句，试用一次简洁回答'}
+                  placeholder={user ? (activeChatMode === 'agent' ? '想聊什么？随便问吧' : '想聊什么？随便问吧') : guestFinalAnswerUsed ? '登录后继续和卜卜象聊' : '先留下问题，免费先看「我」'}
                   className="composer-textarea h-8 min-h-8 max-h-32 min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1 py-1.5 text-sm font-light leading-5 text-foreground placeholder-muted-foreground focus:outline-none"
                   disabled={isLoading}
                 />
@@ -4857,7 +4920,11 @@ function HomeContent() {
         {showAuthDialog && (
           <AuthDialog
             isOpen={showAuthDialog}
-            onClose={() => setShowAuthDialog(false)}
+            onClose={() => {
+              setShowAuthDialog(false)
+              setAuthDialogMode('signin')
+            }}
+            mode={authDialogMode}
           />
         )}
         {showRewardsDialog && (

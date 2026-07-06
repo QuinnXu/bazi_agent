@@ -11,7 +11,11 @@ import {
   type AgentReportPreference,
 } from '@/lib/agent-complexity'
 import { runAgentAnalysisStream } from '@/lib/agent-analysis-runner'
-import { buildGuestFirstQaSystemPrompt } from '@/lib/guest-first-qa-flow'
+import {
+  buildGuestFirstQaFixedQuestion,
+  buildGuestFirstQaSystemPrompt,
+  buildGuestFirstQaTrialPromptContext,
+} from '@/lib/guest-first-qa-flow'
 import {
   normalizeAgentCardPlan,
   planAgentCardWithLLM,
@@ -441,15 +445,25 @@ function buildAnalysisRequest(
   const calendar = buildCalendarContext(slots)
   const preference = effectiveReportPreference(input)
   const customInstruction = normalizeAgentReportPreference(preference)?.customInstruction || null
+  const basePromptStyleHint = customInstruction
+    ? customInstruction
+    : buildAgentReportStyleHint(getAgentReportPreferenceLabel(preference))
+  const guestOriginalQuestion = input.guestOnboardingQuestion?.trim() || null
+  const promptStyleHint = input.guestOnboarding
+    ? [
+        basePromptStyleHint,
+        buildGuestFirstQaTrialPromptContext(guestOriginalQuestion),
+      ].join('\n')
+    : basePromptStyleHint
   return {
     slots,
     calendar,
     depth,
-    userQuestion: slots.matter?.raw || sourceText,
+    userQuestion: input.guestOnboarding
+      ? buildGuestFirstQaFixedQuestion()
+      : slots.matter?.raw || sourceText,
     conversationSummary: input.sessionSummary || input.featureContext?.summary || null,
-    promptStyleHint: customInstruction
-      ? customInstruction
-      : buildAgentReportStyleHint(getAgentReportPreferenceLabel(preference)),
+    promptStyleHint,
   }
 }
 
@@ -588,11 +602,11 @@ function chooseAgentResponseMode(
   toolDecision?: AgentToolDecision | null,
 ): AgentResponsePolicy {
   const intentText = sourceText || latest
+  if (input.guestOnboarding && hasDirectChatProfileContext(input)) {
+    return { mode: 'report', reason: 'guest_onboarding' }
+  }
   if (slots.matter?.analysisMode !== 'analysis') {
     return { mode: 'direct_answer', reason: 'plain_chat' }
-  }
-  if (input.guestOnboarding && hasDirectChatProfileContext(input)) {
-    return { mode: 'direct_answer', reason: 'guest_onboarding' }
   }
   if (input.pendingConfirmation?.kind === 'select_depth' || effectiveReportPreference(input)) {
     return { mode: 'report', reason: 'active_report_workflow' }

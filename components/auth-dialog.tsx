@@ -29,6 +29,10 @@ export function AuthDialog({ isOpen, onClose, mode: initialMode = 'signin' }: Au
   const verifiedOtpKeyRef = useRef<string | null>(null)
   const { signIn, signUp, verifyOtp, resendSignUpOtp, resetPasswordForEmail } = useAuth()
 
+  useEffect(() => {
+    if (isOpen) setMode(initialMode)
+  }, [initialMode, isOpen])
+
   // 60 秒重发倒计时
   useEffect(() => {
     if (resendCountdown <= 0) return
