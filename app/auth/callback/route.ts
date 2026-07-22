@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { completeUserRegistration } from '@/lib/rewards'
+import {
+  clearReferralAttributionCookie,
+  getReferralAttributionId,
+} from '@/lib/referral-attribution'
 
 /**
  * 处理 Supabase 邮箱确认链接回调（及 OAuth 等 code 交换）。
@@ -27,7 +31,11 @@ export async function GET(request: Request) {
     if (!error) {
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        await completeUserRegistration(user)
+        const attributionId = await getReferralAttributionId()
+        const result = await completeUserRegistration(user, null, attributionId)
+        if (result.referralApplied) {
+          await clearReferralAttributionCookie()
+        }
       }
     }
   }

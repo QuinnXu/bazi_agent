@@ -2,8 +2,9 @@
 
 const { paipan: PaipanClass } = require('@/tool/paipan')
 
-import { consumeApples, getOrResetQuota } from '@/lib/quota'
-import { CLASSIC_CHAT_APPLE_COST } from '@/lib/apple-costs'
+import { consumeApples, getOrResetQuota, refundApples } from '@/lib/quota'
+import { createChargeSettledStream } from '@/lib/quota-stream'
+import { getClassicChatAppleCost, resolveBillingPlan } from '@/lib/apple-costs'
 import {
   getAgentComplexityProfile,
   type AgentComplexityMode,
@@ -65,6 +66,7 @@ export interface ClassicChatResult {
   task: LlmTaskKind
   model: string
   inputTokens: number
+  appleCost: number
 }
 
 export class ServiceHttpError extends Error {
@@ -147,18 +149,31 @@ export async function runClassicChatStream(
     ? null
     : await getOrResetQuota(input.userId)
   const preUsedToday = preQuota?.usedToday ?? 0
+  const appleCost = input.guestTrial || !useUltraMode
+    ? 0
+    : getClassicChatAppleCost(resolveBillingPlan(preQuota?.tier))
+  let chargeId: string | null = null
 
-  if (!input.guestTrial && useUltraMode && CLASSIC_CHAT_APPLE_COST > 0) {
-    const { success, quota } = await consumeApples(input.userId, CLASSIC_CHAT_APPLE_COST)
+  if (!input.guestTrial && (useUltraMode || preQuota?.tier === 'ultra')) {
+    const charge = await consumeApples(input.userId, appleCost, { enforceFairUse: true })
+    const { success, quota } = charge
     if (!success) {
+      if (charge.fairUseLimited) {
+        throw new ServiceHttpError(429, {
+          error: 'fair_use_limited',
+          message: '当前账号的生成任务过于频繁，请稍后再试。',
+          retryAfterSeconds: charge.retryAfterSeconds,
+        })
+      }
       throw new ServiceHttpError(403, {
         error: 'quota_exceeded',
-        message: `这次经典投喂需要 ${CLASSIC_CHAT_APPLE_COST} 个苹果🍎，今天的库存不太够啦。`,
-        required: CLASSIC_CHAT_APPLE_COST,
+        message: `这次经典投喂需要 ${appleCost} 个苹果🍎，今天的库存不太够啦。`,
+        required: appleCost,
         remaining: quota.remaining,
         dailyLimit: quota.dailyLimit,
       })
     }
+    chargeId = charge.chargeId
   }
 
   const task = pickLlmTask({
@@ -169,18 +184,28 @@ export async function runClassicChatStream(
   const complexityProfile = getAgentComplexityProfile(input.complexity)
 
   const messagesWithSystem = buildClassicMessages(input)
-  const { response, config, inputTokens } = await callLLM(messagesWithSystem, task, {
-    signal: opts.signal,
-    maxTokens: complexityProfile.answerMaxTokens,
-    thinking: complexityProfile.thinking,
-    reasoningEffort: complexityProfile.reasoningEffort,
-  })
+  let llmResult: Awaited<ReturnType<typeof callLLM>>
+  try {
+    llmResult = await callLLM(messagesWithSystem, task, {
+      signal: opts.signal,
+      maxTokens: complexityProfile.answerMaxTokens,
+      thinking: complexityProfile.thinking,
+      reasoningEffort: complexityProfile.reasoningEffort,
+    })
+  } catch (error) {
+    if (chargeId) await refundApples(input.userId, chargeId)
+    throw error
+  }
+  const { response, config, inputTokens } = llmResult
   const baseStream = createUnifiedStreamProcessor(response, {
     chunking: 'immediate',
   })
+  const billableStream = chargeId
+    ? createChargeSettledStream(baseStream, { userId: input.userId, chargeId })
+    : baseStream
   const stream = input.skipUsageTracking
-    ? baseStream
-    : createUsageTrackedStream(baseStream, {
+    ? billableStream
+    : createUsageTrackedStream(billableStream, {
         userId: input.userId,
         source: 'classic_chat',
         mode: 'classic',
@@ -189,5 +214,5 @@ export async function runClassicChatStream(
         inputTokens,
       })
 
-  return { stream, task, model: config.model, inputTokens }
+  return { stream, task, model: config.model, inputTokens, appleCost }
 }

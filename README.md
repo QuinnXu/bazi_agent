@@ -43,13 +43,35 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# OTT Pay Checkout (server-only; use the credentials issued to your merchant)
+OTTPAY_MERCHANT_ID=your-merchant-id
+OTTPAY_SHOP_ID=your-shop-id
+OTTPAY_OPERATOR_ID=your-operator-id
+OTTPAY_SIGN_KEY=your-sign-key
+OTTPAY_APP_KEY=your-app-key
+OTTPAY_CURRENCY=CAD
+OTTPAY_CAD_PER_CNY=0.2077
+OTTPAY_EXCHANGE_RATE_DATE=2026-07-20
+OTTPAY_PUBLIC_BASE_URL=https://your-public-domain.example
+OTTPAY_CHECKOUT_ENABLED=
+OTTPAY_RECONCILE_SECRET=generate-a-long-random-secret
+OTTPAY_TEST_USER_IDS=uuid-1,uuid-2
+# 仅在执行 1 分真实交易测试期间临时启用
+OTTPAY_LIVE_TEST_CONFIRM=YES
 ```
 
 ### 4. 部署数据库
 
 在 Supabase Dashboard 的 SQL Editor 中执行 `supabase/schema_v2_english.sql`，确保存在 `profiles` 等表（不要使用 `users` 表名）。
 
-已有线上库升级时，也可以按顺序执行 `supabase/migrations/` 中的迁移；推荐奖励与兑换码功能对应 `20260515_referrals_redemptions.sql`。
+首次建库先执行 `supabase/schema_v2_english.sql`，随后仍需按文件名顺序执行 `supabase/migrations/` 中尚未包含于基础 Schema 的迁移。推荐奖励基础能力对应 `20260515_referrals_redemptions.sql`，双向苹果奖励与拉新漏斗对应 `202607200001_referral_growth_v2.sql`。
+
+### OTT Pay 1 分真实支付与权益测试
+
+OTT Pay 官方说明微信/支付宝不提供沙箱。当前 Merchant ID 以 CAD 结算：人民币目录价按 `OTTPAY_CAD_PER_CNY` 固定汇率四舍五入到 CAD 分，并把汇率及日期写入订单商品快照。配置 `OTTPAY_CHECKOUT_ENABLED=YES`、`OTTPAY_TEST_USER_IDS` 与 `OTTPAY_LIVE_TEST_CONFIRM=YES` 后，使用白名单账号登录 `/payment-test`。创建订单后系统会立即主动查单；只要 OTT 返回的商户、门店、金额或币种不是订单快照中的预期 CAD 值，就不会暴露支付链接。
+
+测试页只使用支付宝并在新窗口打开支付页，提供两种固定 CAD 0.01 真实订单：当前会员层级续期 1 天，以及充值 1 个 7 天有效的苹果。支付回调、页面主动查单和每 5 分钟补单都会经过商户、门店、币种、金额校验和幂等入账；有效 Ultra 会员按正式规则不能购买苹果包。关闭支付窗口会保留原订单供继续支付，不会重复建单。测试结束后移除 `OTTPAY_LIVE_TEST_CONFIRM`。
 
 ### 5. 配置 Supabase 认证回调（必做）
 
@@ -143,6 +165,7 @@ pnpm dev
 | `message_feedback` | 消息反馈 |
 | `user_quotas` | 苹果额度、会员周期、限时额外额度 |
 | `referrals` | 推荐关系与推荐奖励记录 |
+| `referral_attributions` | 匿名首次点击归因与试用、注册、激活漏斗 |
 | `redemption_codes` | 后台生成的推广兑换码 |
 | `redemption_redemptions` | 用户兑换记录 |
 
@@ -192,6 +215,19 @@ git push origin main
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase 项目 URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase Anon Key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Service Role Key |
+| `OTTPAY_MERCHANT_ID` | OTT Pay 商户号（仅服务端） |
+| `OTTPAY_SHOP_ID` | OTT Pay 门店号（仅服务端） |
+| `OTTPAY_OPERATOR_ID` | OTT Pay 操作员号（仅服务端） |
+| `OTTPAY_SIGN_KEY` | OTT Pay 加密签名密钥（仅服务端） |
+| `OTTPAY_APP_KEY` | OTT Pay AppKey / Merchant Code（预留给需要该凭据的渠道 API） |
+| `OTTPAY_CURRENCY` | OTT 商户结算币种；当前必须设为 `CAD` |
+| `OTTPAY_CAD_PER_CNY` | 固定 CNY→CAD 汇率；订单创建时写入快照并按 CAD 分四舍五入 |
+| `OTTPAY_EXCHANGE_RATE_DATE` | 汇率日期，格式 `YYYY-MM-DD` |
+| `OTTPAY_PUBLIC_BASE_URL` | 接收支付回跳和 webhook 的公网 HTTPS 根地址 |
+| `OTTPAY_CHECKOUT_ENABLED` | 全局支付开关；仅当 CAD 折算和 OTT 主动查单预检通过后设为 `YES` |
+| `OTTPAY_RECONCILE_SECRET` | Supabase Cron 调用补单接口使用的服务端 Bearer Secret，同时保存到 Supabase Vault |
+| `OTTPAY_TEST_USER_IDS` | 允许进入 1 分真实支付测试页的 Supabase 用户 UUID，多个用逗号分隔 |
+| `OTTPAY_LIVE_TEST_CONFIRM` | 设为 `YES` 才允许创建 1 分真实测试单；测试完成后移除 |
 
 ### 4. 部署
 

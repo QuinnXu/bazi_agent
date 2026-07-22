@@ -60,6 +60,7 @@ export interface AgentInlineInputRequest {
   type: 'human_input_request'
   requestId: string
   kind: 'bazi_profile' | 'bazi_profiles' | 'profile_required' | 'feature_params'
+  variant?: 'guest_first_qa_profile'
   title: string
   message: string
   fields: AgentInputField[]
@@ -70,6 +71,8 @@ export interface AgentInlineInputRequest {
 
 export type AgentInputValue = string | string[] | boolean | number | null
 export type AgentInputValues = Record<string, AgentInputValue>
+
+const GUEST_FIRST_QA_PROFILE_NAME = '我'
 
 interface AgentInputRequestProps {
   request: AgentInlineInputRequest
@@ -211,6 +214,7 @@ function validateBatchBaziProfiles(
 }
 
 export function AgentInputRequest({ request, disabled = false, onSubmit }: AgentInputRequestProps) {
+  const isGuestFirstQaProfileRequest = request.variant === 'guest_first_qa_profile'
   const requestBatchProfiles = useMemo(() => {
     if (request.kind !== 'bazi_profiles') return []
     return request.profiles && request.profiles.length > 0 ? request.profiles : [{}]
@@ -220,8 +224,17 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
     if (request.kind === 'bazi_profiles') {
       return batchProfilesInitialValues(requestBatchProfiles)
     }
-    return Object.fromEntries(request.fields.map(field => [field.name, initialValueFor(field)])) as AgentInputValues
-  }, [request.fields, request.kind, requestBatchProfiles])
+    const values = Object.fromEntries(request.fields.map(field => [field.name, initialValueFor(field)])) as AgentInputValues
+    if (!isGuestFirstQaProfileRequest) return values
+    return {
+      ...values,
+      profileName: GUEST_FIRST_QA_PROFILE_NAME,
+      minute: values.minute || '0',
+      longitude: values.longitude || String(DEFAULT_BIRTH_LOCATION.longitude),
+      latitude: values.latitude || String(DEFAULT_BIRTH_LOCATION.latitude),
+      locationName: values.locationName || DEFAULT_BIRTH_LOCATION.name,
+    }
+  }, [isGuestFirstQaProfileRequest, request.fields, request.kind, requestBatchProfiles])
 
   const [values, setValues] = useState<AgentInputValues>(initialValues)
   const [batchProfiles, setBatchProfiles] = useState<AgentBaziProfileInputData[]>(requestBatchProfiles)
@@ -310,6 +323,7 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
 
   const renderBaziProfileFields = (profileIndex?: number) => {
     const isBatchProfile = typeof profileIndex === 'number'
+    const hideProfileName = isGuestFirstQaProfileRequest && !isBatchProfile
     const nameFor = (fieldName: typeof BATCH_BAZI_FIELDS[number]) => (
       isBatchProfile ? batchFieldName(profileIndex, fieldName) : fieldName
     )
@@ -335,18 +349,20 @@ export function AgentInputRequest({ request, disabled = false, onSubmit }: Agent
 
     return (
       <div className="space-y-4">
-        <label className="space-y-1.5 text-xs text-muted-foreground block">
-          <span>人物名称 *</span>
-          <input
-            type="text"
-            value={String(values[nameFor('profileName')] ?? '')}
-            disabled={disabled || isSubmitting}
-            required
-            placeholder="比如：小明、伴侣，或者小象要看的那个人"
-            onChange={event => updateValue(nameFor('profileName'), event.target.value)}
-            className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
-          />
-        </label>
+        {!hideProfileName && (
+          <label className="space-y-1.5 text-xs text-muted-foreground block">
+            <span>人物名称 *</span>
+            <input
+              type="text"
+              value={String(values[nameFor('profileName')] ?? '')}
+              disabled={disabled || isSubmitting}
+              required
+              placeholder="比如：小明、伴侣，或者小象要看的那个人"
+              onChange={event => updateValue(nameFor('profileName'), event.target.value)}
+              className="w-full h-10 rounded-lg border border-border bg-card/60 px-3 text-sm text-foreground outline-none focus:border-primary/60 focus:bg-card/80"
+            />
+          </label>
+        )}
 
         <BirthDatePicker
           year={String(values[nameFor('year')] ?? '')}

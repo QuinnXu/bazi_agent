@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'crypto'
 import { cookies } from 'next/headers'
 import { createServiceClient } from '@/lib/supabase/client'
+import { touchReferralAttribution } from '@/lib/referral-attribution'
 
 export const GUEST_TRIAL_COOKIE = 'bubu_guest_trial'
 export const GUEST_TRIAL_FINAL_ANSWER_LIMIT = 1
@@ -88,6 +89,7 @@ export async function getOrCreateGuestTrial(): Promise<GuestTrialState> {
     if (insertError || !inserted) {
       throw new Error(`Guest trial create failed: ${insertError?.message || 'missing row'}`)
     }
+    await touchReferralAttribution('trial_started_at')
     return normalizeGuestRow(inserted)
   }
 
@@ -107,6 +109,7 @@ export async function getOrCreateGuestTrial(): Promise<GuestTrialState> {
     if (resetError || !reset) {
       throw new Error(`Guest trial reset failed: ${resetError?.message || 'missing row'}`)
     }
+    await touchReferralAttribution('trial_started_at')
     return normalizeGuestRow(reset)
   }
 
@@ -125,6 +128,7 @@ export async function getOrCreateGuestTrial(): Promise<GuestTrialState> {
     throw new Error(`Guest trial touch failed: ${error?.message || 'missing row'}`)
   }
 
+  await touchReferralAttribution('trial_started_at')
   return normalizeGuestRow(data)
 }
 
@@ -161,5 +165,6 @@ export async function recordGuestFinalAnswer(keyHash: string): Promise<GuestTria
     return null
   }
 
+  await touchReferralAttribution('trial_completed_at')
   return normalizeGuestRow(updated)
 }

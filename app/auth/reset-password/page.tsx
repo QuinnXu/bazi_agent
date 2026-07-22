@@ -202,7 +202,7 @@ function ResetPasswordForm() {
         </div>
         <Link
           href="/"
-          className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 transition-all duration-300"
+          className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 transition-all duration-150"
         >
           <ArrowLeft className="w-4 h-4" />
           回到登录页
@@ -226,7 +226,7 @@ function ResetPasswordForm() {
         </div>
         <Link
           href="/"
-          className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 transition-all duration-300"
+          className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 transition-all duration-150"
         >
           <ArrowLeft className="w-4 h-4" />
           回到登录页
@@ -263,7 +263,7 @@ function ResetPasswordForm() {
         </div>
         <Link
           href="/"
-          className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 transition-all duration-300"
+          className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 transition-all duration-150"
         >
           <ArrowLeft className="w-4 h-4" />
           回到登录页
@@ -289,7 +289,7 @@ function ResetPasswordForm() {
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
+              className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-150"
               placeholder="至少 6 位"
               required
               minLength={6}
@@ -308,7 +308,7 @@ function ResetPasswordForm() {
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
+              className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-150"
               placeholder="再输一次"
               required
               minLength={6}
@@ -332,7 +332,7 @@ function ResetPasswordForm() {
         <button
           type="submit"
           disabled={submitting || done}
-          className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
+          className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
         >
           {done ? '小象正在带你回家…' : submitting ? '小象保存中…' : '保存新密码'}
         </button>

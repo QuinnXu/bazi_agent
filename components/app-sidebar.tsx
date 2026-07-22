@@ -20,6 +20,7 @@ import {
   ChevronDown,
   Settings,
   Sparkles,
+  Crown,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -45,6 +46,8 @@ import { createBrowserClient } from '@/lib/supabase/client'
 import { useAuth } from '@/contexts/auth-context'
 import type { ChatSession } from '@/types/database_v2'
 import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
+import { AccountDeletionDialog } from '@/components/account-deletion-dialog'
+import { getMembershipEntryLabel } from '@/lib/membership-plans'
 
 export type FeatureType = 'chat' | 'hepan' | 'fortune' | 'avatar' | 'lifepath'
 export type ChatMode = 'classic' | 'agent' | 'liuyao'
@@ -55,12 +58,24 @@ interface AppSidebarProps {
   onFeatureChange: (feature: FeatureType) => void
   onChatModeChange: (mode: ChatMode) => void
   currentSessionId: string | null
-  onSelectSession: (sessionId: string, mode?: ChatMode) => void
+  onSelectSession: (
+    sessionId: string,
+    mode?: ChatMode,
+    origin?: 'history' | 'new-chat',
+  ) => void
   onOpenAuth: () => void
   onOpenProfiles: () => void
   onOpenChangePassword: () => void
-  appleQuota?: { remaining: number; dailyLimit: number; isPaid: boolean } | null
-  onOpenDonation?: () => void
+  appleQuota?: {
+    tier?: 'free' | 'plus' | 'ultra'
+    remaining: number
+    dailyRemaining?: number
+    dailyLimit: number
+    walletBalance?: number
+    unlimited?: boolean
+    isPaid: boolean
+  } | null
+  onOpenMembership?: () => void
   refreshKey?: number
 }
 
@@ -106,7 +121,7 @@ export function AppSidebar({
   onOpenProfiles,
   onOpenChangePassword,
   appleQuota,
-  onOpenDonation,
+  onOpenMembership,
   refreshKey = 0,
 }: AppSidebarProps) {
   const { user, signOut } = useAuth()
@@ -116,6 +131,7 @@ export function AppSidebar({
   const [loadingSessions, setLoadingSessions] = useState(false)
   const loadSessionsSeqRef = useRef(0)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [showDeleteAccountDialog, setShowDeleteAccountDialog] = useState(false)
   const [abilitiesOpen, setAbilitiesOpen] = useState(false)
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null)
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
@@ -190,7 +206,7 @@ export function AppSidebar({
   }
 
   const handleNewChat = () => {
-    onSelectSession('new', activeChatMode)
+    onSelectSession('new', activeChatMode, 'new-chat')
     onFeatureChange('chat')
     closeMobileSidebar()
   }
@@ -222,7 +238,13 @@ export function AppSidebar({
     closeMobileSidebar()
   }
 
+  const handleOpenMembership = () => {
+    onOpenMembership?.()
+    closeMobileSidebar()
+  }
+
   return (
+    <>
     <Sidebar collapsible="offcanvas" className="border-r border-sidebar-border bg-sidebar/95">
       <SidebarHeader className="p-3 pb-2">
         <div className="flex items-center justify-between gap-2 px-1 py-1">
@@ -266,6 +288,7 @@ export function AppSidebar({
               <button
                 type="button"
                 onClick={() => handleModeSelect('agent')}
+                aria-pressed={activeFeature === 'chat' && activeChatMode === 'agent'}
                 className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
                   activeFeature === 'chat' && activeChatMode === 'agent'
                     ? 'bg-card text-foreground shadow-sm'
@@ -278,6 +301,7 @@ export function AppSidebar({
               <button
                 type="button"
                 onClick={() => handleModeSelect('liuyao')}
+                aria-pressed={activeFeature === 'chat' && activeChatMode === 'liuyao'}
                 className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs transition-colors ${
                   activeFeature === 'chat' && activeChatMode === 'liuyao'
                     ? 'bg-card text-foreground shadow-sm'
@@ -448,20 +472,36 @@ export function AppSidebar({
         {/* Apple quota display */}
         {user && appleQuota && (
           <button
-            onClick={onOpenDonation}
-            className="w-full bg-secondary/40 rounded-lg px-3 py-2 flex items-center justify-between hover:bg-secondary/60 transition-colors"
+            type="button"
+            onClick={handleOpenMembership}
+            aria-label={`${getMembershipEntryLabel(appleQuota.tier)}，查看会员套餐`}
+            className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+              appleQuota.tier === 'ultra'
+                ? 'border-sidebar-border bg-secondary/40 hover:bg-secondary/60'
+                : 'border-primary/20 bg-primary/[0.07] hover:border-primary/35 hover:bg-primary/[0.11]'
+            }`}
           >
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
               <span className="text-sm">🍎</span>
-              <span className="text-xs font-light text-sidebar-foreground">
-                今日苹果篮 {appleQuota.remaining}/{appleQuota.dailyLimit}
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium text-sidebar-foreground">
+                  {appleQuota.tier === 'ultra' ? 'Ultra' : appleQuota.tier === 'plus' ? 'Plus' : '免费会员'}
+                </span>
+                <span className="block truncate text-[10px] text-muted-foreground">
+                  {appleQuota.unlimited
+                    ? '无限苹果 · 全功能畅用'
+                    : `今日 ${appleQuota.dailyRemaining ?? appleQuota.remaining}/${appleQuota.dailyLimit} · 充值 ${appleQuota.walletBalance || 0}`}
+                </span>
               </span>
             </div>
-            {appleQuota.isPaid && (
-              <span className="bg-accent/20 text-accent rounded-full px-2 py-0.5 text-[10px] font-light">
-                VIP
-              </span>
-            )}
+            <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[10px] font-medium ${
+              appleQuota.tier === 'ultra'
+                ? 'bg-secondary text-muted-foreground'
+                : 'bg-primary/[0.12] text-primary'
+            }`}>
+              <Crown className="h-3 w-3" aria-hidden="true" />
+              {getMembershipEntryLabel(appleQuota.tier)}
+            </span>
           </button>
         )}
         {!user ? (
@@ -505,6 +545,17 @@ export function AppSidebar({
                     </button>
                     <SidebarSeparator className="my-1" />
                     <button
+                      onClick={() => {
+                        setShowDeleteAccountDialog(true)
+                        setShowUserMenu(false)
+                        closeMobileSidebar()
+                      }}
+                      className="w-full px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      注销账户
+                    </button>
+                    <button
                       onClick={async () => { await signOut(); setShowUserMenu(false); closeMobileSidebar() }}
                       className="w-full px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-2"
                     >
@@ -519,5 +570,10 @@ export function AppSidebar({
         )}
       </SidebarFooter>
     </Sidebar>
+    <AccountDeletionDialog
+      isOpen={showDeleteAccountDialog}
+      onClose={() => setShowDeleteAccountDialog(false)}
+    />
+    </>
   )
 }

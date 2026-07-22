@@ -17,9 +17,7 @@ import {
   type AgentReportPreference,
 } from '@/lib/agent-complexity'
 import { runFeatureAnalysisStream, type FeatureKind } from '@/lib/feature-service'
-import { CLASSIC_CHAT_APPLE_COST } from '@/lib/apple-costs'
 import { BUBU_EMPTY_RESPONSE } from '@/lib/bubu-copy'
-import { refundApples } from '@/lib/quota'
 import { createServiceClient } from '@/lib/supabase/client'
 import { sanitizeReplacementChars } from '@/lib/text-sanitize'
 import { estimateTokensForText } from '@/lib/token-estimator'
@@ -82,6 +80,7 @@ interface FeaturePayload {
   params: any
   chatMode?: 'classic' | 'agent'
   complexity?: AgentComplexityMode
+  reportPreference?: AgentReportPreference | null
   summary?: string
   featureContext?: Record<string, any>
 }
@@ -225,10 +224,6 @@ export async function startLlmRun(runId: string): Promise<void> {
 
     if (claimedRun.kind === 'classic_chat') {
       const payload = claimedRun.payload as ClassicPayload
-      const cost = payload.useUltraMode ? CLASSIC_CHAT_APPLE_COST : 0
-      if (cost > 0) {
-        await supabase.from('llm_runs').update({ apple_cost: cost }).eq('id', runId)
-      }
       const result = await runClassicChatStream(
         {
           userId: claimedRun.user_id,
@@ -243,6 +238,9 @@ export async function startLlmRun(runId: string): Promise<void> {
       model = result.model
       task = result.task
       inputTokens = result.inputTokens
+      if (result.appleCost > 0) {
+        await supabase.from('llm_runs').update({ apple_cost: result.appleCost }).eq('id', runId)
+      }
       await consumeTextStream(result.stream, chunk => {
         bufferedDelta += chunk
         return flushDelta()
@@ -259,6 +257,7 @@ export async function startLlmRun(runId: string): Promise<void> {
           complexity: payload.complexity
             ? normalizeAgentComplexityMode(payload.complexity)
             : undefined,
+          reportPreference: payload.reportPreference,
         },
         { signal: controller.signal },
       )
@@ -350,16 +349,6 @@ export async function startLlmRun(runId: string): Promise<void> {
     if (controller.signal.aborted || current === 'canceled') {
       await markRunCanceled(supabase, claimedRun, outputText, appendEvent)
       return
-    }
-
-    if (
-      claimedRun.kind === 'classic_chat' &&
-      (claimedRun.payload as ClassicPayload).useUltraMode &&
-      !outputText.trim()
-    ) {
-      await refundApples(claimedRun.user_id, CLASSIC_CHAT_APPLE_COST).catch(refundError => {
-        console.error('[llm-runner] classic refund failed', refundError)
-      })
     }
 
     const message = error instanceof ServiceHttpError
@@ -490,15 +479,6 @@ async function markRunCanceled(
   outputText: string,
   appendEvent: (eventType: string, content?: string | null, payload?: Record<string, any>) => Promise<void>,
 ) {
-  if (
-    run.kind === 'classic_chat' &&
-    (run.payload as ClassicPayload).useUltraMode &&
-    !outputText.trim()
-  ) {
-    await refundApples(run.user_id, CLASSIC_CHAT_APPLE_COST).catch(error => {
-      console.error('[llm-runner] cancel refund failed', error)
-    })
-  }
   await supabase
     .from('llm_runs')
     .update({

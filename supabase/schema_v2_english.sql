@@ -338,63 +338,38 @@ CREATE TABLE IF NOT EXISTS public.redemption_redemptions (
 );
 
 -- ============================================
--- 4g. Afdian Subscription Tables
+-- 4g. OTT Pay Checkout Orders
 -- ============================================
--- Purpose: Bind Afdian sponsors/orders to local users and grant membership.
+-- Purpose: Store immutable, user-bound Checkout orders and verified provider state.
 
-CREATE TABLE IF NOT EXISTS public.afdian_bindings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
-    afdian_user_id TEXT NOT NULL,
-    user_private_id TEXT,
-    binding_method TEXT NOT NULL DEFAULT 'oauth'
-        CHECK (binding_method IN ('oauth', 'binding_code', 'admin')),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.afdian_binding_codes (
-    code TEXT PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    expires_at TIMESTAMPTZ NOT NULL,
-    used_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.afdian_plan_mappings (
-    plan_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    membership_days INTEGER NOT NULL DEFAULT 30 CHECK (membership_days >= 0),
-    bonus_apple_limit INTEGER NOT NULL DEFAULT 0 CHECK (bonus_apple_limit >= 0),
-    bonus_days INTEGER NOT NULL DEFAULT 0 CHECK (bonus_days >= 0),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.afdian_orders (
-    out_trade_no TEXT PRIMARY KEY,
-    afdian_user_id TEXT,
-    user_private_id TEXT,
+CREATE TABLE IF NOT EXISTS public.ottpay_orders (
+    prepay_order_id TEXT PRIMARY KEY,
     user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
-    binding_code TEXT,
-    plan_id TEXT,
-    month INTEGER NOT NULL DEFAULT 1 CHECK (month > 0),
-    total_amount NUMERIC(12, 2),
-    show_amount NUMERIC(12, 2),
-    status INTEGER,
-    remark TEXT,
-    raw JSONB NOT NULL DEFAULT '{}'::JSONB,
-    process_status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (process_status IN ('pending', 'processing', 'processed', 'unmatched', 'needs_mapping', 'ignored', 'failed')),
+    sku TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+    currency TEXT NOT NULL CHECK (currency IN ('CAD', 'USD', 'CNY')),
+    status TEXT NOT NULL DEFAULT 'created'
+        CHECK (status IN ('created', 'pending', 'processing', 'succeeded', 'failed', 'closed')),
+    provider_status TEXT,
+    provider_order_id TEXT,
+    provider_currency TEXT CHECK (provider_currency IS NULL OR provider_currency IN ('CAD', 'USD', 'CNY')),
+    provider_payment_reference TEXT,
+    pay_url TEXT,
+    expires_at TIMESTAMPTZ NOT NULL,
+    provider_expires_at TEXT,
+    product_snapshot JSONB NOT NULL DEFAULT '{}'::JSONB,
+    raw_response JSONB NOT NULL DEFAULT '{}'::JSONB,
+    raw_callback JSONB NOT NULL DEFAULT '{}'::JSONB,
+    raw_query JSONB NOT NULL DEFAULT '{}'::JSONB,
     error_message TEXT,
-    applied_membership_days INTEGER NOT NULL DEFAULT 0 CHECK (applied_membership_days >= 0),
-    applied_bonus_apple_limit INTEGER NOT NULL DEFAULT 0 CHECK (applied_bonus_apple_limit >= 0),
-    applied_bonus_days INTEGER NOT NULL DEFAULT 0 CHECK (applied_bonus_days >= 0),
+    user_cancelled_at TIMESTAMPTZ,
+    user_cancel_reason TEXT,
+    callback_received_at TIMESTAMPTZ,
+    last_synced_at TIMESTAMPTZ,
+    sync_attempts INTEGER NOT NULL DEFAULT 0 CHECK (sync_attempts >= 0),
     processed_at TIMESTAMPTZ,
-    processing_started_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================
@@ -423,7 +398,29 @@ CREATE TABLE IF NOT EXISTS public.user_preferences (
 );
 
 -- ============================================
--- 6. Feedback Table (Optional)
+-- 6. Legal Consent Audit Table
+-- ============================================
+-- Purpose: Store user agreement consent records for signup compliance.
+
+CREATE TABLE IF NOT EXISTS public.user_legal_consents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    email_hash TEXT NOT NULL,
+    agreement_version TEXT NOT NULL,
+    accepted_agreements TEXT[] NOT NULL DEFAULT ARRAY['user-agreement', 'privacy', 'renewal']::TEXT[],
+    consent_source TEXT NOT NULL DEFAULT 'signup'
+        CHECK (consent_source IN ('signup', 'manual', 'admin_import')),
+    ip_address INET,
+    user_agent TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    accepted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, agreement_version, consent_source),
+    CHECK (array_length(accepted_agreements, 1) > 0)
+);
+
+-- ============================================
+-- 7. Feedback Table (Optional)
 -- ============================================
 -- Purpose: Collect user feedback on AI responses
 
@@ -473,6 +470,14 @@ CREATE INDEX IF NOT EXISTS idx_chat_session_contexts_session ON public.chat_sess
 CREATE INDEX IF NOT EXISTS idx_message_feedback_user_id ON public.message_feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_message_feedback_message_id ON public.message_feedback(message_id);
 
+-- Legal consent indexes
+CREATE INDEX IF NOT EXISTS idx_user_legal_consents_user_id
+    ON public.user_legal_consents(user_id, accepted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_legal_consents_email_hash
+    ON public.user_legal_consents(email_hash);
+CREATE INDEX IF NOT EXISTS idx_user_legal_consents_accepted_at
+    ON public.user_legal_consents(accepted_at DESC);
+
 -- LLM Usage indexes
 CREATE INDEX IF NOT EXISTS idx_llm_usage_user_created ON public.llm_usage_events(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_created ON public.llm_usage_events(created_at DESC);
@@ -491,14 +496,18 @@ CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON public.referrals(referrer_u
 CREATE INDEX IF NOT EXISTS idx_referrals_referred ON public.referrals(referred_user_id);
 CREATE INDEX IF NOT EXISTS idx_redemption_codes_active ON public.redemption_codes(is_active, expires_at);
 CREATE INDEX IF NOT EXISTS idx_redemption_redemptions_user ON public.redemption_redemptions(user_id, redeemed_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_afdian_bindings_afdian_user ON public.afdian_bindings(afdian_user_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_afdian_bindings_private_id
-    ON public.afdian_bindings(user_private_id)
-    WHERE user_private_id IS NOT NULL AND user_private_id <> '';
-CREATE INDEX IF NOT EXISTS idx_afdian_binding_codes_user ON public.afdian_binding_codes(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_afdian_orders_user ON public.afdian_orders(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_afdian_orders_status ON public.afdian_orders(process_status, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_afdian_orders_afdian_user ON public.afdian_orders(afdian_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ottpay_orders_user_created ON public.ottpay_orders(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ottpay_orders_status_created ON public.ottpay_orders(status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ottpay_orders_provider_order ON public.ottpay_orders(provider_order_id)
+    WHERE provider_order_id IS NOT NULL AND provider_order_id <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ottpay_orders_active_user ON public.ottpay_orders(user_id)
+    WHERE user_id IS NOT NULL
+      AND user_cancelled_at IS NULL
+      AND status IN ('created', 'pending', 'processing');
+CREATE INDEX IF NOT EXISTS idx_ottpay_orders_user_cancelled ON public.ottpay_orders(user_cancelled_at, created_at)
+    WHERE user_cancelled_at IS NOT NULL AND status IN ('created', 'pending', 'processing');
+CREATE INDEX IF NOT EXISTS idx_ottpay_orders_payment_reference ON public.ottpay_orders(provider_payment_reference)
+    WHERE provider_payment_reference IS NOT NULL AND provider_payment_reference <> '';
 
 -- ============================================
 -- ROW LEVEL SECURITY (RLS) Policies
@@ -511,6 +520,7 @@ ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_session_contexts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_legal_consents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.message_feedback ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.llm_usage_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.llm_runs ENABLE ROW LEVEL SECURITY;
@@ -519,10 +529,7 @@ ALTER TABLE public.guest_trial_usage ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.referrals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.redemption_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.redemption_redemptions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.afdian_bindings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.afdian_binding_codes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.afdian_plan_mappings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.afdian_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ottpay_orders ENABLE ROW LEVEL SECURITY;
 
 -- ============================================
 -- Profiles Table Policies
@@ -719,16 +726,8 @@ CREATE POLICY "Users can view own redemption history"
     ON public.redemption_redemptions FOR SELECT
     USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can view own afdian binding"
-    ON public.afdian_bindings FOR SELECT
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can view own afdian binding codes"
-    ON public.afdian_binding_codes FOR SELECT
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can view own afdian orders"
-    ON public.afdian_orders FOR SELECT
+CREATE POLICY "Users can view own OTT Pay orders"
+    ON public.ottpay_orders FOR SELECT
     USING (auth.uid() = user_id);
 
 -- ============================================
@@ -747,6 +746,14 @@ CREATE POLICY "Users can update own preferences"
     ON public.user_preferences FOR UPDATE
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
+
+-- ============================================
+-- Legal Consent Table Policies
+-- ============================================
+
+CREATE POLICY "Users can view own legal consents"
+    ON public.user_legal_consents FOR SELECT
+    USING (auth.uid() = user_id);
 
 -- ============================================
 -- Message Feedback Table Policies
@@ -818,18 +825,8 @@ CREATE TRIGGER update_redemption_codes_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_afdian_bindings_updated_at
-    BEFORE UPDATE ON public.afdian_bindings
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_afdian_plan_mappings_updated_at
-    BEFORE UPDATE ON public.afdian_plan_mappings
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_afdian_orders_updated_at
-    BEFORE UPDATE ON public.afdian_orders
+CREATE TRIGGER update_ottpay_orders_updated_at
+    BEFORE UPDATE ON public.ottpay_orders
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
@@ -899,7 +896,7 @@ BEGIN
 
         quota_row.membership_expires_at := membership_base + (safe_membership_days || ' days')::INTERVAL;
         quota_row.is_paid := TRUE;
-        quota_row.daily_apple_limit := GREATEST(COALESCE(quota_row.daily_apple_limit, 5), 999);
+        quota_row.daily_apple_limit := GREATEST(COALESCE(quota_row.daily_apple_limit, 5), 30);
     END IF;
 
     IF safe_bonus_limit > 0 AND safe_bonus_days > 0 THEN
@@ -1325,7 +1322,7 @@ ORDER BY tablename;
 -- ============================================
 -- Purpose: Track daily ULTRA mode usage quotas per user
 -- "Apples" represent the daily allowance for ULTRA (Gemini) mode
--- Free users: 5 apples/day, Paid users: 999 apples/day
+-- Free users: 5 apples/day, Plus users: 30 apples/day
 
 CREATE TABLE IF NOT EXISTS public.user_quotas (
     user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -1455,7 +1452,7 @@ BEGIN
         AND quota_row.bonus_expires_at > NOW();
 
     effective_limit := CASE
-        WHEN membership_active THEN GREATEST(COALESCE(quota_row.daily_apple_limit, 5), 999)
+        WHEN membership_active THEN GREATEST(COALESCE(quota_row.daily_apple_limit, 5), 30)
         ELSE COALESCE(quota_row.daily_apple_limit, 5)
     END + CASE WHEN bonus_active THEN COALESCE(quota_row.bonus_apple_limit, 0) ELSE 0 END;
 
@@ -1545,7 +1542,7 @@ BEGIN
         AND quota_row.bonus_expires_at > NOW();
 
     effective_limit := CASE
-        WHEN membership_active THEN GREATEST(COALESCE(quota_row.daily_apple_limit, 5), 999)
+        WHEN membership_active THEN GREATEST(COALESCE(quota_row.daily_apple_limit, 5), 30)
         ELSE COALESCE(quota_row.daily_apple_limit, 5)
     END + CASE WHEN bonus_active THEN COALESCE(quota_row.bonus_apple_limit, 0) ELSE 0 END;
 
@@ -1578,6 +1575,39 @@ BEGIN
     RETURN NEXT;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================
+-- Security Hardening
+-- ============================================
+
+DROP VIEW IF EXISTS public.user_statistics;
+DROP VIEW IF EXISTS public.active_sessions_with_profiles;
+
+ALTER FUNCTION public.generate_referral_code() SET search_path = public, pg_temp;
+ALTER FUNCTION public.update_updated_at_column() SET search_path = public, pg_temp;
+ALTER FUNCTION public.apply_user_benefits(UUID, INTEGER, INTEGER, INTEGER) SET search_path = public, pg_temp;
+ALTER FUNCTION public.settle_referral_reward(UUID, TEXT) SET search_path = public, pg_temp;
+ALTER FUNCTION public.redeem_redemption_code(UUID, TEXT) SET search_path = public, pg_temp;
+ALTER FUNCTION public.update_session_message_count() SET search_path = public, pg_temp;
+ALTER FUNCTION public.create_user_quota() SET search_path = public, pg_temp;
+ALTER FUNCTION public.consume_user_apples(UUID, INTEGER) SET search_path = public, pg_temp;
+ALTER FUNCTION public.refund_user_apples(UUID, INTEGER) SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.generate_referral_code() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.apply_user_benefits(UUID, INTEGER, INTEGER, INTEGER) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.settle_referral_reward(UUID, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.redeem_redemption_code(UUID, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.create_user_quota() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.consume_user_apples(UUID, INTEGER) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.refund_user_apples(UUID, INTEGER) FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.generate_referral_code() TO service_role;
+GRANT EXECUTE ON FUNCTION public.apply_user_benefits(UUID, INTEGER, INTEGER, INTEGER) TO service_role;
+GRANT EXECUTE ON FUNCTION public.settle_referral_reward(UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.redeem_redemption_code(UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.create_user_quota() TO service_role;
+GRANT EXECUTE ON FUNCTION public.consume_user_apples(UUID, INTEGER) TO service_role;
+GRANT EXECUTE ON FUNCTION public.refund_user_apples(UUID, INTEGER) TO service_role;
 
 -- ============================================
 -- End of Schema

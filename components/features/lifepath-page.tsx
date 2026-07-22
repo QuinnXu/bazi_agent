@@ -3,9 +3,15 @@
 import React, { useState } from 'react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
+import { ReportLengthSelector } from './report-length-selector'
 import { useAuth } from '@/contexts/auth-context'
 import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
-import type { FeatureParticipant, LifePathParams } from '@/lib/feature-types'
+import {
+  DEFAULT_FEATURE_REPORT_LENGTH,
+  type FeatureParticipant,
+  type FeatureReportLength,
+  type LifePathParams,
+} from '@/lib/feature-types'
 
 interface LifePathPageProps {
   onBack: () => void
@@ -26,6 +32,7 @@ export function LifePathPage({
 }: LifePathPageProps) {
   const { user } = useAuth()
   const [profile, setProfile] = useState<FeatureParticipant | null>(null)
+  const [reportLength, setReportLength] = useState<FeatureReportLength>(DEFAULT_FEATURE_REPORT_LENGTH)
 
   const canSubmit = !!profile
 
@@ -35,7 +42,7 @@ export function LifePathPage({
       return
     }
     if (!canSubmit || !profile) return
-    onSubmit({ profile })
+    onSubmit({ profile, reportPreference: { mode: reportLength } })
   }
 
   return (
@@ -62,6 +69,11 @@ export function LifePathPage({
           onChange={list => setProfile(list[0] || null)}
           onOpenManager={onOpenProfilesManager}
           emptyHint="先给小象添加一位人物，才能解读人生脉络"
+        />
+        <ReportLengthSelector
+          value={reportLength}
+          onChange={setReportLength}
+          disabled={loading}
         />
       </div>
     </FeaturePageShell>

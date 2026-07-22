@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>卜卜象邮箱验证码</title>
+  </head>
+  <body style="margin:0;background:#f8f5ef;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',Arial,sans-serif;color:#2f2a24;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8f5ef;padding:28px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;background:#fffdf8;border:1px solid #eadfce;border-radius:18px;overflow:hidden;box-shadow:0 18px 48px rgba(65,48,28,0.10);">
+            <tr>
+              <td style="padding:30px 28px 18px;text-align:center;">
+                <img src="{{ .SiteURL }}/avatar-small.png" width="72" height="72" alt="卜卜象" style="display:block;margin:0 auto 16px;border-radius:18px;border:1px solid #eadfce;" />
+                <div style="font-size:13px;letter-spacing:0.08em;color:#9b7a4f;">ASK BUBU</div>
+                <h1 style="margin:10px 0 0;font-size:26px;line-height:1.35;font-weight:400;color:#2f2a24;">小象给你送来验证码</h1>
+                <p style="margin:12px 0 0;font-size:15px;line-height:1.8;color:#75695b;">请在注册页面输入下面的 8 位验证码，完成邮箱验证。</p>
+              </td>
+            </tr>
+
+            <tr>
+              <td align="center" style="padding:8px 28px 24px;">
+                <div style="display:inline-block;min-width:240px;padding:18px 22px;border-radius:16px;background:#f3eadb;border:1px solid #e2cfb4;font-size:34px;line-height:1;letter-spacing:0.28em;text-indent:0.28em;font-weight:600;color:#7a5428;">
+                  {{ .Token }}
+                </div>
+                <p style="margin:14px 0 0;font-size:13px;line-height:1.7;color:#8a7d6d;">验证码通常会在短时间内失效，请不要转发给他人。</p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 28px 26px;">
+                <div style="height:1px;background:#eadfce;margin:0 0 22px;"></div>
+                <p style="margin:0 0 14px;font-size:14px;line-height:1.8;color:#75695b;">如果页面没有自动验证，也可以点击下面的按钮继续：</p>
+                <p style="margin:0;text-align:center;">
+                  <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#7a5428;color:#fffdf8;text-decoration:none;font-size:14px;">确认邮箱</a>
+                </p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:20px 28px;background:#fbf6ed;border-top:1px solid #eadfce;">
+                <p style="margin:0;font-size:12px;line-height:1.8;color:#9a8b79;">如果这不是你本人操作，可以忽略这封邮件。为了账号安全，请勿向任何人透露验证码。</p>
+                <p style="margin:10px 0 0;font-size:12px;line-height:1.8;color:#9a8b79;">卜卜象 · 温柔的小象命理助手</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

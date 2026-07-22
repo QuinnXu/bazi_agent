@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { startTransition, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react"
+import { Activity, startTransition, useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react"
 import dynamic from "next/dynamic"
 import {
   Send,
@@ -24,8 +24,11 @@ import {
   ArrowDown,
   Square,
   ChevronDown,
+  ChevronRight,
+  ArrowLeft,
   Plus,
   EyeOff,
+  Dices,
 } from "lucide-react"
 import Image from "next/image"
 import { MinimalBackground } from "@/components/minimal-background"
@@ -35,9 +38,11 @@ import { UserMenu } from "@/components/user-menu"
 import { useAuth } from "@/contexts/auth-context"
 import { createBrowserClient } from "@/lib/supabase/client"
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar"
+import { Switch } from "@/components/ui/switch"
 import { toast } from "@/hooks/use-toast"
 import { AppSidebar, type ChatMode, type FeatureType } from "@/components/app-sidebar"
-import { BubuEmptyModeShell } from "@/components/bubu-empty-mode-shell"
+import { BubuEmptyModeHeader } from "@/components/bubu-empty-mode-header"
+import { GuestRegistrationHookCard } from "@/components/guest-registration-hook-card"
 import { FeatureCards } from "@/components/feature-cards"
 import { FeatureLauncherButton } from "@/components/feature-launcher-button"
 import { detectFeatureKindFromContent } from "@/components/chat-message"
@@ -57,7 +62,7 @@ import type {
 } from "@/lib/feature-types"
 import { estimateTokensForText } from "@/lib/token-estimator"
 import type { AgentComplexityMode, AgentReportPreference } from "@/lib/agent-complexity"
-import { CLASSIC_CHAT_APPLE_COST } from "@/lib/apple-costs"
+import { getClassicChatAppleCost } from "@/lib/apple-costs"
 import {
   GUEST_FIRST_QA_FLOW,
   buildGuestFirstQaAnswerPrompt,
@@ -66,10 +71,16 @@ import {
   isGuestFirstQaRequestId,
 } from "@/lib/guest-first-qa-flow"
 import { DEFAULT_BIRTH_LOCATION } from "@/lib/birth-location"
+import {
+  playRitualFeedback,
+  readRitualFeedbackPreference,
+  writeRitualFeedbackPreference,
+} from "@/lib/ritual-feedback"
 
 const BaziDialog = dynamic(() => import("@/components/bazi-dialog").then(mod => mod.BaziDialog), { ssr: false })
-const DonationDialog = dynamic(() => import("@/components/donation-button").then(mod => mod.DonationDialog), { ssr: false })
-const AuthDialog = dynamic(() => import("@/components/auth-dialog").then(mod => mod.AuthDialog), { ssr: false })
+const MembershipDialog = dynamic(() => import("@/components/membership-plans").then(mod => mod.MembershipDialog), { ssr: false })
+const loadAuthDialogModule = () => import("@/components/auth-dialog")
+const AuthDialog = dynamic(() => loadAuthDialogModule().then(mod => mod.AuthDialog), { ssr: false })
 const RewardsDialog = dynamic(() => import("@/components/rewards-dialog").then(mod => mod.RewardsDialog), { ssr: false })
 const ProfilesManagementDialog = dynamic(() => import("@/components/profiles-management-dialog").then(mod => mod.ProfilesManagementDialog), { ssr: false })
 const ChangePasswordDialog = dynamic(() => import("@/components/change-password-dialog").then(mod => mod.ChangePasswordDialog), { ssr: false })
@@ -77,7 +88,8 @@ const HepanPage = dynamic(() => import("@/components/features/hepan-page").then(
 const FortunePage = dynamic(() => import("@/components/features/fortune-page").then(mod => mod.FortunePage), { ssr: false })
 const AvatarPage = dynamic(() => import("@/components/features/avatar-page").then(mod => mod.AvatarPage), { ssr: false })
 const LifePathPage = dynamic(() => import("@/components/features/lifepath-page").then(mod => mod.LifePathPage), { ssr: false })
-const LiuYaoChat = dynamic(() => import("@/components/liuyao-chat").then(mod => mod.LiuYaoChat), { ssr: false })
+const loadLiuYaoChatModule = () => import("@/components/liuyao-chat")
+const LiuYaoChat = dynamic(() => loadLiuYaoChatModule().then(mod => mod.LiuYaoChat), { ssr: false })
 
 interface Message {
   id: string;
@@ -149,6 +161,7 @@ interface DurableRunSnapshot {
 }
 
 type ForegroundRunStatus = 'queued' | 'streaming' | 'complete' | 'stopped' | 'error'
+type AgentContextMenuView = 'root' | 'profiles' | 'time' | 'features' | 'custom-time' | 'tags'
 
 interface ForegroundRunState {
   id: string
@@ -247,6 +260,29 @@ interface BaziProfileOption {
   } | null
 }
 
+function supabaseErrorDetails(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return { message: error instanceof Error ? error.message : String(error) }
+  }
+  const value = error as Record<string, unknown>
+  return {
+    code: typeof value.code === 'string' ? value.code : undefined,
+    message: typeof value.message === 'string' ? value.message : 'Supabase 请求失败',
+    details: typeof value.details === 'string' ? value.details : undefined,
+    hint: typeof value.hint === 'string' ? value.hint : undefined,
+  }
+}
+
+function isSupabaseAuthError(error: unknown): boolean {
+  const { code, message, details } = supabaseErrorDetails(error)
+  return (
+    code === 'PGRST301' ||
+    code === 'PGRST302' ||
+    code === 'PGRST303' ||
+    /jwt|token|unauthori[sz]ed|not authenticated/i.test(`${message} ${details || ''}`)
+  )
+}
+
 interface AgentClientStep {
   step: number
   phase: 'planner' | 'tool' | 'final' | 'fallback'
@@ -279,13 +315,27 @@ type AgentStreamEvent =
 
 const COMPOSER_MIN_HEIGHT = 32
 const COMPOSER_MAX_HEIGHT = 128
+const INSPIRATION_TYPE_INTERVAL_MS = 32
+const GUEST_INSPIRATION_INITIAL_DELAY_MS = 600
+const GUEST_INSPIRATION_HOLD_MS = 4000
+const INSPIRATION_PROMPTS = [
+  '看看我今年下半年的偏财运在哪里？',
+  '未来三个月，工作上最值得我把握的机会是什么？',
+  '从我的命盘看，我最容易忽略的天赋是什么？',
+  '我适合靠什么能力，建立长期稳定的收入？',
+  '今年哪些月份更适合我主动求变或做重要决定？',
+  '我最近反复遇到的关系课题，命盘里有什么线索？',
+  '接下来半年，感情里我该主动一点还是顺其自然？',
+  '怎样调整现在的状态，能让接下来的运势走得更顺？',
+  '我当前最值得投入精力经营的事情是什么？',
+  '现在这条事业方向，值得我继续投入吗？',
+] as const
 const STREAM_AUTO_SCROLL_INTERVAL_MS = 80
 const RUN_POLL_INITIAL_DELAY_MS = 180
 const RUN_POLL_MAX_DELAY_MS = 650
 const RUN_POLL_BACKOFF_MS = 80
 const GUEST_TRANSCRIPT_STORAGE_KEY = 'bubu_guest_trial_transcript_v1'
 const GUEST_TRIAL_USED_STORAGE_KEY = 'bubu_guest_trial_final_used_v1'
-const NEW_USER_TUTORIAL_DISMISSED_STORAGE_KEY = 'bubu_new_user_tutorial_dismissed_v1'
 
 interface GuestTranscriptMessage {
   role: 'user' | 'assistant'
@@ -308,11 +358,59 @@ interface GuestTranscriptPayload {
   baziAnalysisResult?: string | null
 }
 
+function parseGuestTranscriptPayload(raw: string | null): GuestTranscriptPayload | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<GuestTranscriptPayload>
+    if (parsed.version !== 1 || !Array.isArray(parsed.messages)) return null
+
+    const messages = parsed.messages.flatMap(message => {
+      if (!message || (message.role !== 'user' && message.role !== 'assistant')) return []
+      if (typeof message.content !== 'string' || typeof message.createdAt !== 'string') return []
+      const content = sanitizeReplacementChars(message.content).trim()
+      const createdAt = new Date(message.createdAt)
+      if (!content || Number.isNaN(createdAt.getTime())) return []
+      return [{
+        role: message.role,
+        content,
+        createdAt: createdAt.toISOString(),
+        mode: message.mode === 'classic' ? 'classic' as const : 'agent' as const,
+        model: typeof message.model === 'string' ? message.model : null,
+        tokensUsed: typeof message.tokensUsed === 'number' ? message.tokensUsed : null,
+      }]
+    })
+    if (messages.length === 0) return null
+
+    return {
+      ...parsed,
+      version: 1,
+      messages,
+      activeChatMode: parsed.activeChatMode === 'classic' ? 'classic' : 'agent',
+      featureContext: parsed.featureContext && typeof parsed.featureContext === 'object'
+        ? parsed.featureContext
+        : null,
+      sessionSummary: typeof parsed.sessionSummary === 'string' ? parsed.sessionSummary : null,
+      guestOnboardingQuestion: typeof parsed.guestOnboardingQuestion === 'string'
+        ? parsed.guestOnboardingQuestion.trim() || null
+        : null,
+      postRegistrationFollowUpPending: parsed.postRegistrationFollowUpPending === true,
+      selectedProfile: parsed.selectedProfile && typeof parsed.selectedProfile === 'object'
+        ? parsed.selectedProfile
+        : null,
+      baziAnalysisResult: typeof parsed.baziAnalysisResult === 'string'
+        ? parsed.baziAnalysisResult
+        : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 function createViewOperationId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-const AGENT_FEATURE_MENTIONS: Array<{
+const AGENT_FEATURE_ENTRIES: Array<{
   kind: FeatureKind
   label: string
   hint: string
@@ -423,10 +521,14 @@ function createGuestOnboardingProfileRequest(question: string): AgentInlineInput
   const request = legacyBaziEventToHumanInput({
     type: 'bazi_profile_form',
     message: GUEST_FIRST_QA_FLOW.copy.assistantIntro,
-    initialData: EMPTY_BAZI_FORM_DATA,
+    initialData: {
+      ...EMPTY_BAZI_FORM_DATA,
+      profileName: GUEST_FIRST_QA_FLOW.defaultProfileName,
+    },
   })
   return {
     ...request,
+    variant: 'guest_first_qa_profile',
     requestId: `${GUEST_FIRST_QA_FLOW.requestPrefix}-${Date.now()}`,
     title: GUEST_FIRST_QA_FLOW.copy.profileCardTitle,
     message: GUEST_FIRST_QA_FLOW.copy.profileCardMessage(question),
@@ -689,6 +791,10 @@ function HomeContent() {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const streamingMessageTopRef = useRef<HTMLDivElement>(null)
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const inspirationTypeTimerRef = useRef<number | null>(null)
+  const guestInspirationAutoplayTimerRef = useRef<number | null>(null)
+  const activeInspirationPromptRef = useRef<string | null>(null)
+  const lastInspirationIndexRef = useRef<number | null>(null)
   const streamContentRef = useRef('')
   const rafIdRef = useRef<number | null>(null)
   const streamingMessageIdRef = useRef<string | null>(null)
@@ -708,6 +814,10 @@ function HomeContent() {
   const temporarySessionIdRef = useRef<string | null>(null)
   const guestTranscriptMigrationRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const agentProfilesLoadRef = useRef<{
+    userId: string
+    promise: Promise<BaziProfileOption[]>
+  } | null>(null)
   const stopRequestedRef = useRef(false)
   const streamHadOutputRef = useRef(false)
   const initialPromptAppliedRef = useRef(false)
@@ -734,8 +844,15 @@ function HomeContent() {
   const [sessionListRefreshKey, setSessionListRefreshKey] = useState(0)
   const [agentComplexity, setAgentComplexity] = useState<AgentComplexityMode>('instant')
   const [messages, setMessages] = useState<Message[]>([])
+  const [keepNewChatComposerDocked, setKeepNewChatComposerDocked] = useState(false)
   const [activeStreamingMessageId, setActiveStreamingMessageId] = useState<string | null>(null)
   const [input, setInput] = useState('')
+  const [isDrawingInspiration, setIsDrawingInspiration] = useState(false)
+  const [isInputFromInspiration, setIsInputFromInspiration] = useState(false)
+  const [guestInspirationAutoplayStopped, setGuestInspirationAutoplayStopped] = useState(false)
+  const [isDocumentVisible, setIsDocumentVisible] = useState(true)
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+  const [ritualFeedbackEnabled, setRitualFeedbackEnabled] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isSessionLoading, setIsSessionLoading] = useState(false)
   const [isStreamingStarted, setIsStreamingStarted] = useState(false)
@@ -756,7 +873,7 @@ function HomeContent() {
   })
   const [isUltraMode, setIsUltraMode] = useState(false)
   const [activeFeature, setActiveFeature] = useState<FeatureType>('chat')
-  const [showDonationDialog, setShowDonationDialog] = useState(false)
+  const [showMembershipDialog, setShowMembershipDialog] = useState(false)
   const [showRewardsDialog, setShowRewardsDialog] = useState(false)
   const [featureContext, setFeatureContext] = useState<FeatureContext | null>(null)
   const [sessionSummary, setSessionSummary] = useState<string | null>(null)
@@ -766,24 +883,34 @@ function HomeContent() {
   const [mentionOpen, setMentionOpen] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionTrigger, setMentionTrigger] = useState<'@' | '#'>('@')
+  const [contextMenuView, setContextMenuView] = useState<AgentContextMenuView>('root')
   const [composerModeOpen, setComposerModeOpen] = useState(false)
 
   // Apple quota state
   const [appleQuota, setAppleQuota] = useState<{
+    tier: 'free' | 'plus' | 'ultra'
     remaining: number
+    dailyRemaining: number
     dailyLimit: number
+    walletBalance: number
+    walletExpiresAt?: string | null
+    unlimited: boolean
     isPaid: boolean
     membershipExpiresAt?: string | null
+    nextMembershipTier?: 'free' | 'plus' | 'ultra' | null
+    nextMembershipStartsAt?: string | null
     bonusAppleLimit?: number
     bonusExpiresAt?: string | null
   } | null>(null)
   const [showQuotaExhausted, setShowQuotaExhausted] = useState(false)
-  const [showLandingAuthHint, setShowLandingAuthHint] = useState(false)
   const [landingComposerPulse, setLandingComposerPulse] = useState(false)
+  const [showInviteWelcome, setShowInviteWelcome] = useState(false)
   const [guestFinalAnswerUsed, setGuestFinalAnswerUsed] = useState(false)
   const [guestTrialStateHydrated, setGuestTrialStateHydrated] = useState(false)
+  const [guestTranscriptRestoreReady, setGuestTranscriptRestoreReady] = useState(false)
   const [guestOnboardingQuestion, setGuestOnboardingQuestion] = useState<string | null>(null)
-  const [showNewUserTutorial, setShowNewUserTutorial] = useState(false)
+  const [showGuestRegistrationFallback, setShowGuestRegistrationFallback] = useState(false)
+  const [guestRegistrationHookHighlighted, setGuestRegistrationHookHighlighted] = useState(false)
   const [pendingPostRegistrationFollowUp, setPendingPostRegistrationFollowUp] = useState<{
     sessionId: string
     question: string
@@ -798,6 +925,50 @@ function HomeContent() {
   const featureContextRef = useRef<FeatureContext | null>(null)
   const guestTranscriptPayloadRef = useRef<GuestTranscriptPayload | null>(null)
   const guestTranscriptSaveTimerRef = useRef<number | null>(null)
+  const guestTranscriptRestoredRef = useRef(false)
+  const guestRegistrationHookRef = useRef<HTMLDivElement>(null)
+  const guestRegistrationHookHighlightTimerRef = useRef<number | null>(null)
+  const postRegistrationFollowUpStartedRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    const preloadPrimaryInteractions = () => {
+      void Promise.all([
+        loadAuthDialogModule(),
+        loadLiuYaoChatModule(),
+      ])
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      const idleId = window.requestIdleCallback(preloadPrimaryInteractions, { timeout: 1200 })
+      return () => window.cancelIdleCallback(idleId)
+    }
+    const timeoutId = window.setTimeout(preloadPrimaryInteractions, 350)
+    return () => window.clearTimeout(timeoutId)
+  }, [])
+
+  useEffect(() => {
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const updateMotionPreference = () => setPrefersReducedMotion(motionQuery.matches)
+    updateMotionPreference()
+    motionQuery.addEventListener('change', updateMotionPreference)
+    return () => motionQuery.removeEventListener('change', updateMotionPreference)
+  }, [])
+
+  useEffect(() => {
+    setRitualFeedbackEnabled(readRitualFeedbackPreference())
+  }, [])
+
+  const handleRitualFeedbackChange = useCallback((enabled: boolean) => {
+    setRitualFeedbackEnabled(enabled)
+    writeRitualFeedbackPreference(enabled)
+    if (enabled) void playRitualFeedback({ preview: true })
+  }, [])
+
+  useEffect(() => {
+    const updateDocumentVisibility = () => setIsDocumentVisible(!document.hidden)
+    updateDocumentVisibility()
+    document.addEventListener('visibilitychange', updateDocumentVisibility)
+    return () => document.removeEventListener('visibilitychange', updateDocumentVisibility)
+  }, [])
 
   useEffect(() => {
     messagesRef.current = messages
@@ -808,13 +979,81 @@ function HomeContent() {
   }, [featureContext])
 
   useEffect(() => {
+    let transcriptPayload: GuestTranscriptPayload | null = null
     try {
-      setGuestFinalAnswerUsed(window.localStorage.getItem(GUEST_TRIAL_USED_STORAGE_KEY) === '1')
-      setShowNewUserTutorial(window.localStorage.getItem(NEW_USER_TUTORIAL_DISMISSED_STORAGE_KEY) !== '1')
+      const rawTranscript = window.localStorage.getItem(GUEST_TRANSCRIPT_STORAGE_KEY)
+      transcriptPayload = parseGuestTranscriptPayload(rawTranscript)
+      if (rawTranscript && !transcriptPayload) {
+        window.localStorage.removeItem(GUEST_TRANSCRIPT_STORAGE_KEY)
+      }
+      guestTranscriptPayloadRef.current = transcriptPayload
+      setGuestFinalAnswerUsed(
+        window.localStorage.getItem(GUEST_TRIAL_USED_STORAGE_KEY) === '1' ||
+        transcriptPayload?.postRegistrationFollowUpPending === true,
+      )
     } catch {
-      setShowNewUserTutorial(true)
+      guestTranscriptPayloadRef.current = null
+      setGuestFinalAnswerUsed(false)
     } finally {
       setGuestTrialStateHydrated(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (authLoading || !guestTrialStateHydrated || guestTranscriptRestoredRef.current) return
+    guestTranscriptRestoredRef.current = true
+
+    if (!user && guestFinalAnswerUsed) {
+      const payload = guestTranscriptPayloadRef.current
+      if (payload) {
+        const restoredMessages: Message[] = payload.messages.map(message => {
+          const mode: ChatMode = message.mode === 'classic' ? 'classic' : 'agent'
+          return {
+            id: createBubuMessageId(message.role),
+            role: message.role,
+            content: message.content,
+            createdAt: new Date(message.createdAt),
+            mode,
+            model: message.model ?? null,
+            tokensUsed: message.tokensUsed ?? null,
+            ...(message.role === 'assistant'
+              ? {
+                  streamState: createMessageStreamState(mode === 'classic' ? 'classic' : 'agent', 'complete'),
+                  suggestedFollowUps: [],
+                  followUpStatus: 'ready' as const,
+                }
+              : {}),
+          }
+        })
+        const restoredQuestion = payload.guestOnboardingQuestion?.trim() || null
+        const restoredProfile = payload.selectedProfile?.name ? payload.selectedProfile : null
+
+        setMessages(restoredMessages)
+        setGuestOnboardingQuestion(restoredQuestion)
+        landingGuestQuestionRef.current = restoredQuestion
+        selectedSessionIdRef.current = guestSessionIdRef.current
+        setCurrentSessionId(null)
+        setCurrentSessionMode('agent')
+        setActiveChatMode('agent')
+        setKeepNewChatComposerDocked(false)
+        setFeatureContext(payload.featureContext || null)
+        setSessionSummary(payload.sessionSummary || null)
+        setSelectedProfile(restoredProfile)
+        setSelectedProfileId(restoredProfile?.id || null)
+        setAgentParticipants(restoredProfile ? [restoredProfile] : [])
+        setBaziAnalysisResult(payload.baziAnalysisResult || restoredProfile?.baziText || null)
+        setAgentPendingConfirmation(null)
+        setAgentTimeRanges([])
+        setAgentReportPreference(null)
+      }
+    }
+
+    setGuestTranscriptRestoreReady(true)
+  }, [authLoading, guestFinalAnswerUsed, guestTrialStateHydrated, user])
+
+  useEffect(() => () => {
+    if (guestRegistrationHookHighlightTimerRef.current !== null) {
+      window.clearTimeout(guestRegistrationHookHighlightTimerRef.current)
     }
   }, [])
 
@@ -860,17 +1099,9 @@ function HomeContent() {
     }
   }, [])
 
-  const dismissNewUserTutorial = useCallback(() => {
-    setShowNewUserTutorial(false)
-    try {
-      window.localStorage.setItem(NEW_USER_TUTORIAL_DISMISSED_STORAGE_KEY, '1')
-    } catch {
-      // Tutorial dismissal is a convenience preference; ignore storage failures.
-    }
-  }, [])
-
   useEffect(() => {
     if (typeof window === 'undefined') return
+    if (!guestTranscriptRestoreReady) return
     if (user) {
       if (guestTranscriptPayloadRef.current) {
         flushGuestTranscriptPayload()
@@ -897,6 +1128,7 @@ function HomeContent() {
       }))
 
     if (transcriptMessages.length === 0) {
+      if (guestFinalAnswerUsed && guestTranscriptPayloadRef.current) return
       guestTranscriptPayloadRef.current = null
       flushGuestTranscriptPayload()
       return
@@ -929,11 +1161,42 @@ function HomeContent() {
     flushGuestTranscriptPayload,
     guestFinalAnswerUsed,
     guestOnboardingQuestion,
+    guestTranscriptRestoreReady,
     messages,
     selectedProfile,
     sessionSummary,
     user,
   ])
+
+  const startGuestOnboarding = useCallback((question: string) => {
+    const onboardingQuestion = question.trim()
+    const sessionId = guestSessionIdRef.current
+    const assistantMessage: Message = {
+      id: createBubuMessageId('assistant'),
+      role: 'assistant',
+      content: GUEST_FIRST_QA_FLOW.copy.assistantIntro,
+      createdAt: new Date(),
+      mode: 'agent',
+      agentUi: createGuestOnboardingProfileRequest(onboardingQuestion),
+      agentUiStatus: 'pending',
+    }
+
+    landingGuestQuestionRef.current = onboardingQuestion
+    selectedSessionIdRef.current = sessionId
+    setGuestOnboardingQuestion(onboardingQuestion || null)
+    setCurrentSessionId(null)
+    setCurrentSessionMode('agent')
+    setActiveChatMode('agent')
+    setInput('')
+    setIsInputFromInspiration(false)
+    setMessages([assistantMessage])
+    setAgentPendingConfirmation(null)
+    setAgentParticipants([])
+    setAgentTimeRanges([])
+    setAgentReportPreference(null)
+    setFeatureContext(null)
+    setSessionSummary(null)
+  }, [])
 
   useEffect(() => {
     if (authLoading) return
@@ -943,39 +1206,34 @@ function HomeContent() {
     const url = new URL(window.location.href)
     const prompt = url.searchParams.get('prompt')?.trim()
     const fromLanding = url.searchParams.get('from') === 'landing'
+    const fromInvite = url.searchParams.get('from') === 'invite'
     const trialFlow = url.searchParams.get('trialFlow')
-    const fromLandingTrial = fromLanding && isGuestFirstQaFlow(trialFlow)
+    const fromEntryTrial = (fromLanding || fromInvite) && isGuestFirstQaFlow(trialFlow)
     const shouldStartGuestOnboarding =
       !user &&
-      fromLandingTrial &&
+      fromEntryTrial &&
       !guestFinalAnswerUsed
 
+    const inviteError = url.searchParams.get('inviteError')
+    if (inviteError) {
+      const description = inviteError === 'invalid'
+        ? '这个邀请链接已经失效，仍然可以直接体验卜卜象。'
+        : inviteError === 'existing_user'
+          ? '邀请奖励仅面向新注册用户，你可以继续使用当前账号。'
+          : '邀请归因暂时不可用，仍然可以直接体验。'
+      toast({ title: '邀请提示', description })
+    }
+
+    if (fromInvite && url.searchParams.get('invited') === '1' && !user) {
+      setShowInviteWelcome(true)
+      window.setTimeout(() => setShowInviteWelcome(false), 6000)
+    }
+
     if (shouldStartGuestOnboarding) {
-      const landingPrompt = prompt || ''
-      const sessionId = guestSessionIdRef.current
-      const assistantMessage: Message = {
-        id: createBubuMessageId('assistant'),
-        role: 'assistant',
-        content: GUEST_FIRST_QA_FLOW.copy.assistantIntro,
-        createdAt: new Date(),
-        mode: 'agent',
-        agentUi: createGuestOnboardingProfileRequest(landingPrompt),
-        agentUiStatus: 'pending',
-      }
-      landingGuestQuestionRef.current = landingPrompt
-      selectedSessionIdRef.current = sessionId
-      setGuestOnboardingQuestion(landingPrompt || null)
-      setCurrentSessionId(null)
-      setCurrentSessionMode('agent')
-      setActiveChatMode('agent')
-      setInput('')
-      setMessages([assistantMessage])
-      setAgentPendingConfirmation(null)
-      setAgentParticipants([])
-      setAgentTimeRanges([])
-      setAgentReportPreference(null)
-      setFeatureContext(null)
-      setSessionSummary(null)
+      startGuestOnboarding(prompt || '')
+    } else if (fromInvite && !user && guestFinalAnswerUsed) {
+      setAuthDialogMode('signup')
+      setShowAuthDialog(true)
     } else if (prompt) {
       setInput(prompt)
       if (!user && guestFinalAnswerUsed) {
@@ -983,24 +1241,22 @@ function HomeContent() {
         setShowAuthDialog(true)
       }
     }
-    if (fromLanding) {
-      setShowLandingAuthHint(true)
+    if (fromLanding || fromInvite) {
       setLandingComposerPulse(true)
       window.setTimeout(() => setLandingComposerPulse(false), 1800)
-      if (!prompt && !user && fromLandingTrial && !guestFinalAnswerUsed) {
+      if (!prompt && !user && fromEntryTrial && !guestFinalAnswerUsed) {
         setActiveChatMode('agent')
         setCurrentSessionMode('agent')
         window.setTimeout(() => composerTextareaRef.current?.focus(), 120)
       }
     }
-    if (url.searchParams.has('prompt') || url.searchParams.has('from') || url.searchParams.has('trialFlow')) {
-      url.searchParams.delete('prompt')
-      url.searchParams.delete('from')
-      url.searchParams.delete('trialFlow')
+    const transientParams = ['prompt', 'from', 'trialFlow', 'invited', 'inviteError']
+    if (transientParams.some(param => url.searchParams.has(param))) {
+      transientParams.forEach(param => url.searchParams.delete(param))
       const nextUrl = `${url.pathname}${url.search}${url.hash}`
       window.history.replaceState(window.history.state, '', nextUrl || '/')
     }
-  }, [authLoading, guestFinalAnswerUsed, guestTrialStateHydrated, user])
+  }, [authLoading, guestFinalAnswerUsed, guestTrialStateHydrated, startGuestOnboarding, user])
 
   // Fetch apple quota when user changes
   const fetchQuota = useCallback(async () => {
@@ -1009,14 +1265,21 @@ function HomeContent() {
       return
     }
     try {
-      const res = await fetch('/api/quota')
+      const res = await fetch('/api/quota', { cache: 'no-store' })
       if (res.ok) {
         const data = await res.json()
         setAppleQuota({
+          tier: data.tier ?? 'free',
           remaining: data.remaining,
+          dailyRemaining: data.dailyRemaining ?? data.remaining,
           dailyLimit: data.dailyLimit,
+          walletBalance: data.walletBalance ?? 0,
+          walletExpiresAt: data.walletExpiresAt ?? null,
+          unlimited: Boolean(data.unlimited),
           isPaid: data.isPaid,
           membershipExpiresAt: data.membershipExpiresAt ?? null,
+          nextMembershipTier: data.nextMembershipTier ?? null,
+          nextMembershipStartsAt: data.nextMembershipStartsAt ?? null,
           bonusAppleLimit: data.bonusAppleLimit ?? 0,
           bonusExpiresAt: data.bonusExpiresAt ?? null,
         })
@@ -1027,37 +1290,72 @@ function HomeContent() {
   }, [user])
 
   const loadAgentProfiles = useCallback(async () => {
-    if (!user) {
+    if (!user || authLoading) {
       setAgentProfiles([])
       return [] as BaziProfileOption[]
     }
-    try {
-      // @ts-ignore - Database types will be generated after schema deployment
-      const { data, error } = await supabase
+
+    const requestUserId = user.id
+    if (agentProfilesLoadRef.current?.userId === requestUserId) {
+      return agentProfilesLoadRef.current.promise
+    }
+
+    const request = (async () => {
+      const fetchProfiles = () => supabase
         .from('bazi_profiles')
         .select('id, profile_name, bazi_result_text, bazi_result')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-      if (error) throw error
-      const rows = (data as BaziProfileOption[]) || []
-      setAgentProfiles(rows)
-      return rows
-    } catch (error) {
-      console.error('[agent] 加载人物失败:', error)
-      setAgentProfiles([])
-      return [] as BaziProfileOption[]
+
+      try {
+        let result = await fetchProfiles()
+        if (result.error && isSupabaseAuthError(result.error)) {
+          const { error: refreshError } = await supabase.auth.refreshSession()
+          if (!refreshError) result = await fetchProfiles()
+        }
+
+        if (result.error) throw result.error
+        const rows = (result.data as BaziProfileOption[]) || []
+        if (agentProfilesLoadRef.current?.userId === requestUserId) setAgentProfiles(rows)
+        return rows
+      } catch (error) {
+        console.error('[agent] 加载人物失败:', supabaseErrorDetails(error))
+        if (agentProfilesLoadRef.current?.userId === requestUserId) setAgentProfiles([])
+        return [] as BaziProfileOption[]
+      }
+    })()
+
+    agentProfilesLoadRef.current = { userId: requestUserId, promise: request }
+    try {
+      return await request
+    } finally {
+      if (agentProfilesLoadRef.current?.promise === request) agentProfilesLoadRef.current = null
     }
-  }, [supabase, user])
+  }, [authLoading, supabase, user])
 
   useEffect(() => {
     fetchQuota()
   }, [fetchQuota])
 
   useEffect(() => {
-    if (activeChatMode === 'agent' && user) {
+    if (!user) return
+
+    const refreshVisibleQuota = () => {
+      if (document.visibilityState === 'visible') fetchQuota()
+    }
+    window.addEventListener('focus', refreshVisibleQuota)
+    document.addEventListener('visibilitychange', refreshVisibleQuota)
+    return () => {
+      window.removeEventListener('focus', refreshVisibleQuota)
+      document.removeEventListener('visibilitychange', refreshVisibleQuota)
+    }
+  }, [fetchQuota, user])
+
+  useEffect(() => {
+    if (!authLoading && activeChatMode === 'agent' && user) {
       loadAgentProfiles()
     }
-  }, [activeChatMode, loadAgentProfiles, user])
+  }, [activeChatMode, authLoading, loadAgentProfiles, user])
 
   const setStreamingMessageId = useCallback((id: string | null) => {
     streamingMessageIdRef.current = id
@@ -1285,28 +1583,17 @@ function HomeContent() {
     const raw = window.localStorage.getItem(GUEST_TRANSCRIPT_STORAGE_KEY)
     if (!raw) return
 
-    let payload: GuestTranscriptPayload | null = null
-    try {
-      payload = JSON.parse(raw) as GuestTranscriptPayload
-    } catch {
+    const payload = parseGuestTranscriptPayload(raw)
+    if (!payload) {
       window.localStorage.removeItem(GUEST_TRANSCRIPT_STORAGE_KEY)
       return
     }
-
-    const transcriptMessages = (payload?.messages || [])
-      .filter(message =>
-        (message.role === 'user' || message.role === 'assistant') &&
-        sanitizeReplacementChars(message.content).trim().length > 0,
-      )
-    if (transcriptMessages.length === 0) {
-      window.localStorage.removeItem(GUEST_TRANSCRIPT_STORAGE_KEY)
-      return
-    }
+    const transcriptMessages = payload.messages
 
     guestTranscriptMigrationRef.current = true
     const migrate = async () => {
       const firstUserMessage = transcriptMessages.find(message => message.role === 'user')
-      const titleSource = firstUserMessage?.content || transcriptMessages[0]?.content || '试用对话'
+      const titleSource = payload?.guestOnboardingQuestion?.trim() || firstUserMessage?.content || transcriptMessages[0]?.content || '试用对话'
       const title = titleSource.slice(0, 30) + (titleSource.length > 30 ? '...' : '')
       const mode: ChatMode = payload?.activeChatMode === 'classic' ? 'classic' : 'agent'
 
@@ -1674,7 +1961,11 @@ function HomeContent() {
   }, [activeChatMode, refreshSessionList, supabase, user])
 
   // 加载会话消息
-  const loadSession = useCallback(async (sessionId: string, modeHint?: ChatMode) => {
+  const loadSession = useCallback(async (
+    sessionId: string,
+    modeHint?: ChatMode,
+    origin: 'history' | 'new-chat' = 'history',
+  ) => {
     if (isTemporaryChat) {
       setIsTemporaryChat(false)
       temporarySessionIdRef.current = null
@@ -1692,6 +1983,18 @@ function HomeContent() {
       selectedSessionIdRef.current === targetSessionId
 
     if (sessionId === 'new') {
+      const hasActiveModeConversation = activeChatMode === 'liuyao'
+        ? Boolean(currentSessionId)
+        : messagesRef.current.some(message =>
+            sanitizeReplacementChars(message.content).trim().length > 0 || Boolean(message.agentUi)
+          )
+      const shouldKeepComposerDocked =
+        origin === 'new-chat' &&
+        (
+          keepNewChatComposerDocked ||
+          hasActiveModeConversation
+        )
+      setKeepNewChatComposerDocked(shouldKeepComposerDocked)
       setIsSessionLoading(false)
       setMessages([])
       selectedSessionIdRef.current = null
@@ -1707,8 +2010,14 @@ function HomeContent() {
       setAgentTimeRanges([])
       setAgentReportPreference(null)
       setMentionOpen(false)
+      setGuestInspirationAutoplayStopped(false)
+      activeInspirationPromptRef.current = null
+      if (shouldKeepComposerDocked && nextMode !== 'liuyao') {
+        window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
+      }
       return
     }
+    setKeepNewChatComposerDocked(false)
     setCurrentSessionId(sessionId)
     if (modeHint) {
       setCurrentSessionMode(modeHint)
@@ -1836,7 +2145,7 @@ function HomeContent() {
         console.error('加载会话失败:', error)
       }
     }
-  }, [activeChatMode, attachForegroundRunToView, beginSessionView, isTemporaryChat, mergeForegroundRunMessages, supabase])
+  }, [activeChatMode, attachForegroundRunToView, beginSessionView, currentSessionId, isTemporaryChat, keepNewChatComposerDocked, mergeForegroundRunMessages, supabase])
 
   const requestFollowUpSuggestions = useCallback(async (
     messageId: string,
@@ -1912,6 +2221,91 @@ function HomeContent() {
     textarea.style.overflowY = textarea.scrollHeight > COMPOSER_MAX_HEIGHT ? 'auto' : 'hidden'
   }, [])
 
+  const clearGuestInspirationAutoplayTimer = useCallback(() => {
+    if (guestInspirationAutoplayTimerRef.current !== null) {
+      window.clearTimeout(guestInspirationAutoplayTimerRef.current)
+      guestInspirationAutoplayTimerRef.current = null
+    }
+  }, [])
+
+  const stopInspirationTyping = useCallback((completeCurrentPrompt = false) => {
+    if (inspirationTypeTimerRef.current !== null) {
+      window.clearInterval(inspirationTypeTimerRef.current)
+      inspirationTypeTimerRef.current = null
+    }
+    if (completeCurrentPrompt && activeInspirationPromptRef.current) {
+      setInput(activeInspirationPromptRef.current)
+      setIsInputFromInspiration(true)
+    }
+    setIsDrawingInspiration(false)
+  }, [])
+
+  const stopGuestInspirationAutoplay = useCallback(() => {
+    clearGuestInspirationAutoplayTimer()
+    setGuestInspirationAutoplayStopped(true)
+  }, [clearGuestInspirationAutoplayTimer])
+
+  const takeOverGuestInspiration = useCallback(() => {
+    stopGuestInspirationAutoplay()
+    stopInspirationTyping(true)
+  }, [stopGuestInspirationAutoplay, stopInspirationTyping])
+
+  useEffect(() => {
+    return () => {
+      if (inspirationTypeTimerRef.current !== null) {
+        window.clearInterval(inspirationTypeTimerRef.current)
+      }
+      if (guestInspirationAutoplayTimerRef.current !== null) {
+        window.clearTimeout(guestInspirationAutoplayTimerRef.current)
+      }
+    }
+  }, [])
+
+  const drawInspiration = useCallback((focusComposer: boolean) => {
+    stopInspirationTyping()
+
+    let nextIndex = Math.floor(Math.random() * INSPIRATION_PROMPTS.length)
+    if (INSPIRATION_PROMPTS.length > 1 && nextIndex === lastInspirationIndexRef.current) {
+      nextIndex = (nextIndex + 1) % INSPIRATION_PROMPTS.length
+    }
+    lastInspirationIndexRef.current = nextIndex
+
+    const prompt = INSPIRATION_PROMPTS[nextIndex]
+    activeInspirationPromptRef.current = prompt
+    let characterIndex = 0
+    setMentionOpen(false)
+    setInput('')
+    setIsInputFromInspiration(true)
+
+    if (prefersReducedMotion) {
+      setInput(prompt)
+      setIsDrawingInspiration(false)
+      if (focusComposer) {
+        window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
+      }
+      return
+    }
+
+    setIsDrawingInspiration(true)
+    if (focusComposer) composerTextareaRef.current?.focus()
+
+    inspirationTypeTimerRef.current = window.setInterval(() => {
+      characterIndex += 1
+      setInput(prompt.slice(0, characterIndex))
+      if (characterIndex >= prompt.length) {
+        stopInspirationTyping()
+        if (focusComposer) {
+          window.requestAnimationFrame(() => composerTextareaRef.current?.focus())
+        }
+      }
+    }, INSPIRATION_TYPE_INTERVAL_MS)
+  }, [prefersReducedMotion, stopInspirationTyping])
+
+  const handleDrawInspiration = useCallback(() => {
+    stopGuestInspirationAutoplay()
+    drawInspiration(true)
+  }, [drawInspiration, stopGuestInspirationAutoplay])
+
   useLayoutEffect(() => {
     resizeComposerTextarea()
   }, [
@@ -1926,14 +2320,20 @@ function HomeContent() {
   ])
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    stopGuestInspirationAutoplay()
+    stopInspirationTyping()
+    activeInspirationPromptRef.current = null
+    setIsInputFromInspiration(false)
     const nextInput = e.target.value
     setInput(nextInput)
 
     if (activeChatMode === 'agent' && user) {
       const mentionMatch = nextInput.match(/(?:^|\s)([@#])([^\s@#]*)$/)
       if (mentionMatch) {
-        setMentionTrigger(mentionMatch[1] === '#' ? '#' : '@')
+        const trigger = mentionMatch[1] === '#' ? '#' : '@'
+        setMentionTrigger(trigger)
         setMentionQuery(mentionMatch[2] || '')
+        setContextMenuView(trigger === '@' ? 'profiles' : 'tags')
         setMentionOpen(true)
         if (agentProfiles.length === 0) loadAgentProfiles()
         return
@@ -1941,7 +2341,7 @@ function HomeContent() {
     }
 
     setMentionOpen(false)
-  }, [activeChatMode, agentProfiles.length, loadAgentProfiles, user])
+  }, [activeChatMode, agentProfiles.length, loadAgentProfiles, stopGuestInspirationAutoplay, stopInspirationTyping, user])
 
   const filteredAgentProfiles = useMemo(() => {
     const query = mentionQuery.trim().toLowerCase()
@@ -1953,8 +2353,8 @@ function HomeContent() {
 
   const filteredAgentFeatures = useMemo(() => {
     const query = mentionQuery.trim().toLowerCase()
-    if (!query) return AGENT_FEATURE_MENTIONS
-    return AGENT_FEATURE_MENTIONS.filter(item =>
+    if (!query) return AGENT_FEATURE_ENTRIES
+    return AGENT_FEATURE_ENTRIES.filter(item =>
       item.label.toLowerCase().includes(query) ||
       item.hint.toLowerCase().includes(query),
     )
@@ -1989,7 +2389,16 @@ function HomeContent() {
     ]
   }, [])
 
+  const filteredAgentTimeRanges = useMemo(() => {
+    const query = mentionQuery.trim().toLowerCase()
+    if (!query) return agentQuickTimeRanges
+    return agentQuickTimeRanges.filter(range => range.label.toLowerCase().includes(query))
+  }, [agentQuickTimeRanges, mentionQuery])
+
   const replaceActiveMention = useCallback((label: string, trigger: '@' | '#' = mentionTrigger) => {
+    stopGuestInspirationAutoplay()
+    activeInspirationPromptRef.current = null
+    setIsInputFromInspiration(false)
     setInput(prev => {
       const mention = `${trigger}${label} `
       if (/(^|\s)[@#][^\s@#]*$/.test(prev)) {
@@ -2000,7 +2409,7 @@ function HomeContent() {
       }
       return `${prev}${prev.endsWith(' ') || prev.length === 0 ? '' : ' '}${mention}`
     })
-  }, [mentionTrigger])
+  }, [mentionTrigger, stopGuestInspirationAutoplay])
 
   const addAgentParticipant = useCallback((profile: SelectedProfileContext) => {
     const next = mergeProfileContexts([...agentParticipants, profile])
@@ -2060,11 +2469,6 @@ function HomeContent() {
     setMentionOpen(false)
   }, [addAgentParticipant, agentParticipants, replaceActiveMention])
 
-  const selectAgentFeatureMention = useCallback((_kind: FeatureKind, label: string) => {
-    replaceActiveMention(label, '#')
-    setMentionOpen(false)
-  }, [replaceActiveMention])
-
   const selectAgentTimeMention = useCallback((range: Omit<AgentTimeRange, 'id'>) => {
     addAgentTimeRange(range)
     replaceActiveMention(range.label, '#')
@@ -2084,9 +2488,24 @@ function HomeContent() {
     )
   }, [activeChatMode, agentProfiles, loadAgentProfiles, user])
 
+  const trackFeatureEntrySelection = useCallback((
+    kind: FeatureKind | 'liuyao',
+    origin: 'sidebar' | 'composer_launcher' | 'empty_home' | 'mode_switch',
+  ) => {
+    if (!user) return
+    void fetch('/api/feature-entry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, origin }),
+      keepalive: true,
+    }).catch(error => {
+      console.warn('[feature-entry] tracking skipped:', error)
+    })
+  }, [user])
+
   const handleChatModeChange = useCallback((mode: ChatMode) => {
     if (!user && mode !== 'agent') {
-      setShowLandingAuthHint(true)
+      setAuthDialogMode('signup')
       setShowAuthDialog(true)
       return
     }
@@ -2100,6 +2519,7 @@ function HomeContent() {
       setMentionOpen(false)
       setComposerModeOpen(false)
       setLiuYaoResetKey(key => key + 1)
+      window.setTimeout(() => trackFeatureEntrySelection('liuyao', 'mode_switch'), 0)
       return
     }
     if (activeChatMode === 'liuyao' || currentSessionMode === 'liuyao') {
@@ -2128,7 +2548,7 @@ function HomeContent() {
           }
         })
     }
-  }, [activeChatMode, beginSessionView, currentSessionId, currentSessionMode, isTemporaryChat, supabase, user])
+  }, [activeChatMode, beginSessionView, currentSessionId, currentSessionMode, isTemporaryChat, supabase, trackFeatureEntrySelection, user])
 
   const handleTemporaryChatToggle = useCallback(() => {
     if (!user || isLoading || isAnalyzing) return
@@ -2150,6 +2570,7 @@ function HomeContent() {
     setMentionOpen(false)
     setComposerModeOpen(false)
     setInput('')
+    setIsInputFromInspiration(false)
   }, [activeChatMode, beginSessionView, isAnalyzing, isLoading, isTemporaryChat, user])
 
   const handleStopGeneration = useCallback(() => {
@@ -2610,8 +3031,10 @@ function HomeContent() {
       __timeRangesOverride?: AgentTimeRange[]
       __guestOnboarding?: boolean
       __guestOnboardingQuestion?: string | null
+      __visibleContentOverride?: string
     }
     const submittedText = (submitEvent.__contentOverride ?? input).trim()
+    const visibleSubmittedText = (submitEvent.__visibleContentOverride ?? submittedText).trim() || submittedText
     const selectedProfileOverride = submitEvent.__selectedProfileOverride
     const selectedParticipantsOverride = submitEvent.__selectedParticipantsOverride
     const reportPreferenceOverride = submitEvent.__agentReportPreferenceOverride
@@ -2623,18 +3046,35 @@ function HomeContent() {
       ? pendingConfirmationOverride
       : agentPendingConfirmation
     if (!submittedText || isLoading) return;
+    stopGuestInspirationAutoplay()
+    activeInspirationPromptRef.current = null
     const isGuestTrialRequest = !user
     const isGuestOnboardingRequest = isGuestTrialRequest && submitEvent.__guestOnboarding === true
     if (isGuestTrialRequest && guestFinalAnswerUsed) {
-      setShowLandingAuthHint(true)
       setLandingComposerPulse(true)
       window.setTimeout(() => setLandingComposerPulse(false), 1400)
-      setAuthDialogMode('signup')
-      setShowAuthDialog(true)
+      setShowGuestRegistrationFallback(true)
+      setGuestRegistrationHookHighlighted(true)
+      if (guestRegistrationHookHighlightTimerRef.current !== null) {
+        window.clearTimeout(guestRegistrationHookHighlightTimerRef.current)
+      }
+      guestRegistrationHookHighlightTimerRef.current = window.setTimeout(() => {
+        guestRegistrationHookHighlightTimerRef.current = null
+        setGuestRegistrationHookHighlighted(false)
+      }, 1600)
+      window.setTimeout(() => {
+        guestRegistrationHookRef.current?.scrollIntoView({
+          behavior: prefersReducedMotion ? 'auto' : 'smooth',
+          block: 'center',
+        })
+      }, 0)
+      return
+    }
+    if (isGuestTrialRequest && !isGuestOnboardingRequest) {
+      startGuestOnboarding(submittedText)
       return
     }
     if (!user) {
-      setShowLandingAuthHint(true)
       setLandingComposerPulse(true)
       window.setTimeout(() => setLandingComposerPulse(false), 1400)
       if (activeChatMode !== 'agent') {
@@ -2643,15 +3083,25 @@ function HomeContent() {
       }
     }
     setComposerModeOpen(false)
+    setMentionOpen(false)
     const effectiveChatMode: ChatMode = isGuestTrialRequest ? 'agent' : activeChatMode
     const shouldPersistChat = Boolean(user) && !isTemporaryChat
     const requestConsumesApple =
       Boolean(user) && effectiveChatMode === 'classic'
         ? isUltraMode
         : false
+    const requestAppleCost = requestConsumesApple
+      ? getClassicChatAppleCost(appleQuota?.tier ?? 'free')
+      : 0
 
     // 投喂模式前端预检查：苹果不够直接拦截，不发请求不添加消息
-    if (requestConsumesApple && CLASSIC_CHAT_APPLE_COST > 0 && appleQuota && appleQuota.remaining < CLASSIC_CHAT_APPLE_COST) {
+    if (
+      requestConsumesApple &&
+      requestAppleCost > 0 &&
+      appleQuota &&
+      !appleQuota.unlimited &&
+      appleQuota.remaining < requestAppleCost
+    ) {
       setShowQuotaExhausted(true)
       setTimeout(() => setShowQuotaExhausted(false), 8000)
       return
@@ -2707,7 +3157,7 @@ function HomeContent() {
     const userMessage: Message = {
       id: createBubuMessageId('user'),
       role: 'user',
-      content: submittedText,
+      content: visibleSubmittedText,
       createdAt: new Date(),
       mode: effectiveChatMode,
     };
@@ -2725,6 +3175,7 @@ function HomeContent() {
     streamContentRef.current = ''
     setMessages(prev => [...prev, userMessage, assistantMessage]);
     if (!submitEvent.__contentOverride) setInput('');
+    setIsInputFromInspiration(false)
     setIsLoading(true);
     setIsStreamingStarted(false);
     autoScrollRef.current = true
@@ -2778,8 +3229,11 @@ function HomeContent() {
       }
       registerForegroundRun(foregroundRun)
 
+      const requestUserMessage = visibleSubmittedText === submittedText
+        ? userMessage
+        : { ...userMessage, content: submittedText }
       const requestData: any = {
-        messages: [...messages, userMessage].map(m => ({
+        messages: [...messages, requestUserMessage].map(m => ({
           role: m.role,
           content: sanitizeReplacementChars(m.content),
         }))
@@ -2853,7 +3307,6 @@ function HomeContent() {
           const errorData = await response.json().catch(() => ({}))
           if (errorData.error === 'guest_trial_exhausted') {
             markGuestTrialFinalAnswerUsed()
-            setShowLandingAuthHint(true)
             setAuthDialogMode('signup')
             setShowAuthDialog(true)
             if (!foregroundRun || isForegroundRunVisible(foregroundRun)) {
@@ -2894,7 +3347,11 @@ function HomeContent() {
 
       // 投喂模式：立即本地扣减苹果，再异步刷新真实值
       if (requestConsumesApple) {
-        setAppleQuota(prev => prev ? { ...prev, remaining: Math.max(0, prev.remaining - CLASSIC_CHAT_APPLE_COST), } : null)
+        setAppleQuota(prev => prev ? {
+          ...prev,
+          remaining: Math.max(0, prev.remaining - requestAppleCost),
+          dailyRemaining: Math.max(0, prev.dailyRemaining - requestAppleCost),
+        } : null)
         fetchQuota()
       }
 
@@ -3048,7 +3505,6 @@ function HomeContent() {
         const runIsVisible = foregroundRun ? isForegroundRunVisible(foregroundRun) : isOperationActive(sessionId)
         if (isGuestTrialRequest && !agentDoneState.pendingConfirmation) {
           markGuestTrialFinalAnswerUsed()
-          if (runIsVisible) setShowLandingAuthHint(true)
         }
         if (runIsVisible) {
           setAgentPendingConfirmation(agentDoneState.pendingConfirmation)
@@ -3241,14 +3697,17 @@ function HomeContent() {
         if (rafIdRef.current) { cancelAnimationFrame(rafIdRef.current); rafIdRef.current = null }
       }
     }
-  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, sessionSummary, agentPendingConfirmation, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId, requestFollowUpSuggestions, refreshSessionList, registerForegroundRun, scheduleForegroundContentUpdate, applyForegroundRunPatch, isForegroundRunVisible, clearForegroundRun, guestFinalAnswerUsed, isTemporaryChat, markGuestTrialFinalAnswerUsed, guestOnboardingQuestion])
+  }, [input, isLoading, messages, baziAnalysisResult, isUltraMode, user, ensureSession, saveMessage, supabase, fetchQuota, appleQuota, featureContext, sessionSummary, agentPendingConfirmation, activeChatMode, agentComplexity, selectedProfile, currentSessionId, upsertAgentStep, resolveMentionedProfiles, agentParticipants, agentTimeRanges, agentReportPreference, setStreamingMessageId, requestFollowUpSuggestions, refreshSessionList, registerForegroundRun, scheduleForegroundContentUpdate, applyForegroundRunPatch, isForegroundRunVisible, clearForegroundRun, guestFinalAnswerUsed, isTemporaryChat, markGuestTrialFinalAnswerUsed, guestOnboardingQuestion, startGuestOnboarding, stopGuestInspirationAutoplay, prefersReducedMotion])
 
   useEffect(() => {
     if (!pendingPostRegistrationFollowUp || !user || isLoading) return
     if (currentSessionId !== pendingPostRegistrationFollowUp.sessionId) return
     const { question } = pendingPostRegistrationFollowUp
-    setPendingPostRegistrationFollowUp(null)
+    const followUpKey = `${pendingPostRegistrationFollowUp.sessionId}:${question}`
+    if (postRegistrationFollowUpStartedRef.current === followUpKey) return
+    postRegistrationFollowUpStartedRef.current = followUpKey
     const timer = window.setTimeout(() => {
+      setPendingPostRegistrationFollowUp(null)
       const event = {
         preventDefault: () => {},
         __contentOverride: buildPostRegistrationFollowUpPrompt(question),
@@ -3265,23 +3724,31 @@ function HomeContent() {
       }
       handleSubmit(event)
     }, 350)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.clearTimeout(timer)
+      if (postRegistrationFollowUpStartedRef.current === followUpKey) {
+        postRegistrationFollowUpStartedRef.current = null
+      }
+    }
   }, [currentSessionId, handleSubmit, isLoading, pendingPostRegistrationFollowUp, user])
 
   const handleComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!user && !guestInspirationAutoplayStopped) {
+      takeOverGuestInspiration()
+    }
     if (
       e.key === 'Enter' &&
       !e.shiftKey &&
       !e.altKey &&
       !e.ctrlKey &&
       !e.metaKey &&
-      !e.nativeEvent.isComposing &&
-      window.innerWidth >= 768
+      !e.nativeEvent.isComposing
     ) {
       e.preventDefault()
+      if (isDrawingInspiration) return
       handleSubmit(e as unknown as React.FormEvent)
     }
-  }, [handleSubmit])
+  }, [guestInspirationAutoplayStopped, handleSubmit, isDrawingInspiration, takeOverGuestInspiration, user])
 
   // ==================== Feature analysis ====================
   const submitFeatureAnalyze = useCallback(async (payload: FeaturePayload) => {
@@ -3391,6 +3858,7 @@ function HomeContent() {
           params: payload.params,
           chatMode: activeChatMode,
           complexity: activeChatMode === 'agent' ? agentComplexity : undefined,
+          reportPreference: payload.params.reportPreference,
         }),
         signal: requestController.signal,
       })
@@ -3598,18 +4066,28 @@ function HomeContent() {
       setShowAuthDialog(true)
       return
     }
-    setTimeout(() => {
-      const ev = {
-        preventDefault: () => {},
-        __contentOverride: text,
-      } as React.FormEvent & { __contentOverride: string }
-      handleSubmit(ev)
-    }, 30)
+    const ev = {
+      preventDefault: () => {},
+      __contentOverride: text,
+    } as React.FormEvent & { __contentOverride: string }
+    handleSubmit(ev)
   }, [user, handleSubmit])
 
-  const openFeaturePage = useCallback((kind: FeatureKind) => {
+  const openFeaturePage = useCallback((
+    kind: FeatureKind,
+    origin: 'sidebar' | 'composer_launcher' | 'empty_home' = 'composer_launcher',
+  ) => {
     setActiveFeature(kind as FeatureType)
-  }, [])
+    window.setTimeout(() => trackFeatureEntrySelection(kind, origin), 0)
+  }, [trackFeatureEntrySelection])
+
+  const openFeatureFromContextMenu = useCallback((kind: FeatureKind) => {
+    setInput(prev => prev.replace(/(^|\s)#[^\s@#]*$/, '$1').trimEnd())
+    setMentionOpen(false)
+    setMentionQuery('')
+    setContextMenuView('root')
+    openFeaturePage(kind, 'composer_launcher')
+  }, [openFeaturePage])
 
   const createAndSaveBaziProfile = useCallback(async (
     data: BaziData,
@@ -3876,6 +4354,7 @@ function HomeContent() {
           __preserveCurrentProfile: true,
           ...(isGuestOnboardingRequest
             ? {
+                __visibleContentOverride: GUEST_FIRST_QA_FLOW.copy.trialRequestVisibleText,
                 __guestOnboarding: true,
                 __guestOnboardingQuestion: onboardingQuestion,
                 __agentReportPreferenceOverride: GUEST_FIRST_QA_FLOW.reportPreference,
@@ -3885,6 +4364,7 @@ function HomeContent() {
             : {}),
         } as React.FormEvent & {
           __contentOverride: string
+          __visibleContentOverride?: string
           __selectedProfileOverride: SelectedProfileContext
           __selectedParticipantsOverride: SelectedProfileContext[]
           __preserveCurrentProfile: boolean
@@ -4085,6 +4565,7 @@ function HomeContent() {
       : isUltraMode
       ? '经典+'
       : '经典'
+  const classicChatAppleCost = getClassicChatAppleCost(appleQuota?.tier ?? 'free')
 
   const composerModeTitle =
     activeChatMode === 'agent'
@@ -4092,7 +4573,9 @@ function HomeContent() {
         ? '本命屋 Instant，快速编排'
         : `本命屋 ${composerModeLabel}，提高规划和报告上限`
       : isUltraMode
-      ? `经典投喂模式，每次消耗 ${CLASSIC_CHAT_APPLE_COST} 个苹果`
+      ? classicChatAppleCost === 0
+        ? '经典投喂模式，当前会员层级不扣苹果'
+        : `经典投喂模式，每次消耗 ${classicChatAppleCost} 个苹果`
       : '经典聊天，不消耗苹果'
 
   const visibleAgentParticipants =
@@ -4125,6 +4608,12 @@ function HomeContent() {
       }
     })
   }, [messages])
+
+  const openGuestRegistrationHook = useCallback(() => {
+    flushGuestTranscriptPayload()
+    setAuthDialogMode('signup')
+    setShowAuthDialog(true)
+  }, [flushGuestTranscriptPayload])
 
   const renderComposerModeMenu = () => (
     !user ? (
@@ -4160,7 +4649,7 @@ function HomeContent() {
         </button>
 
         {composerModeOpen && (
-          <div className="glass-minimal absolute bottom-full right-0 z-50 mb-3 w-60 overflow-hidden rounded-2xl border border-border bg-card p-2 shadow-2xl">
+          <div className="glass-minimal bubu-chat-popover absolute bottom-full right-0 z-50 mb-3 w-60 overflow-hidden border border-border bg-card p-2 shadow-2xl">
             <div className="px-3 pb-2 pt-1 text-xs text-muted-foreground">
               {activeChatMode === 'agent' ? '本命屋深度' : '经典选项'}
             </div>
@@ -4183,7 +4672,9 @@ function HomeContent() {
                 >
                   <MessageCircle className="h-4 w-4 text-primary" />
                   <span className="flex-1">经典投喂</span>
-                  <span className="text-xs text-muted-foreground">苹果 ×{CLASSIC_CHAT_APPLE_COST}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {classicChatAppleCost === 0 ? '会员免费' : `苹果 ×${classicChatAppleCost}`}
+                  </span>
                   {isUltraMode && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
                 </button>
               </>
@@ -4213,7 +4704,9 @@ function HomeContent() {
 
             {appleQuota && (
               <div className="mt-2 rounded-xl border border-border/70 bg-muted/35 px-3 py-2 text-xs text-muted-foreground">
-                苹果 {appleQuota.remaining}/{appleQuota.dailyLimit}
+                {appleQuota.unlimited
+                  ? '苹果 无限 · Ultra 全功能畅用'
+                  : `苹果 ${appleQuota.remaining}/${appleQuota.dailyLimit}`}
               </div>
             )}
           </div>
@@ -4224,7 +4717,7 @@ function HomeContent() {
   )
 
   const renderModeSwitch = () => (
-    <div className="bubu-mode-switch relative grid h-8 w-[11.5rem] grid-cols-2 rounded-full border border-border/70 bg-muted/45 p-0.5 shadow-sm">
+    <div className="bubu-mode-switch relative grid h-9 w-[13rem] grid-cols-2 rounded-full border border-border/70 bg-muted/45 p-0.5 shadow-sm">
       <span
         aria-hidden="true"
         className={`bubu-mode-switch-indicator ${
@@ -4234,7 +4727,8 @@ function HomeContent() {
       <button
         type="button"
         onClick={() => handleChatModeChange('agent')}
-        className={`relative z-10 h-7 rounded-full px-3 text-xs font-light flex items-center justify-center gap-1.5 transition-colors ${
+        aria-pressed={activeChatMode === 'agent'}
+        className={`relative z-10 h-8 rounded-full px-3 text-xs font-light flex items-center justify-center gap-1.5 transition-colors duration-150 ${
           activeChatMode === 'agent'
             ? 'text-primary-foreground'
             : 'text-muted-foreground hover:text-foreground'
@@ -4247,7 +4741,10 @@ function HomeContent() {
       <button
         type="button"
         onClick={() => handleChatModeChange('liuyao')}
-        className={`relative z-10 h-7 rounded-full px-3 text-xs font-light flex items-center justify-center gap-1.5 transition-colors ${
+        onPointerEnter={() => void loadLiuYaoChatModule()}
+        onFocus={() => void loadLiuYaoChatModule()}
+        aria-pressed={activeChatMode === 'liuyao'}
+        className={`relative z-10 h-8 rounded-full px-3 text-xs font-light flex items-center justify-center gap-1.5 transition-colors duration-150 ${
           activeChatMode === 'liuyao'
             ? 'text-primary-foreground'
             : 'text-muted-foreground hover:text-foreground'
@@ -4261,11 +4758,73 @@ function HomeContent() {
   )
 
   // ---- 渲染主聊天区域 ----
-  const hasPendingAgentUi = messages.some(message => message.agentUiStatus === 'pending')
+  const hasRenderableChatMessages = messages.some(message =>
+    sanitizeReplacementChars(message.content).trim().length > 0 || Boolean(message.agentUi)
+  )
+  const showBlankChat = !isSessionLoading && !hasRenderableChatMessages
+  const showEmptyChatHome = showBlankChat && !keepNewChatComposerDocked
+  const showDockedEmptyChat = showBlankChat && keepNewChatComposerDocked
+  const guestInspirationSurfaceEligible =
+    !authLoading &&
+    guestTrialStateHydrated &&
+    !user &&
+    activeFeature === 'chat' &&
+    activeChatMode === 'agent' &&
+    showBlankChat &&
+    !guestFinalAnswerUsed &&
+    !isLoading &&
+    !isAnalyzing &&
+    !showAuthDialog &&
+    (!input.trim() || isInputFromInspiration)
+  const shouldAutoRotateGuestInspiration =
+    guestInspirationSurfaceEligible &&
+    isDocumentVisible &&
+    !guestInspirationAutoplayStopped
+
+  useEffect(() => {
+    clearGuestInspirationAutoplayTimer()
+    if (!shouldAutoRotateGuestInspiration || isDrawingInspiration) return
+
+    const hasCompletedInspiration = isInputFromInspiration && Boolean(input.trim())
+    guestInspirationAutoplayTimerRef.current = window.setTimeout(() => {
+      guestInspirationAutoplayTimerRef.current = null
+      drawInspiration(false)
+    }, hasCompletedInspiration ? GUEST_INSPIRATION_HOLD_MS : GUEST_INSPIRATION_INITIAL_DELAY_MS)
+
+    return clearGuestInspirationAutoplayTimer
+  }, [
+    clearGuestInspirationAutoplayTimer,
+    drawInspiration,
+    input,
+    isDrawingInspiration,
+    isInputFromInspiration,
+    shouldAutoRotateGuestInspiration,
+  ])
+
+  useEffect(() => {
+    if (guestInspirationSurfaceEligible && isDocumentVisible) return
+    clearGuestInspirationAutoplayTimer()
+    if (isDrawingInspiration && isInputFromInspiration) {
+      stopInspirationTyping(true)
+    }
+  }, [
+    clearGuestInspirationAutoplayTimer,
+    guestInspirationSurfaceEligible,
+    isDocumentVisible,
+    isDrawingInspiration,
+    isInputFromInspiration,
+    stopInspirationTyping,
+  ])
+
   const renderChatArea = () => (
     <>
-      <div ref={messagesContainerRef} className="relative flex-1 overflow-y-auto px-3 pb-6 pt-16 [scrollbar-gutter:stable] md:px-6 md:pb-8">
-        <div className="max-w-3xl mx-auto">
+      <div
+        ref={messagesContainerRef}
+        className={`relative flex-1 overflow-y-auto px-3 [scrollbar-gutter:stable] md:px-6 ${
+          showEmptyChatHome ? 'pb-8 pt-0' : 'pb-6 pt-16 md:pb-8'
+        }`}
+      >
+        <div className={showBlankChat ? 'mx-auto h-full max-w-3xl' : 'max-w-3xl mx-auto'}>
           <div ref={messagesStartRef} />
           {isSessionLoading ? (
             <div className="space-y-4 py-4 md:space-y-6">
@@ -4281,48 +4840,40 @@ function HomeContent() {
               </div>
               <div className="ml-auto h-10 w-64 max-w-[82%] rounded-2xl bg-primary/18 md:rounded-lg" />
             </div>
-          ) : messages.length === 0 ? (
-            <BubuEmptyModeShell
-              modeKey={activeChatMode}
-              title="卜卜象陪你卜卜象"
-              description={
-                activeChatMode === 'agent'
-                  ? '本命屋会判断问题、补问关键信息，并在需要时调用结构化分析。'
-                  : '可以直接提问八字命理，也可以从下方选择一个结构化功能开始 🐘'
-              }
-              modeSwitch={renderModeSwitch()}
-              cards={(
-                <FeatureCards
-                  onPick={(kind) => {
-                    if (!user) {
-                      setShowLandingAuthHint(true)
-                      setShowAuthDialog(true)
-                      return
-                    }
-                    setActiveFeature(kind as FeatureType)
-                  }}
-                />
-              )}
-              footer={!user && (
-                <div className="mx-auto flex max-w-md flex-col items-center gap-3 rounded-lg border border-border bg-card/70 px-4 py-3 text-center backdrop-blur-sm">
-                  <p className="text-xs sm:text-sm text-muted-foreground font-light">
-                    可以先看一次「我」的入门画像；登录后可保存人物档案、同步聊天记录，并继续对话。
-                  </p>
-                  <button
-                    onClick={() => {
-                      setAuthDialogMode('signup')
-                      setShowAuthDialog(true)
-                    }}
-                    className="h-9 rounded-lg bg-primary px-5 text-sm font-light text-primary-foreground hover:opacity-90 transition-all"
-                  >
-                    登录 / 注册
-                  </button>
-                </div>
-              )}
-            />
+          ) : showEmptyChatHome ? (
+            <div className="h-full" />
+          ) : showDockedEmptyChat ? (
+            <div className="flex h-full flex-col items-center justify-center py-6">
+              <BubuEmptyModeHeader
+                activeMode="agent"
+                modeSwitch={renderModeSwitch()}
+                title={user ? '卜卜象陪你卜卜象' : GUEST_FIRST_QA_FLOW.copy.landing.homeTitle}
+              />
+              <FeatureCards
+                variant="pills"
+                showCost={false}
+                onPick={(kind) => {
+                  if (!user) {
+                    setAuthDialogMode('signup')
+                    setShowAuthDialog(true)
+                    return
+                  }
+                  openFeaturePage(kind, 'empty_home')
+                }}
+              />
+            </div>
           ) : (
             <div className="space-y-4 py-3 md:space-y-6 md:py-4">
               {chatRenderItems.map(({ message, reportType, previousUserContent, isLastAssistant }) => {
+                const isStreamingMessage = message.id === activeStreamingMessageId
+                const showGuestRegistrationHook =
+                  !user &&
+                  guestFinalAnswerUsed &&
+                  isLastAssistant &&
+                  message.role === 'assistant' &&
+                  !isStreamingMessage &&
+                  !message.agentUi &&
+                  Boolean(sanitizeReplacementChars(message.content).trim())
                 return (
                   <div
                     key={message.id}
@@ -4331,12 +4882,22 @@ function HomeContent() {
                   >
                     <ChatMessage
                       message={message}
-                      isStreaming={message.id === activeStreamingMessageId}
+                      isStreaming={isStreamingMessage}
                       reportType={reportType}
                       previousUserContent={previousUserContent}
+                      ritualFeedbackEnabled={Boolean(user && ritualFeedbackEnabled)}
                       onFollowUp={isLastAssistant ? fillAndSubmit : undefined}
                       onAgentUiSubmit={handleAgentUiSubmit}
                     />
+                    {showGuestRegistrationHook && (
+                      <div ref={guestRegistrationHookRef}>
+                        <GuestRegistrationHookCard
+                          question={guestOnboardingQuestion}
+                          onContinue={openGuestRegistrationHook}
+                          highlighted={guestRegistrationHookHighlighted}
+                        />
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -4345,7 +4906,7 @@ function HomeContent() {
           )}
         </div>
 
-        {showJumpLatest && messages.length > 0 && (
+        {showJumpLatest && hasRenderableChatMessages && (
           <button
             onClick={scrollToLatest}
             className="fixed bottom-[calc(8.25rem+env(safe-area-inset-bottom))] right-4 z-30 inline-flex h-10 items-center gap-2 rounded-full border border-primary/25 bg-card/95 px-3 text-xs font-medium text-foreground shadow-lg backdrop-blur-sm transition-all hover:bg-card md:bottom-28"
@@ -4356,7 +4917,7 @@ function HomeContent() {
           </button>
         )}
 
-        {showScrollTop && messages.length > 0 && (
+        {showScrollTop && hasRenderableChatMessages && (
           <button
             onClick={scrollToTop}
             className={`fixed bottom-[calc(8.25rem+env(safe-area-inset-bottom))] z-20 flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground shadow-lg backdrop-blur-sm transition-all hover:bg-card hover:text-foreground md:bottom-28 ${
@@ -4369,8 +4930,22 @@ function HomeContent() {
         )}
       </div>
 
-      <div className="shrink-0 border-t border-border/45 bg-background/90 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl md:px-4">
-        <div className="max-w-3xl mx-auto">
+      <div
+        className={
+          showEmptyChatHome
+            ? 'pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-y-auto px-3 pb-14 pt-20 md:px-6'
+            : 'shrink-0 border-t border-border/45 bg-background/90 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl md:px-4'
+        }
+      >
+        <div className={`mx-auto max-w-3xl ${showEmptyChatHome ? 'pointer-events-auto w-full' : ''}`}>
+          {showEmptyChatHome && (
+            <BubuEmptyModeHeader
+              activeMode="agent"
+              modeSwitch={renderModeSwitch()}
+              title={user ? '卜卜象陪你卜卜象' : GUEST_FIRST_QA_FLOW.copy.landing.homeTitle}
+            />
+          )}
+
           {showQuotaExhausted && (
             <div className="mb-2 rounded-lg border border-primary/25 bg-card/82 px-4 py-3 animate-fade-in relative">
               <button
@@ -4383,229 +4958,316 @@ function HomeContent() {
                 今天的苹果额度已用完。明天会自动刷新，也可以加购更多额度。
               </p>
               <button
-                onClick={() => { setShowDonationDialog(true); setShowQuotaExhausted(false) }}
+                onClick={() => { setShowMembershipDialog(true); setShowQuotaExhausted(false) }}
                 className="mt-2 h-8 rounded-lg bg-primary px-3 text-xs font-light text-primary-foreground hover:opacity-90 transition-all"
               >
-                购买苹果
+                查看套餐
               </button>
-            </div>
-          )}
-
-          {!user && showNewUserTutorial && activeChatMode === 'agent' && !guestOnboardingQuestion && !guestFinalAnswerUsed && !hasPendingAgentUi && (
-            <div className="mb-2 rounded-lg border border-primary/20 bg-card/88 px-4 py-3 shadow-sm backdrop-blur-sm animate-fade-in relative">
-              <button
-                type="button"
-                onClick={dismissNewUserTutorial}
-                className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md bg-muted/60 text-muted-foreground transition-colors hover:text-foreground"
-                title={GUEST_FIRST_QA_FLOW.copy.tutorialDismissLabel}
-              >
-                <X className="h-3 w-3" />
-              </button>
-              <div className="pr-7">
-                <p className="text-sm font-medium text-foreground">
-                  {GUEST_FIRST_QA_FLOW.copy.tutorialTitle}
-                </p>
-                <p className="mt-1 text-xs font-light leading-5 text-muted-foreground">
-                  {GUEST_FIRST_QA_FLOW.copy.tutorialDescription}
-                </p>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-4">
-                {GUEST_FIRST_QA_FLOW.copy.tutorialSteps.map(step => (
-                  <div key={step.label} className="rounded-lg border border-border/70 bg-background/42 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-xs font-medium text-primary">
-                        {step.label}
-                      </span>
-                      <p className="min-w-0 truncate text-xs font-medium text-foreground">{step.title}</p>
-                    </div>
-                    <p className="mt-1.5 text-[11px] font-light leading-4 text-muted-foreground">{step.description}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {!user && showLandingAuthHint && (
-            <div className="mb-2 rounded-lg border border-primary/25 bg-card/88 px-4 py-3 shadow-sm backdrop-blur-sm animate-fade-in relative">
-              <button
-                type="button"
-                onClick={() => setShowLandingAuthHint(false)}
-                className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md bg-muted/60 text-muted-foreground transition-colors hover:text-foreground"
-                title="关闭提示"
-              >
-                <X className="h-3 w-3" />
-              </button>
-              <div className="pr-7">
-                <p className="text-sm font-medium text-foreground">
-                  {guestFinalAnswerUsed
-                    ? GUEST_FIRST_QA_FLOW.copy.authHintTitle.completed
-                    : guestOnboardingQuestion || hasPendingAgentUi
-                    ? GUEST_FIRST_QA_FLOW.copy.authHintTitle.collecting
-                    : GUEST_FIRST_QA_FLOW.copy.authHintTitle.ready}
-                </p>
-                <p className="mt-1 text-xs font-light leading-5 text-muted-foreground">
-                  {guestFinalAnswerUsed
-                    ? GUEST_FIRST_QA_FLOW.copy.authHintDescription.completed
-                    : guestOnboardingQuestion || hasPendingAgentUi
-                    ? GUEST_FIRST_QA_FLOW.copy.authHintDescription.collecting
-                    : GUEST_FIRST_QA_FLOW.copy.authHintDescription.ready}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthDialogMode(guestFinalAnswerUsed ? 'signup' : 'signin')
-                    setShowAuthDialog(true)
-                  }}
-                  className="mt-2 h-8 rounded-lg bg-primary px-3 text-xs font-light text-primary-foreground transition-all hover:opacity-90"
-                >
-                  {guestFinalAnswerUsed ? '登录 / 注册继续' : '登录后保存记录'}
-                </button>
-              </div>
             </div>
           )}
 
           <form id="chat-form" onSubmit={handleSubmit} className="relative">
             {activeChatMode === 'agent' && user && mentionOpen && (
-              <div className="glass-minimal absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-h-[min(26rem,calc(100dvh-12rem))] max-w-xl overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
-                <div className="px-3 py-2 border-b border-border/50 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Plus className="w-3.5 h-3.5" />
-                  添加本命屋上下文
-                </div>
-                <div className="max-h-96 overflow-y-auto py-1">
-                  <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                    人物
-                  </div>
-                  {filteredAgentProfiles.length > 0 ? (
-                    filteredAgentProfiles.map(profile => {
-                      const ctx = profileOptionToContext(profile)
-                      const selected = agentParticipants.some(
-                        item => profileContextKey(item) === profileContextKey(ctx),
-                      )
-                      return (
-                        <button
-                          key={profile.id}
-                          type="button"
-                          onClick={() => selectAgentProfileMention(profile)}
-                          className={`w-full px-3 py-2.5 flex items-center gap-3 text-left transition-colors ${
-                            selected ? 'bg-primary/8 text-foreground' : 'hover:bg-muted/50 text-foreground'
-                          }`}
-                        >
-                          <div className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 ${
-                            selected ? 'bg-primary/15 text-primary' : 'bg-primary/10 text-primary'
-                          }`}>
-                            <AtSign className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm text-foreground truncate">{profile.profile_name}</p>
-                            {ctx.pillars && (
-                              <p className="text-[10px] text-muted-foreground/75 truncate tracking-wider">
-                                {ctx.pillars}
-                              </p>
-                            )}
-                          </div>
-                          {selected && <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
-                        </button>
-                      )
-                    })
+              <>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label="关闭添加内容菜单"
+                  onClick={() => {
+                    setMentionOpen(false)
+                    setContextMenuView('root')
+                    setMentionQuery('')
+                  }}
+                  className="fixed inset-0 z-40 cursor-default"
+                />
+                <div className="glass-minimal bubu-chat-popover absolute bottom-full left-0 right-0 z-50 mx-auto mb-2 max-w-sm overflow-hidden border border-border bg-card shadow-2xl">
+                  <div className="flex h-10 items-center gap-2 border-b border-border/50 px-3 text-xs text-muted-foreground">
+                  {contextMenuView === 'root' ? (
+                    <Plus className="h-3.5 w-3.5" />
                   ) : (
-                    <div className="px-3 py-2 text-xs text-muted-foreground">
-                      暂无匹配人物
-                    </div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMentionOpen(false)
-                      setShowProfilesDialog(true)
-                    }}
-                    className="w-full px-3 py-2 flex items-center gap-2 text-xs text-primary hover:bg-muted/40 transition-colors"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    添加到人物管理
-                  </button>
-
-                  <div className="px-3 pt-3 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground/70 border-t border-border/50">
-                    时间段
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 px-3 py-2">
-                    {agentQuickTimeRanges.map(range => (
-                      <button
-                        key={`${range.label}-${range.start}-${range.end}`}
-                        type="button"
-                        onClick={() => selectAgentTimeMention(range)}
-                        className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2 text-left transition-colors hover:bg-muted/55"
-                      >
-                        <p className="text-xs text-foreground">{range.label}</p>
-                        <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                          点击后带入这段时间
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 px-3 pb-3">
-                    <input
-                      type="date"
-                      value={agentTimeDraft.start}
-                      onChange={event => setAgentTimeDraft(prev => ({ ...prev, start: event.target.value }))}
-                      className="h-9 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary/60"
-                    />
-                    <input
-                      type="date"
-                      value={agentTimeDraft.end}
-                      onChange={event => setAgentTimeDraft(prev => ({ ...prev, end: event.target.value }))}
-                      className="h-9 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary/60"
-                    />
-                    <input
-                      type="text"
-                      value={agentTimeDraft.label}
-                      onChange={event => setAgentTimeDraft(prev => ({ ...prev, label: event.target.value }))}
-                      placeholder="标签，可选"
-                      className="col-span-2 h-9 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/60"
-                    />
                     <button
                       type="button"
-                      disabled={!agentTimeDraft.start || !agentTimeDraft.end}
-                      onClick={() => {
-                        addAgentCustomTimeRange()
-                        replaceActiveMention(agentTimeDraft.label || '自定义时间段', '#')
-                        setMentionOpen(false)
-                      }}
-                      className="col-span-2 h-9 rounded-lg bg-primary text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => setContextMenuView(
+                        contextMenuView === 'custom-time' ? 'time' : 'root'
+                      )}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      aria-label="返回添加内容"
                     >
-                      添加自定义时间段
+                      <ArrowLeft className="h-3.5 w-3.5" />
                     </button>
-                  </div>
+                  )}
+                  <span>
+                    {contextMenuView === 'root'
+                      ? '添加内容'
+                      : contextMenuView === 'profiles'
+                      ? '选择人物'
+                      : contextMenuView === 'time'
+                      ? '选择时间'
+                      : contextMenuView === 'features'
+                      ? '选择功能'
+                      : contextMenuView === 'custom-time'
+                      ? '自定义时间'
+                      : mentionQuery.trim()
+                      ? `#${mentionQuery.trim()}`
+                      : '时间与功能'}
+                  </span>
+                </div>
 
-                  <div className="px-3 pt-3 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground/70 border-t border-border/50">
-                    功能
-                  </div>
-                  {filteredAgentFeatures.map(item => {
-                    const Icon = item.icon
-                    return (
-                      <button
-                        key={item.kind}
-                        type="button"
-                        onClick={() => selectAgentFeatureMention(item.kind, item.label)}
-                        className="w-full px-3 py-2.5 flex items-center gap-3 text-left hover:bg-muted/50 transition-colors"
-                      >
-                        <div className="w-8 h-8 rounded-md bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
-                          <Icon className="w-4 h-4" />
+                  <div className="max-h-[min(22rem,calc(100dvh-12rem))] overflow-y-auto p-2">
+                  {contextMenuView === 'root' && (
+                    <div className="space-y-1">
+                      <div className="mb-2 flex items-center gap-3 rounded-xl bg-muted/35 px-3 py-2.5">
+                        <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${
+                          isTemporaryChat ? 'bg-primary/15 text-primary' : 'bg-card text-muted-foreground'
+                        }`}>
+                          <EyeOff className="h-4 w-4" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm text-foreground truncate">{item.label}</p>
-                          <p className="text-[10px] text-muted-foreground/75 truncate">{item.hint}</p>
+                          <p className="text-sm text-foreground">临时对话</p>
+                          <p className="truncate text-[11px] text-muted-foreground">开启后不保存聊天记录</p>
                         </div>
+                        <Switch
+                          checked={isTemporaryChat}
+                          onCheckedChange={() => handleTemporaryChatToggle()}
+                          disabled={isLoading || isAnalyzing}
+                          aria-label={isTemporaryChat ? '关闭临时对话' : '开启临时对话'}
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setContextMenuView('profiles')}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/55"
+                      >
+                        <AtSign className="h-4 w-4 text-primary" />
+                        <span className="flex-1 text-sm text-foreground">人物</span>
+                        <span className="text-xs text-muted-foreground">
+                          {visibleAgentParticipants.length > 0 ? `已选 ${visibleAgentParticipants.length}` : '选择人物'}
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setContextMenuView('time')}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/55"
+                      >
+                        <Hash className="h-4 w-4 text-primary" />
+                        <span className="flex-1 text-sm text-foreground">时间</span>
+                        <span className="text-xs text-muted-foreground">
+                          {agentTimeRanges.length > 0 ? `已选 ${agentTimeRanges.length}` : '选择时间'}
+                        </span>
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setContextMenuView('features')}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/55"
+                      >
+                        <Compass className="h-4 w-4 text-primary" />
+                        <span className="flex-1 text-sm text-foreground">功能</span>
+                        <span className="text-xs text-muted-foreground">合盘、运势等</span>
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                  )}
+
+                  {contextMenuView === 'profiles' && (
+                    <div className="space-y-1">
+                      {filteredAgentProfiles.length > 0 ? (
+                        filteredAgentProfiles.map(profile => {
+                          const ctx = profileOptionToContext(profile)
+                          const selected = visibleAgentParticipants.some(
+                            item => profileContextKey(item) === profileContextKey(ctx),
+                          )
+                          return (
+                            <button
+                              key={profile.id}
+                              type="button"
+                              onClick={() => selectAgentProfileMention(profile)}
+                              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors ${
+                                selected ? 'bg-primary/8 text-foreground' : 'text-foreground hover:bg-muted/50'
+                              }`}
+                            >
+                              <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${
+                                selected ? 'bg-primary/15 text-primary' : 'bg-muted/55 text-muted-foreground'
+                              }`}>
+                                <AtSign className="h-3.5 w-3.5" />
+                              </div>
+                              <span className="min-w-0 flex-1 truncate text-sm">{profile.profile_name}</span>
+                              {selected && <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
+                            </button>
+                          )
+                        })
+                      ) : (
+                        <div className="px-3 py-3 text-xs text-muted-foreground">暂无匹配人物</div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMentionOpen(false)
+                          setShowProfilesDialog(true)
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs text-primary transition-colors hover:bg-muted/40"
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        人物管理
+                      </button>
+                    </div>
+                  )}
+
+                  {contextMenuView === 'time' && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        {agentQuickTimeRanges.map(range => (
+                          <button
+                            key={`${range.label}-${range.start}-${range.end}`}
+                            type="button"
+                            onClick={() => selectAgentTimeMention(range)}
+                            className="rounded-xl border border-border/70 bg-muted/25 px-3 py-2.5 text-left text-xs text-foreground transition-colors hover:bg-muted/55"
+                          >
+                            {range.label}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setContextMenuView('custom-time')}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted/55"
+                      >
+                        <CalendarRange className="h-4 w-4 text-primary" />
+                        <span className="flex-1">自定义时间</span>
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                    </div>
+                  )}
+
+                  {contextMenuView === 'custom-time' && (
+                    <div className="grid grid-cols-2 gap-2 p-1">
+                      <input
+                        type="date"
+                        aria-label="开始日期"
+                        value={agentTimeDraft.start}
+                        onChange={event => setAgentTimeDraft(prev => ({ ...prev, start: event.target.value }))}
+                        className="h-9 min-w-0 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary/60"
+                      />
+                      <input
+                        type="date"
+                        aria-label="结束日期"
+                        value={agentTimeDraft.end}
+                        onChange={event => setAgentTimeDraft(prev => ({ ...prev, end: event.target.value }))}
+                        className="h-9 min-w-0 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary/60"
+                      />
+                      <input
+                        type="text"
+                        value={agentTimeDraft.label}
+                        onChange={event => setAgentTimeDraft(prev => ({ ...prev, label: event.target.value }))}
+                        placeholder="标签，可选"
+                        className="col-span-2 h-9 rounded-lg border border-border bg-card px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary/60"
+                      />
+                      <button
+                        type="button"
+                        disabled={!agentTimeDraft.start || !agentTimeDraft.end}
+                        onClick={() => {
+                          addAgentCustomTimeRange()
+                          replaceActiveMention(agentTimeDraft.label || '自定义时间段', '#')
+                          setMentionOpen(false)
+                        }}
+                        className="col-span-2 h-9 rounded-lg bg-primary text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        添加时间
+                      </button>
+                    </div>
+                  )}
+
+                  {contextMenuView === 'features' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {AGENT_FEATURE_ENTRIES.map(item => {
+                        const Icon = item.icon
+                        return (
+                          <button
+                            key={item.kind}
+                            type="button"
+                            onClick={() => openFeatureFromContextMenu(item.kind)}
+                            className="flex items-center gap-2 rounded-xl border border-border/65 bg-muted/20 px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted/55"
+                          >
+                            <Icon className="h-4 w-4 flex-shrink-0 text-primary" />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {contextMenuView === 'tags' && (
+                    mentionQuery.trim() ? (
+                      <div className="space-y-2">
+                        {filteredAgentTimeRanges.map(range => (
+                          <button
+                            key={`${range.label}-${range.start}-${range.end}`}
+                            type="button"
+                            onClick={() => selectAgentTimeMention(range)}
+                            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/55"
+                          >
+                            <Hash className="h-3.5 w-3.5 text-primary" />
+                            {range.label}
+                          </button>
+                        ))}
+                        {filteredAgentFeatures.map(item => {
+                          const Icon = item.icon
+                          return (
+                            <button
+                              key={item.kind}
+                              type="button"
+                              onClick={() => openFeatureFromContextMenu(item.kind)}
+                              className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/55"
+                            >
+                              <Icon className="h-3.5 w-3.5 text-primary" />
+                              {item.label}
+                            </button>
+                          )
+                        })}
+                        {filteredAgentTimeRanges.length === 0 && filteredAgentFeatures.length === 0 && (
+                          <div className="px-3 py-3 text-xs text-muted-foreground">暂无匹配内容</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        <button
+                          type="button"
+                          onClick={() => setContextMenuView('time')}
+                          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted/55"
+                        >
+                          <Hash className="h-4 w-4 text-primary" />
+                          <span className="flex-1">时间</span>
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setContextMenuView('features')}
+                          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-foreground transition-colors hover:bg-muted/55"
+                        >
+                          <Compass className="h-4 w-4 text-primary" />
+                          <span className="flex-1">功能</span>
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        </button>
+                      </div>
                     )
-                  })}
+                  )}
+                  </div>
                 </div>
-              </div>
+              </>
             )}
 
             <div
-              className={`rounded-2xl border bg-card/90 px-2 py-1.5 backdrop-blur-xl [view-transition-name:bubu-composer] md:rounded-xl ${
+              className={`bubu-chat-composer border bg-card/90 px-2 py-1.5 backdrop-blur-xl [view-transition-name:bubu-composer] ${
+                showEmptyChatHome
+                  ? 'bubu-chat-composer-empty bg-card/96 shadow-[0_18px_60px_oklch(0.245_0.012_255/0.12)] md:px-3 md:py-2'
+                  : ''
+              } ${
                 landingComposerPulse
-                  ? 'border-primary/50 shadow-[0_0_0_4px_oklch(0.696_0.137_3.34/0.10),0_18px_54px_oklch(0.696_0.137_3.34/0.16)]'
+                  ? 'border-primary/50 shadow-[0_0_0_4px_oklch(0.705_0.158_357.00/0.10),0_18px_54px_oklch(0.705_0.158_357.00/0.16)]'
+                  : showEmptyChatHome
+                  ? 'border-border/75'
                   : 'border-border/80 shadow-[0_16px_48px_oklch(0.245_0.012_255/0.10)]'
               }`}
             >
@@ -4706,10 +5368,11 @@ function HomeContent() {
                       }
                       setMentionQuery('')
                       setMentionTrigger('@')
+                      setContextMenuView('root')
                       setMentionOpen(open => !open)
                       if (agentProfiles.length === 0) loadAgentProfiles()
                     }}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card/80 text-muted-foreground hover:bg-card hover:text-foreground transition-all"
+                    className="bubu-chat-icon-control flex h-8 w-8 items-center justify-center border border-border bg-card/80 text-muted-foreground hover:bg-card hover:text-foreground transition-all"
                     disabled={isLoading || isAnalyzing}
                     title="添加本命屋上下文"
                   >
@@ -4724,7 +5387,7 @@ function HomeContent() {
                         setShowAuthDialog(true)
                         return
                       }
-                      openFeaturePage(kind)
+                      openFeaturePage(kind, 'composer_launcher')
                     }}
                     selectedProfileId={selectedProfileId}
                     onSelectProfile={(profileId, baziResult, profile) => {
@@ -4736,12 +5399,12 @@ function HomeContent() {
                     onOpenProfilesDialog={() => setShowProfilesDialog(true)}
                   />
                 )}
-                {user && (
+                {user && activeChatMode !== 'agent' && (
                   <button
                     type="button"
                     onClick={handleTemporaryChatToggle}
                     disabled={isLoading || isAnalyzing}
-                    className={`flex h-8 w-8 items-center justify-center rounded-full border transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+                    className={`bubu-chat-icon-control flex h-8 w-8 items-center justify-center border transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                       isTemporaryChat
                         ? 'border-primary/30 bg-primary/12 text-primary'
                         : 'border-border bg-card/80 text-muted-foreground hover:bg-card hover:text-foreground'
@@ -4751,13 +5414,34 @@ function HomeContent() {
                     <EyeOff className="w-4 h-4" />
                   </button>
                 )}
+                {showBlankChat && !guestFinalAnswerUsed && (!input.trim() || isInputFromInspiration) && (
+                  <button
+                    type="button"
+                    onClick={handleDrawInspiration}
+                    disabled={isLoading || isAnalyzing}
+                    className="bubu-chat-icon-control flex h-8 w-8 flex-shrink-0 items-center justify-center border border-primary/20 bg-primary/8 text-primary transition-all hover:border-primary/35 hover:bg-primary/12 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="灵感抽签：随机填入一个好问题"
+                    aria-label="灵感抽签"
+                  >
+                    <Dices className={`h-4 w-4 ${isDrawingInspiration ? 'animate-pulse' : ''}`} />
+                  </button>
+                )}
                 <textarea
                   ref={composerTextareaRef}
                   rows={1}
                   value={input}
                   onChange={handleInputChange}
+                  onPointerDown={() => {
+                    if (!user && !guestInspirationAutoplayStopped) {
+                      takeOverGuestInspiration()
+                    }
+                  }}
                   onKeyDown={handleComposerKeyDown}
-                  placeholder={user ? (activeChatMode === 'agent' ? '想聊什么？随便问吧' : '想聊什么？随便问吧') : guestFinalAnswerUsed ? '登录后继续和卜卜象聊' : '先留下问题，免费先看「我」'}
+                  placeholder={user
+                    ? '想聊什么？随便问吧'
+                    : guestFinalAnswerUsed
+                    ? GUEST_FIRST_QA_FLOW.copy.postTrialComposerPlaceholder
+                    : GUEST_FIRST_QA_FLOW.copy.landing.inputPlaceholder}
                   className="composer-textarea h-8 min-h-8 max-h-32 min-w-0 flex-1 resize-none overflow-hidden bg-transparent px-1 py-1.5 text-sm font-light leading-5 text-foreground placeholder-muted-foreground focus:outline-none"
                   disabled={isLoading}
                 />
@@ -4766,7 +5450,7 @@ function HomeContent() {
                   <button
                     type="button"
                     onClick={handleStopGeneration}
-                    className="flex h-8 w-8 items-center justify-center rounded-full border border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/15 transition-all"
+                    className="bubu-chat-icon-control flex h-8 w-8 items-center justify-center border border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/15 transition-all"
                     title="停止输出"
                   >
                     <Square className="w-3.5 h-3.5 fill-current" />
@@ -4774,9 +5458,9 @@ function HomeContent() {
                 ) : (
                   <button
                     type="submit"
-                    disabled={!input.trim() || isLoading}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                    title={user ? "发送" : guestFinalAnswerUsed ? "登录后继续" : "发送试用"}
+                    disabled={!input.trim() || isLoading || isDrawingInspiration}
+                    className="bubu-chat-icon-control flex h-8 w-8 items-center justify-center bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    title={user ? "发送" : guestFinalAnswerUsed ? "查看入阁邀请" : "发送试用"}
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -4784,6 +5468,34 @@ function HomeContent() {
               </div>
             </div>
           </form>
+
+          {showEmptyChatHome && guestFinalAnswerUsed && showGuestRegistrationFallback && (
+            <div ref={guestRegistrationHookRef} className="mt-3">
+              <GuestRegistrationHookCard
+                question={guestOnboardingQuestion}
+                onContinue={openGuestRegistrationHook}
+                highlighted={guestRegistrationHookHighlighted}
+              />
+            </div>
+          )}
+
+          {showEmptyChatHome && (
+            <div className="mt-4">
+              <FeatureCards
+                variant="pills"
+                showCost={false}
+                onPick={(kind) => {
+                  if (!user) {
+                    setAuthDialogMode('signup')
+                    setShowAuthDialog(true)
+                    return
+                  }
+                  openFeaturePage(kind, 'empty_home')
+                }}
+              />
+            </div>
+          )}
+
         </div>
       </div>
     </>
@@ -4796,17 +5508,24 @@ function HomeContent() {
   const renderFeatureContent = () => {
     switch (activeFeature) {
       case 'chat':
-        return activeChatMode === 'liuyao'
-          ? (
-            <LiuYaoChat
-              resetKey={liuYaoResetKey}
-              currentSessionId={currentSessionId}
-              modeSwitch={renderModeSwitch()}
-              onSessionCreated={handleLiuYaoSessionCreated}
-              onSessionListRefresh={refreshSessionList}
-            />
-          )
-          : renderChatArea()
+        return (
+          <>
+            <Activity mode={activeChatMode === 'liuyao' ? 'visible' : 'hidden'}>
+              <LiuYaoChat
+                resetKey={liuYaoResetKey}
+                currentSessionId={currentSessionId}
+                dockEmptyComposer={keepNewChatComposerDocked}
+                modeSwitch={renderModeSwitch()}
+                ritualFeedbackEnabled={Boolean(user && ritualFeedbackEnabled)}
+                onSessionCreated={handleLiuYaoSessionCreated}
+                onSessionListRefresh={refreshSessionList}
+              />
+            </Activity>
+            <Activity mode={activeChatMode === 'liuyao' ? 'hidden' : 'visible'}>
+              {renderChatArea()}
+            </Activity>
+          </>
+        )
       case 'hepan':
         return (
           <HepanPage
@@ -4857,7 +5576,13 @@ function HomeContent() {
       <AppSidebar
         activeFeature={activeFeature}
         activeChatMode={activeChatMode}
-        onFeatureChange={setActiveFeature}
+        onFeatureChange={(feature) => {
+          if (feature !== 'chat') {
+            openFeaturePage(feature, 'sidebar')
+            return
+          }
+          setActiveFeature('chat')
+        }}
         onChatModeChange={handleChatModeChange}
         currentSessionId={currentSessionId}
         onSelectSession={loadSession}
@@ -4865,7 +5590,7 @@ function HomeContent() {
         onOpenProfiles={() => setShowProfilesDialog(true)}
         onOpenChangePassword={() => setShowChangePasswordDialog(true)}
         appleQuota={appleQuota}
-        onOpenDonation={() => setShowDonationDialog(true)}
+        onOpenMembership={() => setShowMembershipDialog(true)}
         refreshKey={sessionListRefreshKey}
       />
 
@@ -4873,19 +5598,27 @@ function HomeContent() {
         <MinimalBackground />
 
         <div className="relative z-10 h-dvh min-w-0 flex flex-col">
+          {showInviteWelcome && !user && (
+            <div className="pointer-events-none absolute inset-x-3 top-16 z-30 flex justify-center">
+              <div className="flex items-center gap-2 rounded-full border border-primary/25 bg-card/95 px-4 py-2 text-xs text-foreground shadow-lg backdrop-blur-xl">
+                <UserPlus className="h-4 w-4 text-primary" />
+                好友送你 30 个苹果：完成试用并注册即可领取，365 天有效
+              </div>
+            </div>
+          )}
           {/* Top bar: Sidebar trigger + UserMenu */}
-          <div className="pointer-events-none absolute inset-x-16 top-3 z-20 flex h-10 items-center justify-center md:hidden">
+          <div className="pointer-events-none absolute inset-x-16 top-3 z-20 flex h-10 items-center justify-center">
             <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-border/55 bg-card/80 px-3 py-1.5 shadow-sm backdrop-blur-xl">
               <span className="relative h-5 w-5 overflow-hidden rounded-full">
-                <Image src="/avatar-small.png" alt="卜卜象" fill className="object-contain" />
+                <Image src="/logo.jpg" alt="卜卜象 logo" fill className="object-contain" />
               </span>
-              <span className="truncate text-sm font-medium text-foreground">卜卜象</span>
+              <span className="whitespace-nowrap text-sm font-medium text-foreground">卜卜象</span>
             </div>
           </div>
           <div className="absolute top-3 left-3 z-20">
             <button
               onClick={toggleSidebar}
-              className="w-10 h-10 rounded-xl bg-card/80 border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-card transition-all duration-300"
+              className="w-10 h-10 rounded-xl bg-card/80 border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-card transition-colors duration-150"
               title={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
             >
               {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
@@ -4897,6 +5630,9 @@ function HomeContent() {
               onOpenProfiles={() => setShowProfilesDialog(true)}
               onOpenChangePassword={() => setShowChangePasswordDialog(true)}
               onOpenRewards={() => setShowRewardsDialog(true)}
+              onOpenMembership={() => setShowMembershipDialog(true)}
+              ritualFeedbackEnabled={ritualFeedbackEnabled}
+              onRitualFeedbackChange={handleRitualFeedbackChange}
               appleQuota={appleQuota}
             />
           </div>
@@ -4925,6 +5661,13 @@ function HomeContent() {
               setAuthDialogMode('signin')
             }}
             mode={authDialogMode}
+            onRegistrationReward={(reward) => {
+              toast({
+                title: `${reward.newUserRewardApples || 30} 个苹果已到账 🍎`,
+                description: `有效期 ${reward.rewardExpiryDays || 365} 天；完成注册后的首次完整回答，邀请你的好友也会到账。`,
+              })
+              void fetchQuota()
+            }}
           />
         )}
         {showRewardsDialog && (
@@ -4966,10 +5709,10 @@ function HomeContent() {
             onClose={() => setShowChangePasswordDialog(false)}
           />
         )}
-        {showDonationDialog && (
-          <DonationDialog
-            isOpen={showDonationDialog}
-            onClose={() => setShowDonationDialog(false)}
+        {showMembershipDialog && (
+          <MembershipDialog
+            isOpen={showMembershipDialog}
+            onClose={() => setShowMembershipDialog(false)}
             appleQuota={appleQuota}
           />
         )}

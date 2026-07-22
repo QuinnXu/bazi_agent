@@ -108,6 +108,7 @@ export function ChatSessionsDialog({
       <div className="relative bg-card/95 backdrop-blur-sm border border-border rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-xl flex flex-col glass-minimal">
         <button
           onClick={onClose}
+          aria-label="关闭聊天记录"
           className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
         >
           <X className="w-4 h-4 text-muted-foreground" />
@@ -126,7 +127,7 @@ export function ChatSessionsDialog({
 
         <button
           onClick={handleCreateSession}
-          className="mb-4 w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-300 flex items-center justify-center gap-2"
+          className="mb-4 w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-light hover:opacity-90 transition-all duration-150 flex items-center justify-center gap-2"
         >
           <Plus className="w-4 h-4" />
           找小象开新聊
@@ -148,7 +149,7 @@ export function ChatSessionsDialog({
                   onSelectSession(session.id)
                   onClose()
                 }}
-                className={`p-4 rounded-lg border transition-all duration-300 cursor-pointer ${
+                className={`p-4 rounded-lg border transition-all duration-150 cursor-pointer ${
                   currentSessionId === session.id
                     ? 'bg-muted border-primary/40'
                     : 'bg-card/60 border-border hover:bg-card/80'

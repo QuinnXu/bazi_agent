@@ -4,27 +4,27 @@
 
 :root {
   /* —— Base surfaces —— */
-  --background: oklch(0.986 0.006 80.00);
-  --foreground: oklch(0.245 0.012 255.00);
+  --background: oklch(0.988 0.010 70.00);
+  --foreground: oklch(0.248 0.018 300.00);
 
-  --card: oklch(0.999 0.002 80.00);
+  --card: oklch(0.998 0.004 70.00);
   --card-foreground: var(--foreground);
 
   --popover: var(--card);
   --popover-foreground: var(--foreground);
 
   /* —— Brand —— */
-  --primary: oklch(0.696 0.137 3.34); /* #E76F9A 卜卜粉 */
+  --primary: oklch(0.705 0.158 357.00); /* 新头像柔粉 */
   --primary-foreground: oklch(0.995 0.004 80.00);
 
-  --secondary: oklch(0.948 0.011 250.00);
-  --secondary-foreground: oklch(0.295 0.016 255.00);
+  --secondary: oklch(0.956 0.020 315.00);
+  --secondary-foreground: oklch(0.310 0.034 312.00);
 
-  --muted: oklch(0.955 0.009 250.00);
-  --muted-foreground: oklch(0.505 0.024 255.00);
+  --muted: oklch(0.962 0.016 340.00);
+  --muted-foreground: oklch(0.505 0.030 315.00);
 
   /* —— Accent / Highlight —— */
-  --accent: oklch(0.844 0.115 40.07); /* #F6C177 星尘金 */
+  --accent: oklch(0.875 0.145 78.00); /* 月亮金 */
   --accent-foreground: var(--foreground);
 
   /* —— Semantic —— */
@@ -32,21 +32,28 @@
   --destructive-foreground: oklch(0.981 0.039 24.79); /* #FFF5F5 */
 
   /* —— Lines & focus —— */
-  --border: oklch(0.895 0.012 250.00);
+  --border: oklch(0.905 0.018 325.00);
   --input: var(--border);
   --ring: var(--primary);
 
   /* —— Charts —— */
-  --chart-1: oklch(0.696 0.137 3.34); /* rose */
-  --chart-2: oklch(0.844 0.115 40.07); /* gold */
-  --chart-3: oklch(0.660 0.116 243.69); /* violet */
-  --chart-4: oklch(0.762 0.060 171.34); /* teal */
-  --chart-5: oklch(0.661 0.166 221.78); /* blue */
+  --chart-1: oklch(0.705 0.158 357.00); /* rose */
+  --chart-2: oklch(0.875 0.145 78.00); /* gold */
+  --chart-3: oklch(0.720 0.130 305.00); /* magic violet */
+  --chart-4: oklch(0.740 0.130 132.00); /* leaf green */
+  --chart-5: oklch(0.720 0.150 25.00); /* coral */
 
   --radius: 0.625rem;
+  --bubu-radius-pill: 999px;
+  --bubu-radius-composer: 1.45rem;
+  --bubu-radius-composer-empty: 1.68rem;
+  --bubu-radius-control: 0.95rem;
+  --bubu-radius-popover: 1.2rem;
+  --bubu-motion-fast: 120ms;
+  --bubu-motion-standard: 160ms;
 
   /* —— Sidebar —— */
-  --sidebar: oklch(0.992 0.004 80.00);
+  --sidebar: oklch(0.992 0.006 70.00);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -57,41 +64,41 @@
 }
 
 .dark {
-  --background: oklch(0.176 0.012 255.00);
+  --background: oklch(0.178 0.018 300.00);
   --foreground: oklch(0.972 0.006 80.00);
 
-  --card: oklch(0.208 0.014 255.00);
+  --card: oklch(0.214 0.022 300.00);
   --card-foreground: var(--foreground);
 
   --popover: var(--card);
   --popover-foreground: var(--foreground);
 
-  --primary: oklch(0.782 0.128 3.79); /* #FF8FB6 更亮的卜卜粉 */
+  --primary: oklch(0.790 0.130 354.00); /* 暗色柔粉 */
   --primary-foreground: var(--background);
 
-  --secondary: oklch(0.255 0.018 255.00);
+  --secondary: oklch(0.275 0.034 302.00);
   --secondary-foreground: var(--foreground);
 
-  --muted: oklch(0.250 0.016 255.00);
-  --muted-foreground: oklch(0.745 0.020 255.00);
+  --muted: oklch(0.265 0.028 315.00);
+  --muted-foreground: oklch(0.760 0.040 320.00);
 
-  --accent: oklch(0.877 0.103 43.09); /* #F7D08A 更柔的金 */
+  --accent: oklch(0.890 0.132 78.00); /* 暗色月亮金 */
   --accent-foreground: var(--background);
 
   --destructive: oklch(0.691 0.198 16.21); /* #FF5C5C */
   --destructive-foreground: var(--background);
 
-  --border: oklch(0.305 0.018 255.00);
+  --border: oklch(0.340 0.035 310.00);
   --input: var(--border);
   --ring: var(--primary);
 
-  --chart-1: oklch(0.782 0.128 3.79);
-  --chart-2: oklch(0.877 0.103 43.09);
-  --chart-3: oklch(0.742 0.083 251.40);
-  --chart-4: oklch(0.815 0.061 170.95);
-  --chart-5: oklch(0.720 0.121 225.00);
+  --chart-1: oklch(0.790 0.130 354.00);
+  --chart-2: oklch(0.890 0.132 78.00);
+  --chart-3: oklch(0.760 0.110 305.00);
+  --chart-4: oklch(0.790 0.110 132.00);
+  --chart-5: oklch(0.760 0.135 25.00);
 
-  --sidebar: oklch(0.195 0.014 255.00);
+  --sidebar: oklch(0.198 0.020 300.00);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--background);
@@ -152,6 +159,12 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
+    transition: background-color var(--bubu-motion-standard) ease, color var(--bubu-motion-fast) ease;
+  }
+
+  :where(button, a, input, textarea, select, [role="button"]) {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* Minimal scrollbar */
@@ -164,29 +177,21 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background-color: oklch(0.696 0.137 3.34 / 0.4);
+    background-color: oklch(0.705 0.158 357.00 / 0.4);
     border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background-color: oklch(0.696 0.137 3.34 / 0.6);
+    background-color: oklch(0.705 0.158 357.00 / 0.6);
   }
 
   /* Dark mode scrollbar */
   .dark ::-webkit-scrollbar-thumb {
-    background-color: oklch(0.782 0.128 3.79 / 0.4);
+    background-color: oklch(0.790 0.130 354.00 / 0.4);
   }
 
   .dark ::-webkit-scrollbar-thumb:hover {
-    background-color: oklch(0.782 0.128 3.79 / 0.6);
-  }
-
-  /* Smooth, subtle animations */
-  * {
-    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow,
-      transform, filter, backdrop-filter;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-    transition-duration: 250ms;
+    background-color: oklch(0.790 0.130 354.00 / 0.6);
   }
 
   /* Subtle glass effect for quiet app surfaces */
@@ -223,9 +228,9 @@
     width: 30px;
     height: 30px;
     border-radius: 9999px;
-    background: oklch(0.696 0.137 3.34 / 0.18);
-    border: 1px solid oklch(0.696 0.137 3.34 / 0.45);
-    box-shadow: 0 0 0 8px oklch(0.696 0.137 3.34 / 0.10);
+    background: oklch(0.705 0.158 357.00 / 0.18);
+    border: 1px solid oklch(0.705 0.158 357.00 / 0.45);
+    box-shadow: 0 0 0 8px oklch(0.705 0.158 357.00 / 0.10);
   }
 
   .bubu-map-marker span {
@@ -264,7 +269,7 @@
   }
 
   .bubu-mode-enter {
-    animation: bubu-mode-enter 240ms cubic-bezier(0.22, 0.8, 0.28, 1) both;
+    animation: bubu-mode-enter var(--bubu-motion-standard) cubic-bezier(0.22, 0.8, 0.28, 1) both;
   }
 
   .bubu-empty-grid {
@@ -321,8 +326,24 @@
     width: calc((100% - 0.25rem) / 2);
     border-radius: 999px;
     background: var(--primary);
-    box-shadow: 0 8px 18px oklch(0.696 0.137 3.34 / 0.20);
-    transition: transform 260ms cubic-bezier(0.22, 0.8, 0.28, 1);
+    box-shadow: 0 8px 18px oklch(0.705 0.158 357.00 / 0.20);
+    transition: transform var(--bubu-motion-standard) cubic-bezier(0.22, 0.8, 0.28, 1);
+  }
+
+  .bubu-chat-composer {
+    border-radius: var(--bubu-radius-composer);
+  }
+
+  .bubu-chat-composer-empty {
+    border-radius: var(--bubu-radius-composer-empty);
+  }
+
+  .bubu-chat-icon-control {
+    border-radius: var(--bubu-radius-control);
+  }
+
+  .bubu-chat-popover {
+    border-radius: var(--bubu-radius-popover);
   }
 
   @media (min-width: 640px) {
@@ -361,35 +382,33 @@
 
 /* Pink crystal selection colors */
 ::selection {
-  background-color: oklch(0.696 0.137 3.34 / 0.3);
+  background-color: oklch(0.705 0.158 357.00 / 0.3);
   color: oklch(0.245 0.024 1.05);
 }
 
 ::-moz-selection {
-  background-color: oklch(0.696 0.137 3.34 / 0.3);
+  background-color: oklch(0.705 0.158 357.00 / 0.3);
   color: oklch(0.245 0.024 1.05);
 }
 
 /* Dark mode selection colors */
 .dark ::selection {
-  background-color: oklch(0.782 0.128 3.79 / 0.4);
+  background-color: oklch(0.790 0.130 354.00 / 0.4);
   color: oklch(0.978 0.038 20.62);
 }
 
 .dark ::-moz-selection {
-  background-color: oklch(0.782 0.128 3.79 / 0.4);
+  background-color: oklch(0.790 0.130 354.00 / 0.4);
   color: oklch(0.978 0.038 20.62);
 }
 
-/* Clean focus styles with primary color */
-input:focus,
-button:focus,
-textarea:focus {
-  outline: 2px solid oklch(0.696 0.137 3.34 / 0.3);
+/* Keyboard focus stays obvious without flashing a ring on pointer clicks. */
+:where(input, button, textarea, select, a, [role="button"]):focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring) 52%, transparent);
   outline-offset: 2px;
 }
 
-textarea.composer-textarea:focus {
+textarea.composer-textarea:focus-visible {
   outline: none;
 }
 
@@ -460,9 +479,9 @@ div {
 .liuyao-breathing-field span {
   position: absolute;
   inset: 18%;
-  border: 1px solid oklch(0.696 0.137 3.34 / 0.18);
+  border: 1px solid oklch(0.705 0.158 357.00 / 0.18);
   border-radius: 999px;
-  background: radial-gradient(circle, oklch(0.696 0.137 3.34 / 0.1), transparent 68%);
+  background: radial-gradient(circle, oklch(0.705 0.158 357.00 / 0.1), transparent 68%);
   animation: liuyao-breathe 5.4s ease-in-out infinite;
 }
 
@@ -494,7 +513,7 @@ div {
   background:
     radial-gradient(circle at 50% 42%, oklch(0.88 0.085 5 / 0.4), transparent 42%),
     linear-gradient(180deg, oklch(0.985 0.014 5 / 0.92), oklch(0.97 0.025 350 / 0.78));
-  box-shadow: inset 0 0 4rem oklch(0.696 0.137 3.34 / 0.06);
+  box-shadow: inset 0 0 4rem oklch(0.705 0.158 357.00 / 0.06);
 }
 
 .dark .liuyao-coin-stage {
@@ -536,7 +555,7 @@ div {
   transform-origin: center;
   animation: liuyao-question-breathe 4.8s ease-in-out infinite;
   filter:
-    drop-shadow(0 0 0.75rem oklch(0.696 0.137 3.34 / 0.16))
+    drop-shadow(0 0 0.75rem oklch(0.705 0.158 357.00 / 0.16))
     saturate(1.02);
   will-change: opacity, transform, background-position, filter;
 }
@@ -617,7 +636,7 @@ div {
   justify-content: center;
   gap: 0.5rem;
   overflow: hidden;
-  border: 1px solid oklch(0.696 0.137 3.34 / 0.32);
+  border: 1px solid oklch(0.705 0.158 357.00 / 0.32);
   border-radius: 999px;
   background:
     radial-gradient(circle at 50% 0%, oklch(0.96 0.035 3 / 0.82), transparent 58%),
@@ -628,7 +647,7 @@ div {
   letter-spacing: 0.01em;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.82),
-    0 0.75rem 1.75rem oklch(0.696 0.137 3.34 / 0.16);
+    0 0.75rem 1.75rem oklch(0.705 0.158 357.00 / 0.16);
   transition:
     transform 160ms ease,
     box-shadow 160ms ease,
@@ -646,16 +665,16 @@ div {
 }
 
 .liuyao-cast-button:not(:disabled):hover {
-  border-color: oklch(0.696 0.137 3.34 / 0.46);
+  border-color: oklch(0.705 0.158 357.00 / 0.46);
   transform: translateY(-1px);
 }
 
 .liuyao-cast-button.is-holding {
-  border-color: oklch(0.696 0.137 3.34 / 0.64);
+  border-color: oklch(0.705 0.158 357.00 / 0.64);
   box-shadow:
-    inset 0 0.25rem 0.8rem oklch(0.696 0.137 3.34 / 0.18),
-    0 0 0 5px oklch(0.696 0.137 3.34 / 0.08),
-    0 0.55rem 1.25rem oklch(0.696 0.137 3.34 / 0.14);
+    inset 0 0.25rem 0.8rem oklch(0.705 0.158 357.00 / 0.18),
+    0 0 0 5px oklch(0.705 0.158 357.00 / 0.08),
+    0 0.55rem 1.25rem oklch(0.705 0.158 357.00 / 0.14);
   transform: translateY(2px) scale(0.985);
 }
 
@@ -673,7 +692,7 @@ div {
   inset: -30%;
   z-index: -1;
   border-radius: inherit;
-  background: radial-gradient(circle, oklch(0.696 0.137 3.34 / 0.34), transparent 58%);
+  background: radial-gradient(circle, oklch(0.705 0.158 357.00 / 0.34), transparent 58%);
   opacity: 0;
   transform: scale(0.72);
   transition: opacity 160ms ease, transform 160ms ease;
@@ -693,7 +712,7 @@ div {
   flex: 0 0 auto;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 0 4px oklch(0.696 0.137 3.34 / 0.12);
+  box-shadow: 0 0 0 4px oklch(0.705 0.158 357.00 / 0.12);
 }
 
 .liuyao-cast-button.is-holding .liuyao-cast-button-dot {
@@ -707,14 +726,14 @@ div {
   height: 0.32rem;
   overflow: hidden;
   border-radius: 999px;
-  background: oklch(0.696 0.137 3.34 / 0.12);
+  background: oklch(0.705 0.158 357.00 / 0.12);
 }
 
 .liuyao-cast-progress > span {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, oklch(0.696 0.137 3.34), oklch(0.73 0.12 335));
+  background: linear-gradient(90deg, oklch(0.705 0.158 357.00), oklch(0.73 0.12 335));
   transform-origin: left center;
   transition: transform 40ms linear;
 }
@@ -807,7 +826,7 @@ div {
 
 @keyframes liuyao-button-dot {
   50% {
-    box-shadow: 0 0 0 7px oklch(0.696 0.137 3.34 / 0.08);
+    box-shadow: 0 0 0 7px oklch(0.705 0.158 357.00 / 0.08);
     transform: scale(0.86);
   }
 }
@@ -819,7 +838,7 @@ div {
     opacity: 0.9;
     transform: scale(0.985);
     filter:
-      drop-shadow(0 0 0.55rem oklch(0.696 0.137 3.34 / 0.14))
+      drop-shadow(0 0 0.55rem oklch(0.705 0.158 357.00 / 0.14))
       brightness(0.98)
       saturate(1.01);
   }
@@ -828,7 +847,7 @@ div {
     opacity: 1;
     transform: scale(1.025);
     filter:
-      drop-shadow(0 0 1rem oklch(0.696 0.137 3.34 / 0.2))
+      drop-shadow(0 0 1rem oklch(0.705 0.158 357.00 / 0.2))
       brightness(1.06)
       saturate(1.08);
   }
@@ -889,8 +908,8 @@ div {
   top: 50%;
   height: 0.42rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, oklch(0.696 0.137 3.34), oklch(0.68 0.105 320));
-  box-shadow: 0 2px 8px oklch(0.696 0.137 3.34 / 0.15);
+  background: linear-gradient(90deg, oklch(0.705 0.158 357.00), oklch(0.68 0.105 320));
+  box-shadow: 0 2px 8px oklch(0.705 0.158 357.00 / 0.15);
   content: "";
   transform: translateY(-50%);
 }
@@ -920,8 +939,8 @@ div {
 
 .liuyao-line-glyph.is-transition .liuyao-line-left,
 .liuyao-line-glyph.is-transition .liuyao-line-right {
-  background: linear-gradient(90deg, oklch(0.844 0.115 40.07), oklch(0.696 0.137 3.34));
-  box-shadow: 0 2px 10px oklch(0.844 0.115 40.07 / 0.18);
+  background: linear-gradient(90deg, oklch(0.875 0.145 78.00), oklch(0.705 0.158 357.00));
+  box-shadow: 0 2px 10px oklch(0.875 0.145 78.00 / 0.18);
 }
 
 .liuyao-line-mark {
@@ -987,12 +1006,71 @@ div {
 
   .liuyao-question-focus {
     background-position: 50% 50%;
-    filter: drop-shadow(0 0 0.6rem oklch(0.696 0.137 3.34 / 0.14));
+    filter: drop-shadow(0 0 0.6rem oklch(0.705 0.158 357.00 / 0.14));
     opacity: 1;
     transform: none;
   }
 
   .liuyao-cast-button.is-holding {
     transform: translateY(1px);
+  }
+}
+
+@keyframes bubu-loading-cue-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes bubu-loading-apple-bounce {
+  0% { transform: translateY(0) scale(0.88); }
+  34% { transform: translateY(-5px) scale(1.08); }
+  62% { transform: translateY(1px) scale(0.98); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+@keyframes bubu-loading-elephant-wave {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  28% { transform: rotate(-5deg) scale(1.06); }
+  58% { transform: rotate(5deg) scale(1.08); }
+  82% { transform: rotate(-2deg) scale(1.03); }
+}
+
+@keyframes bubu-completion-settle {
+  0% { transform: scale(0.94); box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 28%, transparent); }
+  42% { transform: scale(1.045); box-shadow: 0 0 0 5px transparent; }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+}
+
+.bubu-loading-cue {
+  animation: bubu-loading-cue-enter 300ms ease-out both;
+}
+
+.bubu-loading-apple {
+  animation: bubu-loading-apple-bounce 560ms cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+.bubu-loading-elephant {
+  animation: bubu-loading-elephant-wave 720ms cubic-bezier(0.22, 0.8, 0.28, 1) both;
+  transform-origin: 50% 62%;
+}
+
+.bubu-completion-pulse {
+  animation: bubu-completion-settle 600ms cubic-bezier(0.22, 0.8, 0.28, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubu-loading-cue,
+  .bubu-loading-apple,
+  .bubu-loading-elephant,
+  .bubu-completion-pulse {
+    animation: none !important;
   }
 }

@@ -223,6 +223,7 @@ export interface AgentHumanInputRequestUiEvent {
   type: 'human_input_request'
   requestId: string
   kind: AgentHumanInputKind
+  variant?: 'guest_first_qa_profile'
   title: string
   message: string
   fields: AgentHumanInputField[]

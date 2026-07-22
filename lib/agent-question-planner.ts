@@ -752,24 +752,28 @@ function applyWorkflowCorrection(
   return null
 }
 
+function formatTierAppleCost(cost: number): string {
+  return cost === 0 ? '免费' : `${cost} 个苹果`
+}
+
 function depthOptions(slots: AgentAnalysisSlots, plan?: AgentCardPlan | null): AgentHumanInputField['options'] {
   return applyOptionHints([
     {
       label: '简洁结论',
       value: 'concise',
-      description: `${getAgentReportAppleCost('concise')} 个苹果，先给结论、依据和行动提醒。`,
+      description: `免费 ${formatTierAppleCost(getAgentReportAppleCost('concise'))} / Plus ${formatTierAppleCost(getAgentReportAppleCost('concise', 'plus'))} / Ultra 免费，先给结论、依据和行动提醒。`,
       params: { draftSlots: withDepth(slots, 'concise') },
     },
     {
       label: '均衡分析',
       value: 'balanced',
-      description: `${getAgentReportAppleCost('balanced')} 个苹果，覆盖格局、阶段、风险和行动建议。`,
+      description: `免费 ${formatTierAppleCost(getAgentReportAppleCost('balanced'))} / Plus ${formatTierAppleCost(getAgentReportAppleCost('balanced', 'plus'))} / Ultra 免费，覆盖格局、阶段、风险和行动建议。`,
       params: { draftSlots: withDepth(slots, 'balanced') },
     },
     {
       label: '深度报告',
       value: 'detailed',
-      description: `${getAgentReportAppleCost('detailed')} 个苹果，展开大运流年、转折节点和场景专项建议。`,
+      description: `免费 ${formatTierAppleCost(getAgentReportAppleCost('detailed'))} / Plus ${formatTierAppleCost(getAgentReportAppleCost('detailed', 'plus'))} / Ultra 免费，展开大运流年、转折节点和场景专项建议。`,
       params: { draftSlots: withDepth(slots, 'detailed') },
     },
   ], plan)

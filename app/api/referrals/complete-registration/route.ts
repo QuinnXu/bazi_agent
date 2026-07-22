@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase/server'
 import { completeUserRegistration } from '@/lib/rewards'
+import {
+  clearReferralAttributionCookie,
+  getReferralAttributionId,
+} from '@/lib/referral-attribution'
 
 export const runtime = 'nodejs'
 
@@ -14,10 +18,16 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({}))
+    const attributionId = await getReferralAttributionId()
     const result = await completeUserRegistration(
       user,
       typeof body.referral_code === 'string' ? body.referral_code : null,
+      attributionId,
     )
+
+    if (result.referralApplied) {
+      await clearReferralAttributionCookie()
+    }
 
     return NextResponse.json({ success: true, ...result })
   } catch (error) {

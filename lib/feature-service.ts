@@ -1,16 +1,22 @@
 // Shared service for the four structured analysis features.
 
 import {
+  completeAppleCharge,
   consumeApples,
   refundApples,
   getOrResetQuota,
 } from '@/lib/quota'
+import { createChargeSettledStream } from '@/lib/quota-stream'
 import {
   getFeaturePrompt,
   type FeatureKind,
 } from '@/lib/feature-prompts'
 import { getScenarioPrompt, inferFeatureScenario } from '@/lib/agent-scenario-prompts'
-import { FEATURE_APPLE_COSTS, getFeatureAppleCost } from '@/lib/apple-costs'
+import {
+  FEATURE_APPLE_COSTS,
+  getFeatureAppleCost,
+  resolveBillingPlan,
+} from '@/lib/apple-costs'
 import {
   getAgentReportPreferenceInstruction,
   getAgentComplexityProfile,
@@ -100,6 +106,7 @@ export interface FeatureInvocation {
   userId: string
   kind: FeatureKind
   cost: number
+  chargeId: string | null
   task: LlmTaskKind
   source: LlmUsageSource
   complexity: AgentComplexityMode | null
@@ -246,54 +253,6 @@ export function buildFeatureMessages(
 
 // ==================== Refundable stream wrapper ====================
 
-function createRefundableStream(
-  upstream: ReadableStream,
-  refundOnFail: () => Promise<void>,
-): ReadableStream {
-  let receivedAnyChars = false
-  return new ReadableStream({
-    async start(controller) {
-      const reader = upstream.getReader()
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          if (value && value.length > 0) receivedAnyChars = true
-          controller.enqueue(value)
-        }
-        if (!receivedAnyChars) {
-          await refundOnFail()
-        }
-        controller.close()
-      } catch (err) {
-        const isAbort = !!(
-          err &&
-          typeof err === 'object' &&
-          'name' in err &&
-          String((err as any).name) === 'AbortError'
-        )
-        if (isAbort) {
-          console.warn('[feature-analyze] stream aborted', { receivedAnyChars })
-        } else {
-          console.error('[feature-analyze] stream error, refunding:', err)
-        }
-        if (!isAbort || !receivedAnyChars) {
-          try {
-            await refundOnFail()
-          } catch {
-            /* ignore */
-          }
-        }
-        try {
-          controller.error(err)
-        } catch {
-          /* ignore */
-        }
-      }
-    },
-  })
-}
-
 // ==================== Invocation lifecycle ====================
 
 async function prepareFeatureInvocation(
@@ -320,22 +279,35 @@ async function prepareFeatureInvocation(
   }
 
   const chargeApples = input.chargeApples !== false
-  const cost = chargeApples ? getFeatureAppleCost(input.kind) : 0
   let preUsedToday = 0
+  let cost = 0
+  let chargeId: string | null = null
 
-  if (chargeApples && cost > 0) {
+  if (chargeApples) {
     const preQuota = await getOrResetQuota(input.userId)
     preUsedToday = preQuota.usedToday
+    cost = getFeatureAppleCost(input.kind, resolveBillingPlan(preQuota.tier))
 
-    const { success, quota } = await consumeApples(input.userId, cost)
-    if (!success) {
-      throw new ServiceHttpError(403, {
-        error: 'quota_exceeded',
-        message: `这个功能需要 ${cost} 个苹果🍎，今天的库存不太够啦~ 明天再来或者给卜卜象投喂一下吧`,
-        required: cost,
-        remaining: quota.remaining,
-        dailyLimit: quota.dailyLimit,
-      })
+    {
+      const charge = await consumeApples(input.userId, cost, { enforceFairUse: true })
+      const { success, quota } = charge
+      if (!success) {
+        if (charge.fairUseLimited) {
+          throw new ServiceHttpError(429, {
+            error: 'fair_use_limited',
+            message: '当前账号的生成任务过于频繁，请稍后再试。',
+            retryAfterSeconds: charge.retryAfterSeconds,
+          })
+        }
+        throw new ServiceHttpError(403, {
+          error: 'quota_exceeded',
+          message: `这个功能需要 ${cost} 个苹果🍎，今天的库存不太够啦~ 明天再来或者给卜卜象投喂一下吧`,
+          required: cost,
+          remaining: quota.remaining,
+          dailyLimit: quota.dailyLimit,
+        })
+      }
+      chargeId = charge.chargeId
     }
   }
 
@@ -362,7 +334,7 @@ async function prepareFeatureInvocation(
       reportPreference,
     )
   } catch (err) {
-    if (cost > 0) await refundApples(input.userId, cost)
+    if (chargeId) await refundApples(input.userId, chargeId)
     throw err
   }
 
@@ -370,6 +342,7 @@ async function prepareFeatureInvocation(
     userId: input.userId,
     kind: input.kind,
     cost,
+    chargeId,
     task,
     source: input.source || 'feature_page',
     complexity,
@@ -379,9 +352,9 @@ async function prepareFeatureInvocation(
 }
 
 async function refundFeatureInvocation(invocation: FeatureInvocation) {
-  if (invocation.cost <= 0) return
+  if (!invocation.chargeId) return
   try {
-    await refundApples(invocation.userId, invocation.cost)
+    await refundApples(invocation.userId, invocation.chargeId)
   } catch (e) {
     console.error('[feature-analyze] refund failed', e)
   }
@@ -427,10 +400,12 @@ export async function runFeatureAnalysisStream(
     chunking: opts.drip ? 'character' : 'immediate',
     dripDelayMs: opts.dripDelayMs,
   })
-  const refundableStream = createRefundableStream(
-    baseStream,
-    () => refundFeatureInvocation(invocation),
-  )
+  const refundableStream = invocation.chargeId
+    ? createChargeSettledStream(baseStream, {
+        userId: invocation.userId,
+        chargeId: invocation.chargeId,
+      })
+    : baseStream
   const stream = createUsageTrackedStream(refundableStream, {
     userId: invocation.userId,
     source: invocation.source,
@@ -486,6 +461,9 @@ export async function runFeatureAnalysisText(
       outputTokens: result.outputTokens,
       featureKind: invocation.kind,
     })
+    if (invocation.chargeId) {
+      await completeAppleCharge(invocation.userId, invocation.chargeId)
+    }
     return content
   } catch (err) {
     if (err instanceof ServiceHttpError) throw err

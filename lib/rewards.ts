@@ -7,7 +7,7 @@ type ServiceClient = ReturnType<typeof createServiceClient>
 type ProfileRow = Database['public']['Tables']['profiles']['Row']
 
 export const FREE_DAILY_APPLE_LIMIT = 5
-export const PAID_DAILY_APPLE_LIMIT = 999
+export const PAID_DAILY_APPLE_LIMIT = 30
 export const REFERRAL_NEW_USER_REWARD_DAYS = 7
 export const REFERRAL_REFERRER_REWARD_DAYS = 7
 
@@ -20,9 +20,12 @@ export interface BenefitGrant {
 }
 
 export interface BenefitResult {
+  membershipTier?: 'free' | 'plus' | 'ultra'
   membershipExpiresAt: string | null
   bonusAppleLimit: number
   bonusExpiresAt: string | null
+  walletBalance?: number
+  walletExpiresAt?: string | null
 }
 
 export interface RegistrationRewardResult {
@@ -30,8 +33,19 @@ export interface RegistrationRewardResult {
   reason?: 'none' | 'invalid_code' | 'self_referral' | 'already_bound' | 'missing_profile'
   referralCode: string | null
   referrerUserId?: string
-  newUserRewardDays?: number
-  referrerRewardDays?: number
+  newUserRewardApples?: number
+  referrerRewardApples?: number
+  rewardExpiryDays?: number
+  newUserRewardExpiresAt?: string
+  referrerRewardPending?: boolean
+}
+
+export interface ReferralActivationResult {
+  activated: boolean
+  referralId?: string
+  referrerUserId?: string
+  referrerRewardApples?: number
+  rewardExpiresAt?: string
 }
 
 export interface RedemptionResult {
@@ -73,6 +87,7 @@ export function generateReferralCode(): string {
 
 export function generatePromotionCode(kind: string): string {
   const prefix =
+    kind === 'apple_wallet' ? 'APPLE' :
     kind === 'bonus_quota' ? 'PLUS' :
     kind === 'combo' ? 'GIFT' :
     'VIP'
@@ -184,6 +199,7 @@ export async function grantUserBenefits(
 export async function completeUserRegistration(
   user: User,
   explicitReferralCode?: string | null,
+  attributionId?: string | null,
 ): Promise<RegistrationRewardResult> {
   const client = createServiceClient()
   const profile = await ensureUserProfileAndReferralCode(client, {
@@ -194,17 +210,16 @@ export async function completeUserRegistration(
       : null,
   })
 
-  const rawReferralCode =
-    explicitReferralCode ||
-    (typeof user.user_metadata?.referral_code === 'string'
-      ? user.user_metadata.referral_code
-      : null)
-  const referralCode = normalizeReferralCode(rawReferralCode)
+  // Referral binding is based only on the server attribution cookie or the
+  // explicit registration form value. User metadata is user-editable and is
+  // intentionally not trusted for delayed settlement.
+  const referralCode = normalizeReferralCode(explicitReferralCode)
 
   const { data, error } = await client
     .rpc('settle_referral_reward', {
       p_referred_user_id: profile.id,
       p_referral_code: referralCode,
+      p_attribution_id: attributionId || null,
     })
     .single()
 
@@ -217,8 +232,32 @@ export async function completeUserRegistration(
     reason: data.reason as RegistrationRewardResult['reason'],
     referralCode: data.referral_code,
     referrerUserId: data.referrer_user_id || undefined,
-    newUserRewardDays: data.new_user_reward_days || undefined,
-    referrerRewardDays: data.referrer_reward_days || undefined,
+    newUserRewardApples: data.new_user_reward_apples || undefined,
+    referrerRewardApples: data.referrer_reward_apples || undefined,
+    rewardExpiryDays: data.reward_expiry_days || undefined,
+    newUserRewardExpiresAt: data.new_user_reward_expires_at || undefined,
+    referrerRewardPending: data.referrer_reward_pending === true,
+  }
+}
+
+export async function activateReferralRewardAfterAnswer(
+  userId: string,
+  client: ServiceClient = createServiceClient(),
+): Promise<ReferralActivationResult> {
+  const { data, error } = await client
+    .rpc('activate_referral_reward', { p_referred_user_id: userId })
+    .single()
+
+  if (error || !data) {
+    throw new Error(`推荐奖励激活失败：${error?.message || '没有返回激活结果'}`)
+  }
+
+  return {
+    activated: data.activated,
+    referralId: data.referral_id || undefined,
+    referrerUserId: data.referrer_user_id || undefined,
+    referrerRewardApples: data.referrer_reward_apples || undefined,
+    rewardExpiresAt: data.reward_expires_at || undefined,
   }
 }
 
@@ -255,9 +294,12 @@ export async function redeemPromotionCode(userId: string, rawCode: string): Prom
     message: data.message,
     code: data.code || code,
     benefits: {
+      membershipTier: data.membership_tier || 'free',
       membershipExpiresAt: data.membership_expires_at,
       bonusAppleLimit: data.bonus_apple_limit || 0,
       bonusExpiresAt: data.bonus_expires_at,
+      walletBalance: data.apple_wallet_balance || 0,
+      walletExpiresAt: data.apple_wallet_expires_at,
     },
   }
 }

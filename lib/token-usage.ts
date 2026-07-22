@@ -3,6 +3,7 @@ import {
   estimateTokensForText,
 } from '@/lib/token-estimator'
 import type { LlmTaskKind } from '@/lib/llm'
+import { activateReferralRewardAfterAnswer } from '@/lib/rewards'
 
 export type LlmUsageSource =
   | 'classic_chat'
@@ -42,6 +43,24 @@ const FEATURE_KIND_WHITELIST = new Set<string>([
   'liuyao',
 ])
 
+const REFERRAL_NON_ACTIVATING_TASKS = new Set<string>([
+  'agent_planner',
+  'agent_extractor',
+  'follow_up_suggestions',
+])
+
+export function shouldActivateReferralFromUsage(
+  record: Pick<LlmUsageRecord, 'source' | 'task' | 'status'>,
+  outputTokens: number,
+): boolean {
+  return (
+    (record.status || 'completed') === 'completed' &&
+    safeTokenCount(outputTokens) > 0 &&
+    record.source !== 'agent_planner' &&
+    !REFERRAL_NON_ACTIVATING_TASKS.has(record.task)
+  )
+}
+
 function normaliseFeatureKind(value?: string | null): string | null {
   if (!value) return null
   return FEATURE_KIND_WHITELIST.has(value) ? value : null
@@ -72,6 +91,19 @@ export async function recordLlmUsage(record: LlmUsageRecord): Promise<void> {
 
     if (error) {
       console.warn('[token-usage] record failed:', error.message)
+      return
+    }
+
+    if (shouldActivateReferralFromUsage(record, outputTokens)) {
+      try {
+        await activateReferralRewardAfterAnswer(record.userId, supabase)
+      } catch (error) {
+        // The next completed answer retries this idempotent activation.
+        console.warn(
+          '[referral] activation deferred:',
+          error instanceof Error ? error.message : String(error),
+        )
+      }
     }
   } catch (error) {
     console.warn(

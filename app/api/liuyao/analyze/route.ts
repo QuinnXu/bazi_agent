@@ -12,8 +12,13 @@ import {
   getOwnedLiuYaoSession,
   loadLiuYaoContext,
 } from '@/lib/liuyao/server'
+import { getLiuYaoAppleCost, resolveBillingPlan } from '@/lib/apple-costs'
+import { completeAppleCharge, consumeApples, getOrResetQuota, refundApples } from '@/lib/quota'
 
 export async function POST(req: Request) {
+  let chargedUserId: string | null = null
+  let chargedAppleCost = 0
+  let chargeId: string | null = null
   try {
     const supabase = await createServerSupabaseClient()
     const { data: { user }, error } = await supabase.auth.getUser()
@@ -44,6 +49,30 @@ export async function POST(req: Request) {
       plot: context.plot,
     }
     validateLiuYaoAnalysisRequest(analysisRequest)
+
+    const quota = await getOrResetQuota(user.id)
+    const appleCost = getLiuYaoAppleCost('reading', resolveBillingPlan(quota.tier))
+    const consumed = await consumeApples(user.id, appleCost, { enforceFairUse: true })
+    if (!consumed.success) {
+      if (consumed.fairUseLimited) {
+        return Response.json({
+          error: 'fair_use_limited',
+          message: '当前账号的生成任务过于频繁，请稍后再试。',
+          retryAfterSeconds: consumed.retryAfterSeconds,
+        }, { status: 429 })
+      }
+      return Response.json({
+        error: 'quota_exceeded',
+        message: `完整解卦需要 ${appleCost} 个苹果🍎，当前总余额还剩 ${consumed.quota.remaining} 个。`,
+        required: appleCost,
+        remaining: consumed.quota.remaining,
+        dailyLimit: consumed.quota.dailyLimit,
+      }, { status: 403 })
+    }
+    chargedUserId = user.id
+    chargedAppleCost = appleCost
+    chargeId = consumed.chargeId
+
     const result = await runLiuYaoAnalysisStream(user.id, analysisRequest, req.signal)
     const stream = createPersistedTextStream(result.stream, async content => {
       const { error } = await supabase
@@ -62,6 +91,12 @@ export async function POST(req: Request) {
         .from('chat_sessions')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', sessionId)
+      if (chargeId) await completeAppleCharge(user.id, chargeId)
+    }, async (_streamError, content) => {
+      if (chargedUserId && chargeId) {
+        if (!content.trim()) await refundApples(chargedUserId, chargeId)
+        else await completeAppleCharge(chargedUserId, chargeId)
+      }
     })
 
     return new Response(stream, {
@@ -72,9 +107,13 @@ export async function POST(req: Request) {
         'X-LLM-Model': result.model,
         'X-LLM-Task': result.task,
         'X-LLM-Input-Tokens': String(result.inputTokens),
+        'X-Apple-Cost': String(appleCost),
       },
     })
   } catch (error) {
+    if (chargedUserId && chargeId) {
+      await refundApples(chargedUserId, chargeId).catch(() => undefined)
+    }
     console.error('[liuyao-analyze] failed', error)
     return Response.json({
       error: 'analyze_failed',

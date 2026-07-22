@@ -27,6 +27,7 @@ import {
   type AgentInlineInputRequest,
   type AgentInputValues,
 } from "@/components/agent-input-request"
+import { BubuLoadingCue, useBubuCompletionCue } from "@/components/bubu-loading-cue"
 
 const MarkdownRenderer = dynamic(
   () => import("@/components/markdown-renderer").then(mod => mod.MarkdownRenderer),
@@ -69,6 +70,7 @@ interface ChatMessageProps {
   isStreaming?: boolean
   reportType?: FeatureKind
   previousUserContent?: string
+  ritualFeedbackEnabled?: boolean
   onFollowUp?: (text: string) => void
   onAgentUiSubmit?: (request: AgentInlineInputRequest, values: AgentInputValues) => void | Promise<void>
 }
@@ -763,6 +765,7 @@ const ChatMessage = memo(function ChatMessage({
   isStreaming = false,
   reportType,
   previousUserContent,
+  ritualFeedbackEnabled = false,
   onFollowUp,
   onAgentUiSubmit,
 }: ChatMessageProps) {
@@ -774,6 +777,13 @@ const ChatMessage = memo(function ChatMessage({
     [message.content],
   )
   const visibleContent = useChatGptStreamingText(displayContent, isStreaming)
+  const loadingScenario = reportType ? "bazi" : "chat"
+  const completionPulse = useBubuCompletionCue({
+    active: isStreaming,
+    completed: message.streamState?.status === "complete",
+    hasContent: Boolean(displayContent.trim()),
+    feedbackEnabled: ritualFeedbackEnabled,
+  })
 
   const userKind = useMemo(
     () => (isUser ? detectFeatureKindFromContent(displayContent) : null),
@@ -805,6 +815,7 @@ const ChatMessage = memo(function ChatMessage({
   )
 
   const hasStoppedWithContent = message.streamState?.status === "stopped" && Boolean(displayContent.trim())
+  const hasMessageBody = isStreaming || Boolean(displayContent.trim())
   const actionsDisabled = isStreaming && !hasStoppedWithContent
   const canCollapse = !isStreaming && (displayContent.length > 1400 || displayContent.split("\n").length > 22)
   const contentClassName = collapsed && canCollapse && !isStreaming
@@ -848,36 +859,48 @@ const ChatMessage = memo(function ChatMessage({
               <Image src="/avatar-small.png" alt="卜卜象" width={28} height={28} className="h-full w-full object-contain" />
             </span>
             <span className="font-medium text-foreground/80">卜卜象</span>
-            <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-muted/55 px-2 py-0.5 text-[10px] text-muted-foreground">
+            <span className={`inline-flex min-w-0 items-center gap-1.5 rounded-full bg-muted/55 px-2 py-0.5 text-[10px] text-muted-foreground ${completionPulse ? "bubu-completion-pulse" : ""}`}>
               {isStreaming && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-primary animate-pulse" />}
+              {completionPulse && <Check className="h-3 w-3 flex-shrink-0 text-primary" aria-hidden="true" />}
               <span className="truncate">{streamLabel(message, isStreaming, reportType)}</span>
+            </span>
+            <span className="sr-only" role="status" aria-live="polite">
+              {completionPulse ? streamLabel(message, false, reportType) : ""}
             </span>
           </div>
 
           {reportType && <ReportHeader kind={reportType} />}
 
-          <div className={contentClassName}>
-            {isStreaming ? (
-              <StreamingMarkdown content={visibleContent} />
-            ) : (
-              <div className="markdown-content max-w-none text-foreground">
-                {displayContent ? <MarkdownRenderer content={displayContent} /> : <MessageSkeleton />}
-              </div>
-            )}
-            {collapsed && canCollapse && !isStreaming && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-card to-transparent" />
-            )}
-          </div>
+          {hasMessageBody && (
+            <div className={contentClassName}>
+              {isStreaming ? (
+                visibleContent.trim() ? (
+                  <StreamingMarkdown content={visibleContent} />
+                ) : (
+                  <BubuLoadingCue scenario={loadingScenario} />
+                )
+              ) : (
+                <div className="markdown-content max-w-none text-foreground">
+                  <MarkdownRenderer content={displayContent} />
+                </div>
+              )}
+              {collapsed && canCollapse && !isStreaming && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-card to-transparent" />
+              )}
+            </div>
+          )}
 
-          <AssistantActions
-            content={displayContent}
-            isStreaming={actionsDisabled}
-            isCollapsed={collapsed}
-            canCollapse={canCollapse}
-            copied={copied}
-            onCopy={handleCopy}
-            onToggleCollapse={() => setCollapsed(value => !value)}
-          />
+          {displayContent.trim() && (
+            <AssistantActions
+              content={displayContent}
+              isStreaming={actionsDisabled}
+              isCollapsed={collapsed}
+              canCollapse={canCollapse}
+              copied={copied}
+              onCopy={handleCopy}
+              onToggleCollapse={() => setCollapsed(value => !value)}
+            />
+          )}
 
           {!isStreaming && displayContent && (
             <FollowUp

@@ -1,14 +1,58 @@
 {
-  "classicChat": 0,
+  "classicChat": {
+    "free": 1,
+    "plus": 1,
+    "ultra": 0
+  },
   "agentReports": {
-    "concise": 0,
-    "balanced": 1,
-    "detailed": 1
+    "concise": {
+      "free": 1,
+      "plus": 0,
+      "ultra": 0
+    },
+    "balanced": {
+      "free": 3,
+      "plus": 2,
+      "ultra": 0
+    },
+    "detailed": {
+      "free": 6,
+      "plus": 4,
+      "ultra": 0
+    }
   },
   "featureCards": {
-    "hepan": 1,
-    "fortune": 1,
-    "avatar": 1,
-    "lifepath": 1
+    "hepan": {
+      "free": 4,
+      "plus": 3,
+      "ultra": 0
+    },
+    "fortune": {
+      "free": 3,
+      "plus": 2,
+      "ultra": 0
+    },
+    "avatar": {
+      "free": 2,
+      "plus": 1,
+      "ultra": 0
+    },
+    "lifepath": {
+      "free": 6,
+      "plus": 4,
+      "ultra": 0
+    }
+  },
+  "liuyao": {
+    "reading": {
+      "free": 5,
+      "plus": 3,
+      "ultra": 0
+    },
+    "followUp": {
+      "free": 0,
+      "plus": 0,
+      "ultra": 0
+    }
   }
 }

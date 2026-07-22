@@ -97,6 +97,16 @@ export async function GET(req: Request) {
       console.warn('[Admin] Failed to fetch redemption stats:', redemptionsError.message)
     }
 
+    const { data: walletLots, error: walletError } = await serviceClient
+      .from('apple_wallet_lots')
+      .select('user_id, remaining_amount, expires_at')
+      .gt('remaining_amount', 0)
+      .gt('expires_at', new Date().toISOString())
+
+    if (walletError) {
+      console.warn('[Admin] Failed to fetch apple wallets:', walletError.message)
+    }
+
     // Build a map of quotas by user_id
     const quotaMap = new Map<string, typeof quotas[0]>()
     for (const q of quotas || []) {
@@ -123,6 +133,10 @@ export async function GET(req: Request) {
     for (const r of redemptions || []) {
       redemptionCountMap.set(r.user_id, (redemptionCountMap.get(r.user_id) || 0) + 1)
     }
+    const walletBalanceMap = new Map<string, number>()
+    for (const lot of walletLots || []) {
+      walletBalanceMap.set(lot.user_id, (walletBalanceMap.get(lot.user_id) || 0) + lot.remaining_amount)
+    }
 
     const origin = new URL(req.url).origin
 
@@ -135,11 +149,17 @@ export async function GET(req: Request) {
       const membershipActive = !!q?.is_paid && (
         !q.membership_expires_at || new Date(q.membership_expires_at).getTime() > Date.now()
       )
+      const membershipTier = q?.ultra_expires_at && new Date(q.ultra_expires_at).getTime() > Date.now()
+        ? 'ultra'
+        : q?.plus_expires_at && new Date(q.plus_expires_at).getTime() > Date.now()
+          ? 'plus'
+          : membershipActive ? 'plus' : 'free'
       return {
         user_id: u.id,
         email: u.email || '',
         display_name: p?.display_name || u.user_metadata?.display_name || null,
         is_paid: membershipActive,
+        membership_tier: membershipTier,
         daily_apple_limit: q?.daily_apple_limit ?? 5,
         membership_expires_at: q?.membership_expires_at ?? null,
         bonus_apple_limit: q?.bonus_apple_limit ?? 0,
@@ -148,12 +168,13 @@ export async function GET(req: Request) {
         last_reset_date: q?.last_reset_date ?? null,
         has_quota_record: !!q,
         referral_code: referralCode,
-        invite_link: referralCode ? `${origin}/?ref=${encodeURIComponent(referralCode)}` : '',
+        invite_link: referralCode ? `${origin}/invite/${encodeURIComponent(referralCode)}` : '',
         referred_by: p?.referred_by ?? null,
         referred_by_email: referredByEmail,
         referral_bound_at: p?.referral_bound_at ?? null,
         referral_count: referralCountMap.get(u.id) || 0,
         redemption_count: redemptionCountMap.get(u.id) || 0,
+        wallet_balance: walletBalanceMap.get(u.id) || 0,
         created_at: u.created_at,
       }
     })
@@ -191,6 +212,7 @@ export async function PATCH(req: Request) {
       is_paid,
       daily_apple_limit,
       membership_expires_at,
+      membership_tier,
       bonus_apple_limit,
       bonus_expires_at,
       referral_code,
@@ -201,22 +223,67 @@ export async function PATCH(req: Request) {
     }
 
     const serviceClient = createServiceClient()
+    const { data: existingQuota, error: existingQuotaError } = await serviceClient
+      .from('user_quotas')
+      .select('membership_tier, membership_expires_at, plus_expires_at, ultra_expires_at, daily_apple_limit')
+      .eq('user_id', user_id)
+      .maybeSingle()
+
+    if (existingQuotaError) {
+      console.error('[Admin] Failed to load existing quota:', existingQuotaError.message)
+      return NextResponse.json({ error: '读取当前账户权益失败' }, { status: 500 })
+    }
 
     // Build the update object
     const updateData: Record<string, any> = {}
-    if (typeof is_paid === 'boolean') updateData.is_paid = is_paid
-    if (typeof daily_apple_limit === 'number') updateData.daily_apple_limit = daily_apple_limit
-    if ('membership_expires_at' in body) updateData.membership_expires_at = toIsoOrNull(membership_expires_at)
+    const requestedTier = membership_tier === 'plus' || membership_tier === 'ultra' || membership_tier === 'free'
+      ? membership_tier
+      : null
+    if (typeof daily_apple_limit === 'number') {
+      updateData.daily_apple_limit = Math.max(0, Math.floor(daily_apple_limit))
+    }
     if (typeof bonus_apple_limit === 'number') updateData.bonus_apple_limit = Math.max(0, Math.floor(bonus_apple_limit))
     if ('bonus_expires_at' in body) updateData.bonus_expires_at = toIsoOrNull(bonus_expires_at)
 
-    if (updateData.membership_expires_at && new Date(updateData.membership_expires_at).getTime() > Date.now()) {
-      updateData.is_paid = true
-      updateData.daily_apple_limit = Math.max(Number(updateData.daily_apple_limit || daily_apple_limit || 5), 999)
-    }
-
-    if (typeof is_paid === 'boolean' && !is_paid && !('membership_expires_at' in body)) {
+    if (requestedTier === 'free' || (!requestedTier && typeof is_paid === 'boolean' && !is_paid)) {
       updateData.membership_expires_at = null
+      updateData.membership_tier = 'free'
+      updateData.plus_expires_at = null
+      updateData.ultra_expires_at = null
+      updateData.daily_apple_limit = typeof daily_apple_limit === 'number'
+        ? Math.max(0, Math.floor(daily_apple_limit))
+        : 5
+      updateData.is_paid = false
+    } else if (requestedTier === 'plus' || requestedTier === 'ultra') {
+      const tierExpiryField = requestedTier === 'ultra' ? 'ultra_expires_at' : 'plus_expires_at'
+      const requestedExpiry = 'membership_expires_at' in body
+        ? toIsoOrNull(membership_expires_at)
+        : toIsoOrNull(existingQuota?.[tierExpiryField] || existingQuota?.membership_expires_at)
+      const membershipExpiry = requestedExpiry
+        || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+      if (new Date(membershipExpiry).getTime() <= Date.now()) {
+        return NextResponse.json({ error: 'Plus/Ultra 的到期时间必须晚于当前时间' }, { status: 400 })
+      }
+
+      updateData.is_paid = true
+      updateData.membership_tier = requestedTier
+      updateData.membership_expires_at = membershipExpiry
+      updateData.plus_expires_at = requestedTier === 'plus' ? membershipExpiry : null
+      updateData.ultra_expires_at = requestedTier === 'ultra' ? membershipExpiry : null
+      if (typeof daily_apple_limit !== 'number') {
+        updateData.daily_apple_limit = requestedTier === 'plus' ? 30 : 5
+      }
+    } else if ('membership_expires_at' in body) {
+      const existingTier = existingQuota?.membership_tier
+      const membershipExpiry = toIsoOrNull(membership_expires_at)
+      if ((existingTier === 'plus' || existingTier === 'ultra') && membershipExpiry) {
+        if (new Date(membershipExpiry).getTime() <= Date.now()) {
+          return NextResponse.json({ error: 'Plus/Ultra 的到期时间必须晚于当前时间' }, { status: 400 })
+        }
+        updateData.membership_expires_at = membershipExpiry
+        updateData[`${existingTier}_expires_at`] = membershipExpiry
+      }
     }
 
     if (typeof referral_code === 'string') {

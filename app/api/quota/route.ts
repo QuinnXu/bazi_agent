@@ -22,14 +22,33 @@ export async function GET() {
 
     const quota = await getOrResetQuota(user.id)
 
+    if (!quota.dbConnected) {
+      return NextResponse.json(
+        { error: '苹果额度服务暂时不可用' },
+        {
+          status: 503,
+          headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+        },
+      )
+    }
+
     return NextResponse.json({
+      tier: quota.tier,
       isPaid: quota.isPaid,
+      unlimited: quota.unlimited,
       dailyLimit: quota.dailyLimit,
       usedToday: quota.usedToday,
+      dailyRemaining: quota.dailyRemaining,
+      walletBalance: quota.walletBalance,
+      walletExpiresAt: quota.walletExpiresAt,
       remaining: quota.remaining,
       membershipExpiresAt: quota.membershipExpiresAt,
+      nextMembershipTier: quota.nextMembershipTier,
+      nextMembershipStartsAt: quota.nextMembershipStartsAt,
       bonusAppleLimit: quota.bonusAppleLimit,
       bonusExpiresAt: quota.bonusExpiresAt,
+    }, {
+      headers: { 'Cache-Control': 'private, no-store, max-age=0' },
     })
   } catch (error) {
     console.error('Quota API Error:', error)

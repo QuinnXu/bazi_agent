@@ -4,9 +4,15 @@ import React, { useRef, useState } from 'react'
 import { ImagePlus, Trash2 } from 'lucide-react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
+import { ReportLengthSelector } from './report-length-selector'
 import { useAuth } from '@/contexts/auth-context'
 import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
-import type { AvatarParams, FeatureParticipant } from '@/lib/feature-types'
+import {
+  DEFAULT_FEATURE_REPORT_LENGTH,
+  type AvatarParams,
+  type FeatureParticipant,
+  type FeatureReportLength,
+} from '@/lib/feature-types'
 
 interface AvatarPageProps {
   onBack: () => void
@@ -92,6 +98,7 @@ export function AvatarPage({
   const [errorMsg, setErrorMsg] = useState<string>('')
   const [isProcessing, setIsProcessing] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [reportLength, setReportLength] = useState<FeatureReportLength>(DEFAULT_FEATURE_REPORT_LENGTH)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const stepLabels = ['上传头像', '是否结合八字']
@@ -158,6 +165,7 @@ export function AvatarPage({
       imageDataUrl,
       combineBazi,
       profile: combineBazi ? profile : null,
+      reportPreference: { mode: reportLength },
     })
   }
 
@@ -298,6 +306,12 @@ export function AvatarPage({
               )}
             </div>
           )}
+
+          <ReportLengthSelector
+            value={reportLength}
+            onChange={setReportLength}
+            disabled={loading || isProcessing}
+          />
 
           <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
             点击「让小象开看」后，卜卜象会用多模态模型看图，再结合

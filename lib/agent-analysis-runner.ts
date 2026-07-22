@@ -1,9 +1,10 @@
 import { ServiceHttpError } from '@/lib/chat-service'
 import { callLLM, createUnifiedStreamProcessor, type LlmTaskKind } from '@/lib/llm'
-import { consumeApples, refundApples } from '@/lib/quota'
+import { consumeApples, getOrResetQuota, refundApples } from '@/lib/quota'
+import { createChargeSettledStream } from '@/lib/quota-stream'
 import { createUsageTrackedStream } from '@/lib/token-usage'
 import { buildAgentAnalysisMessages } from '@/lib/agent-prompt-builder'
-import { getAgentReportAppleCost } from '@/lib/apple-costs'
+import { getAgentReportAppleCost, resolveBillingPlan } from '@/lib/apple-costs'
 import {
   getAgentComplexityProfile,
   type AgentComplexityMode,
@@ -47,47 +48,6 @@ export function getAgentAnalysisGenerationOptions(
   }
 }
 
-function createRefundableAgentStream(
-  upstream: ReadableStream,
-  refundOnFail: () => Promise<void>,
-): ReadableStream {
-  let receivedAnyBytes = false
-  return new ReadableStream({
-    async start(controller) {
-      const reader = upstream.getReader()
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          if (value && value.length > 0) receivedAnyBytes = true
-          controller.enqueue(value)
-        }
-        if (!receivedAnyBytes) await refundOnFail()
-        controller.close()
-      } catch (error) {
-        const isAbort = !!(
-          error &&
-          typeof error === 'object' &&
-          'name' in error &&
-          String((error as any).name) === 'AbortError'
-        )
-        if (!isAbort || !receivedAnyBytes) {
-          try {
-            await refundOnFail()
-          } catch {
-            /* ignore */
-          }
-        }
-        try {
-          controller.error(error)
-        } catch {
-          /* stream already closed */
-        }
-      }
-    },
-  })
-}
-
 export async function runAgentAnalysisStream(
   input: {
     userId: string
@@ -102,11 +62,22 @@ export async function runAgentAnalysisStream(
 ): Promise<AgentAnalysisStreamResult> {
   const depth = input.request.depth
   const chargeApples = input.chargeApples !== false
-  const appleCost = chargeApples ? getAgentAnalysisDepthCost(depth) : 0
+  const quota = chargeApples ? await getOrResetQuota(input.userId) : null
+  const appleCost = chargeApples
+    ? getAgentReportAppleCost(depth, resolveBillingPlan(quota?.tier))
+    : 0
+  let chargeId: string | null = null
 
-  if (appleCost > 0) {
-    const preQuota = await consumeApples(input.userId, appleCost)
+  if (chargeApples) {
+    const preQuota = await consumeApples(input.userId, appleCost, { enforceFairUse: true })
     if (!preQuota.success) {
+      if (preQuota.fairUseLimited) {
+        throw new ServiceHttpError(429, {
+          error: 'fair_use_limited',
+          message: '当前账号的生成任务过于频繁，请稍后再试。',
+          retryAfterSeconds: preQuota.retryAfterSeconds,
+        })
+      }
       throw new ServiceHttpError(403, {
         error: 'quota_exceeded',
         message: `这次分析需要 ${appleCost} 个苹果🍎，今天的库存不太够啦。`,
@@ -115,6 +86,7 @@ export async function runAgentAnalysisStream(
         dailyLimit: preQuota.quota.dailyLimit,
       })
     }
+    chargeId = preQuota.chargeId
   }
 
   const messages = buildAgentAnalysisMessages(input.request)
@@ -129,7 +101,7 @@ export async function runAgentAnalysisStream(
       reasoningEffort: generationOptions.reasoningEffort,
     })
   } catch (error) {
-    if (appleCost > 0) await refundApples(input.userId, appleCost)
+    if (chargeId) await refundApples(input.userId, chargeId)
     throw error
   }
 
@@ -137,10 +109,8 @@ export async function runAgentAnalysisStream(
     chunking: 'immediate',
     logLabel: `agent_analysis:${depth}`,
   })
-  const billableStream = appleCost > 0
-    ? createRefundableAgentStream(baseStream, async () => {
-        await refundApples(input.userId, appleCost)
-      })
+  const billableStream = chargeId
+    ? createChargeSettledStream(baseStream, { userId: input.userId, chargeId })
     : baseStream
   const trackedStream = input.skipUsageTracking
     ? billableStream

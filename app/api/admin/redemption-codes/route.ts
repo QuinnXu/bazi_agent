@@ -7,7 +7,7 @@ import type { RedemptionCodeKind } from '@/types/database_v2'
 
 export const runtime = 'nodejs'
 
-const CODE_KINDS: RedemptionCodeKind[] = ['membership_days', 'bonus_quota', 'combo']
+const CODE_KINDS: RedemptionCodeKind[] = ['membership_days', 'bonus_quota', 'combo', 'apple_wallet']
 
 function toNonNegativeInt(value: unknown, fallback = 0): number {
   const num = Number(value)
@@ -76,11 +76,14 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}))
     const kind = CODE_KINDS.includes(body.kind) ? body.kind as RedemptionCodeKind : 'membership_days'
     const membershipDays = toNonNegativeInt(body.membership_days, kind === 'membership_days' ? 7 : 0)
+    const membershipTier = body.membership_tier === 'ultra' ? 'ultra' : 'plus'
     const bonusAppleLimit = toNonNegativeInt(body.bonus_apple_limit, 0)
     const bonusDays = toNonNegativeInt(body.bonus_days, 0)
+    const appleAmount = toNonNegativeInt(body.apple_amount, kind === 'apple_wallet' ? 10 : 0)
+    const appleExpiryDays = Math.max(1, toNonNegativeInt(body.apple_expiry_days, 90))
 
-    if (membershipDays <= 0 && !(bonusAppleLimit > 0 && bonusDays > 0)) {
-      return NextResponse.json({ error: '请至少配置会员天数，或配置额外额度和有效天数' }, { status: 400 })
+    if (membershipDays <= 0 && !(bonusAppleLimit > 0 && bonusDays > 0) && appleAmount <= 0) {
+      return NextResponse.json({ error: '请至少配置会员天数、每日加额或一次性苹果' }, { status: 400 })
     }
 
     const serviceClient = createServiceClient()
@@ -107,8 +110,11 @@ export async function POST(req: Request) {
         description: typeof body.description === 'string' ? body.description.trim() || null : null,
         kind,
         membership_days: membershipDays,
+        membership_tier: membershipTier,
         bonus_apple_limit: bonusAppleLimit,
         bonus_days: bonusDays,
+        apple_amount: appleAmount,
+        apple_expiry_days: appleExpiryDays,
         max_redemptions: nullablePositiveInt(body.max_redemptions),
         starts_at: toIsoOrNull(body.starts_at) || new Date().toISOString(),
         expires_at: toIsoOrNull(body.expires_at),

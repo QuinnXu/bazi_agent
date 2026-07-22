@@ -62,6 +62,7 @@ export async function loadLiuYaoMessages(
 export function createPersistedTextStream(
   upstream: ReadableStream,
   onComplete: (content: string) => Promise<void>,
+  onError?: (error: unknown, content: string) => Promise<void>,
 ): ReadableStream {
   const decoder = new TextDecoder()
   let output = ''
@@ -80,6 +81,13 @@ export function createPersistedTextStream(
         if (output.trim()) await onComplete(output)
         controller.close()
       } catch (error) {
+        if (onError) {
+          try {
+            await onError(error, output)
+          } catch {
+            // Preserve the original stream failure.
+          }
+        }
         try {
           controller.error(error)
         } catch {

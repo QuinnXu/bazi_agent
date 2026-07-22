@@ -92,13 +92,13 @@ export function ProfileSelector({ selectedProfileId, onSelectProfile, onOpenProf
           e.stopPropagation()
           setShowDropdown(!showDropdown)
         }}
-        className="flex items-center gap-1.5 px-3 py-2 h-10 w-28 rounded-full bg-card/80 border border-border hover:bg-card transition-all duration-300"
+        className="flex items-center gap-1.5 px-3 py-2 h-10 w-28 rounded-full bg-card/80 border border-border hover:bg-card transition-all duration-150"
       >
         <User className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         <span className="text-sm text-foreground flex-1 truncate text-left">
           {profiles.length === 0 ? '加人物' : (selectedProfile ? selectedProfile.profile_name : '选人物')}
         </span>
-        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-300 ${showDropdown ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3.5 h-3.5 text-muted-foreground flex-shrink-0 transition-transform duration-150 ${showDropdown ? 'rotate-180' : ''}`} />
       </button>
 
       {showDropdown && (

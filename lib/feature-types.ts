@@ -5,6 +5,10 @@
  */
 
 import type { FeatureType } from '@/components/app-sidebar'
+import type {
+  AgentReportPreference,
+  AgentReportPreferenceMode,
+} from '@/lib/agent-complexity'
 import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
 
 // ==================== Participant ====================
@@ -16,6 +20,10 @@ export interface FeatureParticipant {
   baziText?: string | null // full plaintext bazi report
 }
 
+export type FeatureReportLength = Exclude<AgentReportPreferenceMode, 'custom'>
+
+export const DEFAULT_FEATURE_REPORT_LENGTH: FeatureReportLength = 'balanced'
+
 // ==================== Per-feature params ====================
 
 export type HepanSubtype = 'pair' | 'multi' | 'event'
@@ -26,6 +34,7 @@ export interface HepanParams {
   eventDesc?: string
   participants: FeatureParticipant[]
   analysisAngle?: string
+  reportPreference: AgentReportPreference
 }
 
 export type Granularity = 'day' | 'month'
@@ -37,6 +46,7 @@ export interface FortuneParams {
   granularity: Granularity
   focus: string[]
   analysisAngle?: string
+  reportPreference: AgentReportPreference
 }
 
 export interface AvatarParams {
@@ -44,11 +54,13 @@ export interface AvatarParams {
   combineBazi: boolean
   profile?: FeatureParticipant | null
   analysisAngle?: string
+  reportPreference: AgentReportPreference
 }
 
 export interface LifePathParams {
   profile: FeatureParticipant
   analysisAngle?: string
+  reportPreference: AgentReportPreference
 }
 
 // ==================== Discriminated payload ====================

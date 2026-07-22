@@ -4,10 +4,13 @@ import React, { useMemo, useState } from 'react'
 import { X, Plus } from 'lucide-react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
+import { ReportLengthSelector } from './report-length-selector'
 import { useAuth } from '@/contexts/auth-context'
 import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
+import { DEFAULT_FEATURE_REPORT_LENGTH } from '@/lib/feature-types'
 import type {
   FeatureParticipant,
+  FeatureReportLength,
   FortuneParams,
   Granularity,
 } from '@/lib/feature-types'
@@ -56,6 +59,7 @@ export function FortunePage({
   const [granularity, setGranularity] = useState<Granularity>('day')
   const [focus, setFocus] = useState<string[]>(['事业突破', '感情缘分'])
   const [customFocus, setCustomFocus] = useState('')
+  const [reportLength, setReportLength] = useState<FeatureReportLength>(DEFAULT_FEATURE_REPORT_LENGTH)
 
   const stepLabels = ['人物', '时间范围', '关注方向']
 
@@ -105,6 +109,7 @@ export function FortunePage({
       end,
       granularity,
       focus,
+      reportPreference: { mode: reportLength },
     })
   }
 
@@ -281,6 +286,12 @@ export function FortunePage({
           {focus.length === 0 && (
             <p className="text-xs text-destructive">小象至少需要一个关注方向喔</p>
           )}
+
+          <ReportLengthSelector
+            value={reportLength}
+            onChange={setReportLength}
+            disabled={loading}
+          />
 
           <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed space-y-1">
             <p>

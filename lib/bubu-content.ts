@@ -14,6 +14,70 @@ export type AgentScenarioKind =
 
 export type BubuRunKind = 'classic' | 'agent' | 'feature'
 export type BubuStreamStatus = 'queued' | 'streaming' | 'complete' | 'stopped' | 'error'
+export type BubuLoadingScenario = 'bazi' | 'liuyao' | 'chat'
+export type BubuLoadingVisual = 'default' | 'apple' | 'elephant'
+
+export interface BubuLoadingCue {
+  text: string
+  visual: BubuLoadingVisual
+}
+
+export const BUBU_LOADING_CUES: Record<BubuLoadingScenario, readonly BubuLoadingCue[]> = {
+  bazi: [
+    { text: '命盘的轴线正在小象眼前展开…', visual: 'default' },
+    { text: '正在翻阅古籍找灵感…', visual: 'default' },
+    { text: '看八字太费脑了，小象偷偷吃了一口苹果 🍎', visual: 'apple' },
+    { text: '正在端详天干地支相遇时的火花…', visual: 'default' },
+    { text: '调皮的流年被小象抓住了 🐘', visual: 'default' },
+    { text: '正在梳理你人生大运的起伏轨迹…', visual: 'default' },
+    { text: '小象正用鼻子拨开流年的迷雾…', visual: 'default' },
+    { text: '正在推演五行流转的秘密…', visual: 'default' },
+    { text: '稍等喔，小象正在帮你寻找命局里的『喜用神』…', visual: 'default' },
+    { text: '小象的耳朵扇了扇，快看到结论啦 🐘', visual: 'elephant' },
+    { text: '小象正在把散落的星光，排成属于你的命盘…', visual: 'default' },
+    { text: '五行正在悄悄交换位置，小象再看一眼…', visual: 'default' },
+    { text: '正在给大运的转弯处做上小小记号…', visual: 'default' },
+    { text: '古籍翻到关键一页啦，小象用苹果压住了书角 🍎', visual: 'apple' },
+    { text: '大运转到关键处，小象的耳朵也跟着轻轻一扇 🐘', visual: 'elephant' },
+    { text: '小象用鼻尖敲了敲算盘，答案越来越清楚了…', visual: 'default' },
+  ],
+  liuyao: [
+    { text: '铜钱已落定，小象正在为你解开卦象…', visual: 'default' },
+    { text: '正在认真对照六十四卦的古籍…', visual: 'default' },
+    { text: '正在倾听六亲与神煞带来的指引…', visual: 'default' },
+    { text: '看变卦好费神，小象偷偷啃了一口苹果 🍎', visual: 'apple' },
+    { text: '正在感应动爻背后的力量流转…', visual: 'default' },
+    { text: '小象用鼻子蹭了蹭卦签，寻找破局的灵感 🐘', visual: 'default' },
+    { text: '世爻与应爻的缘分正在浮现…', visual: 'default' },
+    { text: '嘘——小象听到了命运齿轮转动的声音…', visual: 'default' },
+    { text: '正在把文言文翻译成你能听懂的建议…', visual: 'default' },
+    { text: '解卦进入尾声，闭上眼睛深呼吸一下喔…', visual: 'default' },
+    { text: '卦象像水纹一样展开，小象正在看它指向哪里…', visual: 'default' },
+    { text: '正在辨认本卦与变卦之间的那一步转折…', visual: 'default' },
+    { text: '六爻各就各位，小象开始串起它们的故事…', visual: 'default' },
+    { text: '动爻轻轻亮了一下，小象的耳朵也跟着动了动 🐘', visual: 'elephant' },
+    { text: '卦里藏着的提醒，正在被小象慢慢捧出来…', visual: 'default' },
+    { text: '最后一处呼应核对好啦，小象奖励自己一小口苹果 🍎', visual: 'apple' },
+  ],
+  chat: [
+    { text: '小象正在乖乖听题…', visual: 'default' },
+    { text: '正在小象脑海里疯狂打草稿…', visual: 'default' },
+    { text: '听到这个问题，小象的耳朵竖了起来！🐘', visual: 'elephant' },
+    { text: '正在为你组织温暖的文字…', visual: 'default' },
+    { text: '思考的时候，小象摸了摸圆滚滚的肚子…', visual: 'default' },
+    { text: '这个问题问得好，小象正在翻找记录…', visual: 'default' },
+    { text: '偷偷咽下嘴里的苹果，马上回答 🍎', visual: 'apple' },
+    { text: '正在努力把命理知识变成大白话…', visual: 'default' },
+    { text: '小象一边认真思考，一边轻轻甩了甩尾巴…', visual: 'default' },
+    { text: '马上就写好啦，别着急喔…', visual: 'default' },
+    { text: '小象把你的问题放在心里转了两圈…', visual: 'default' },
+    { text: '正在挑一句既准确、又不绕弯的话…', visual: 'default' },
+    { text: '象脑袋里的小灯泡正在一颗颗亮起来 ✨', visual: 'default' },
+    { text: '小象认真点了点头，正在接住你的意思…', visual: 'default' },
+    { text: '正在把复杂的部分揉成一小团好懂的话…', visual: 'default' },
+    { text: '答案已经走到门口啦，小象把最后一口苹果留到说完 🍎', visual: 'apple' },
+  ],
+} as const
 
 export interface ChatParticipantLike {
   name: string
@@ -653,12 +717,13 @@ export const BUBU_COPY = {
     titles: AUTH_TITLES,
     messages: {
       otpSent: (email: string) => `卜卜象已经把验证码寄到 ${email}`,
-      otpIncomplete: '小象还缺完整的 6 位验证码',
+      otpIncomplete: '小象还缺完整的 8 位验证码',
       otpVerifyFailed: '小象没有核对成功，稍后再试一次喔',
       otpResent: '小象重新寄出验证码啦，请查收邮箱',
       sendFailed: '小象暂时没寄出去，稍后再试一次喔',
       missingEmail: '小象还需要你的邮箱地址',
       resetSent: '小象已经寄出重置邮件，点开邮件里的链接就能去修改密码喔。',
+      legalConsentRequired: '注册前需要先阅读并同意用户协议、隐私保护政策和用户同意续课/会员服务续费规则喔。',
     },
     labels: {
       email: '邮箱',
@@ -685,14 +750,20 @@ export const BUBU_COPY = {
       sendReset: '让小象寄重置邮件',
       backToSignin: '回到登录',
     },
+    legal: {
+      checkboxAriaLabel: '同意用户协议、隐私保护政策和用户同意续课会员服务续费规则',
+      consentPrefix: '我已阅读并同意',
+      consentSuffix: '，并确认注册后平台可按协议处理必要信息。',
+      registrationNotice: '注册仅代表你已阅读并接受基础服务、隐私保护和续课/续费规则；如后续开通课程、会员或自动续费服务，仍以购买页的单独提示与确认授权为准。',
+    },
   },
   donation: {
     messages: DONATION_MESSAGES,
     title: '给卜卜象投喂苹果',
     intro: '卜卜象最喜欢苹果啦~ 吃了苹果才能帮你看得更准呢',
     quota: (remaining: number) => `你今天还有 ${remaining} 个苹果🍎`,
-    vipBadge: 'VIP',
-    vipHint: '打赏后私信告知，即可升级为 VIP 获得每日 999 个苹果',
+    vipBadge: '会员',
+    vipHint: 'Plus 每日 30 个苹果并享专题折扣；Ultra 全功能不扣苹果',
   },
   rewards: {
     title: '推荐与兑换',
@@ -1114,6 +1185,15 @@ export function buildAuthDialogTitles(email: string) {
 }
 
 export function formatFeatureRequestDisplay(kind: FeatureKind, params: any): FeatureRequestDisplayCopy {
+  const reportLengthLabel = params?.reportPreference?.mode === 'concise'
+    ? '简洁结论'
+    : params?.reportPreference?.mode === 'detailed'
+      ? '深度报告'
+      : params?.reportPreference?.mode === 'balanced'
+        ? '均衡分析'
+        : ''
+  const reportLengthLine = reportLengthLabel ? `\n报告长度：${reportLengthLabel}` : ''
+
   if (kind === 'hepan') {
     const subLabel = params?.subtype === 'pair' ? '双人合盘' : params?.subtype === 'multi' ? '多人合盘' : '应事分析'
     const sourceParticipants = Array.isArray(params?.participants) ? params.participants : []
@@ -1121,7 +1201,7 @@ export function formatFeatureRequestDisplay(kind: FeatureKind, params: any): Fea
     return {
       summary: `${subLabel}：${names}${params?.relationLabel ? ` · ${params.relationLabel}` : ''}${params?.eventDesc ? ` · 应事：${String(params.eventDesc).slice(0, 30)}` : ''}`,
       participants: sourceParticipants.map((item: any) => ({ name: item.name, baziText: item.baziText, pillars: item.pillars })),
-      userDisplay: `${FEATURE_SENTINELS.hepan}（${subLabel}）\n人物：${names}${params?.relationLabel ? `\n关系：${params.relationLabel}` : ''}${params?.eventDesc ? `\n应事：${params.eventDesc}` : ''}`,
+      userDisplay: `${FEATURE_SENTINELS.hepan}（${subLabel}）\n人物：${names}${params?.relationLabel ? `\n关系：${params.relationLabel}` : ''}${params?.eventDesc ? `\n应事：${params.eventDesc}` : ''}${reportLengthLine}`,
     }
   }
 
@@ -1132,7 +1212,7 @@ export function formatFeatureRequestDisplay(kind: FeatureKind, params: any): Fea
     return {
       summary: `近期运势 · ${name}：${params?.start} ~ ${params?.end}（${granularityLabel}）· 关注：${focus}`,
       participants: params?.profile ? [{ name, baziText: params.profile.baziText, pillars: params.profile.pillars }] : [],
-      userDisplay: `${FEATURE_SENTINELS.fortune}（${granularityLabel}）\n命主：${name}\n时间：${params?.start} ~ ${params?.end}\n关注：${focus}`,
+      userDisplay: `${FEATURE_SENTINELS.fortune}（${granularityLabel}）\n命主：${name}\n时间：${params?.start} ~ ${params?.end}\n关注：${focus}${reportLengthLine}`,
     }
   }
 
@@ -1141,7 +1221,7 @@ export function formatFeatureRequestDisplay(kind: FeatureKind, params: any): Fea
     return {
       summary: `头像分析推荐${params?.combineBazi && profile ? ` · 结合 ${profile.name} 的八字` : '（仅气质分析）'}`,
       participants: profile ? [{ name: profile.name, baziText: profile.baziText, pillars: profile.pillars }] : [],
-      userDisplay: `${FEATURE_SENTINELS.avatar}\n上传了头像${params?.combineBazi ? `，结合${profile ? ` ${profile.name} 的` : ''}八字` : ''}`,
+      userDisplay: `${FEATURE_SENTINELS.avatar}\n上传了头像${params?.combineBazi ? `，结合${profile ? ` ${profile.name} 的` : ''}八字` : ''}${reportLengthLine}`,
     }
   }
 
@@ -1150,7 +1230,7 @@ export function formatFeatureRequestDisplay(kind: FeatureKind, params: any): Fea
   return {
     summary: `人生脉络与总体分析 · ${name}`,
     participants: profile ? [{ name, baziText: profile.baziText, pillars: profile.pillars }] : [],
-    userDisplay: `${FEATURE_SENTINELS.lifepath}\n命主：${name}`,
+    userDisplay: `${FEATURE_SENTINELS.lifepath}\n命主：${name}${reportLengthLine}`,
   }
 }
 

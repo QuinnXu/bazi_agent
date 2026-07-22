@@ -13,6 +13,7 @@ import remarkGfm from 'remark-gfm'
 import {
   CalendarRange,
   Compass,
+  Dices,
   Loader2,
   RefreshCw,
   Send,
@@ -36,12 +37,15 @@ import type {
   LiuYaoPlotResult,
   LiuYaoStoredMessage,
 } from '@/lib/liuyao/types'
-import { BubuEmptyModeShell } from '@/components/bubu-empty-mode-shell'
+import { BubuEmptyModeHeader } from '@/components/bubu-empty-mode-header'
+import { BubuLoadingCue, useBubuCompletionCue } from '@/components/bubu-loading-cue'
 
 interface LiuYaoChatProps {
   resetKey?: number
   currentSessionId: string | null
+  dockEmptyComposer?: boolean
   modeSwitch?: React.ReactNode
+  ritualFeedbackEnabled?: boolean
   onSessionCreated: (sessionId: string) => void
   onSessionListRefresh: () => void
 }
@@ -66,6 +70,7 @@ const RITUAL_CUES = [
 
 const RITUAL_CUE_DURATION_MS = 2800
 const RITUAL_READY_DELAY_MS = RITUAL_CUE_DURATION_MS * RITUAL_CUES.length
+const INSPIRATION_TYPE_INTERVAL_MS = 32
 
 const FUTURE_FLOW_CARDS: Array<{
   id: QuestionPromptKind
@@ -74,7 +79,7 @@ const FUTURE_FLOW_CARDS: Array<{
   badge: string
   icon: React.ElementType
   accent: 'rose' | 'gold' | 'violet' | 'teal'
-  prompt: string
+  prompts: readonly string[]
 }> = [
   {
     id: 'relationship',
@@ -83,7 +88,13 @@ const FUTURE_FLOW_CARDS: Array<{
     badge: '关系',
     icon: Users,
     accent: 'rose',
-    prompt: '我想问这段关系接下来应该推进还是先观察？',
+    prompts: [
+      '这段关系在未来三个月会朝什么方向发展？',
+      '我现在主动推进这段关系，结果会怎样？',
+      '对方目前对这段关系的真实态度是什么？',
+      '这段关系还有继续投入的价值吗？',
+      '近期适合和对方坦白我的真实想法吗？',
+    ],
   },
   {
     id: 'career',
@@ -92,7 +103,13 @@ const FUTURE_FLOW_CARDS: Array<{
     badge: '事业',
     icon: Compass,
     accent: 'teal',
-    prompt: '我想问眼前这个事业选择是否适合继续投入？',
+    prompts: [
+      '我该不该接受眼前这个工作机会？',
+      '未来三个月适合主动换工作吗？',
+      '当前这个事业方向值得我继续投入吗？',
+      '现在启动这个项目，时机是否合适？',
+      '这次合作会为我的事业带来正向结果吗？',
+    ],
   },
   {
     id: 'fortune',
@@ -101,7 +118,13 @@ const FUTURE_FLOW_CARDS: Array<{
     badge: '运势',
     icon: CalendarRange,
     accent: 'gold',
-    prompt: '我想问接下来一段时间最需要注意什么？',
+    prompts: [
+      '接下来一个月，我最需要防范什么风险？',
+      '未来三个月，我的财运会如何变化？',
+      '近期生活中，哪件事最值得我优先处理？',
+      '这个月适合做一笔重要支出吗？',
+      '接下来三个月，我的运势转机会出现在哪里？',
+    ],
   },
   {
     id: 'decision',
@@ -110,13 +133,21 @@ const FUTURE_FLOW_CARDS: Array<{
     badge: '应事',
     icon: Sparkles,
     accent: 'violet',
-    prompt: '我想问这件事现在做，时机是否合适？',
+    prompts: [
+      '现在推进这件事，时机是否合适？',
+      '眼前两个选择中，哪条路对我更有利？',
+      '这件事继续坚持，最终会有好结果吗？',
+      '近期适合做出这个重要决定吗？',
+      '当前困局的突破口会出现在哪里？',
+    ],
   },
 ]
 
+const LIUYAO_INSPIRATION_PROMPTS = FUTURE_FLOW_CARDS.flatMap(item => item.prompts)
+
 const FUTURE_FLOW_ACCENT_BG: Record<'rose' | 'gold' | 'violet' | 'teal', string> = {
-  rose: 'bg-[oklch(0.696_0.137_3.34)]/12 text-[oklch(0.696_0.137_3.34)] border-[oklch(0.696_0.137_3.34)]/20',
-  gold: 'bg-[oklch(0.844_0.115_40.07)]/15 text-[oklch(0.65_0.115_40.07)] border-[oklch(0.844_0.115_40.07)]/30',
+  rose: 'bg-[oklch(0.705_0.158_357.00)]/12 text-[oklch(0.705_0.158_357.00)] border-[oklch(0.705_0.158_357.00)]/20',
+  gold: 'bg-[oklch(0.875_0.145_78.00)]/15 text-[oklch(0.65_0.115_40.07)] border-[oklch(0.875_0.145_78.00)]/30',
   violet: 'bg-[oklch(0.660_0.116_243.69)]/12 text-[oklch(0.660_0.116_243.69)] border-[oklch(0.660_0.116_243.69)]/25',
   teal: 'bg-[oklch(0.762_0.060_171.34)]/15 text-[oklch(0.55_0.080_171.34)] border-[oklch(0.762_0.060_171.34)]/30',
 }
@@ -134,13 +165,16 @@ const LIUYAO_MARKDOWN_COMPONENTS = {
 export function LiuYaoChat({
   resetKey = 0,
   currentSessionId,
+  dockEmptyComposer = false,
   modeSwitch,
+  ritualFeedbackEnabled = false,
   onSessionCreated,
   onSessionListRefresh,
 }: LiuYaoChatProps) {
   const [stage, setStage] = useState<FlowStage>('empty')
   const [draftQuestion, setDraftQuestion] = useState('')
   const [followUpInput, setFollowUpInput] = useState('')
+  const [isDrawingInspiration, setIsDrawingInspiration] = useState(false)
   const [session, setSession] = useState<DivinationSession | null>(null)
   const [plot, setPlot] = useState<LiuYaoPlotResult | null>(null)
   const [stablePlot, setStablePlot] = useState<LiuYaoPlotResult | null>(null)
@@ -158,8 +192,28 @@ export function LiuYaoChat({
   const scrollRef = useRef<HTMLDivElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const questionComposerRef = useRef<HTMLTextAreaElement>(null)
+  const inspirationTypeTimerRef = useRef<number | null>(null)
+  const lastInspirationIndexRef = useRef<number | null>(null)
+  const lastCategoryInspirationIndexRef = useRef<Partial<Record<QuestionPromptKind, number>>>({})
   const analysisAbortRef = useRef<AbortController | null>(null)
   const followUpAbortRef = useRef<AbortController | null>(null)
+
+  const latestFollowUpAssistant = useMemo(
+    () => [...followUpMessages].reverse().find(message => message.role === 'assistant') || null,
+    [followUpMessages],
+  )
+  const analysisCompletionPulse = useBubuCompletionCue({
+    active: analysisStatus === 'streaming',
+    completed: analysisStatus === 'done',
+    hasContent: Boolean(analysisText.trim()),
+    feedbackEnabled: ritualFeedbackEnabled,
+  })
+  const followUpCompletionPulse = useBubuCompletionCue({
+    active: followUpStatus === 'streaming',
+    completed: followUpStatus === 'done',
+    hasContent: Boolean(latestFollowUpAssistant?.content.trim()),
+    feedbackEnabled: ritualFeedbackEnabled,
+  })
 
   const question = session?.question || ''
   const displayPlot = plot || stablePlot
@@ -170,9 +224,45 @@ export function LiuYaoChat({
     analysisStatus === 'done' &&
     followUpStatus !== 'streaming'
 
+  const stopInspirationTyping = useCallback(() => {
+    if (inspirationTypeTimerRef.current !== null) {
+      window.clearInterval(inspirationTypeTimerRef.current)
+      inspirationTypeTimerRef.current = null
+    }
+    setIsDrawingInspiration(false)
+  }, [])
+
+  const typeQuestion = useCallback((prompt: string) => {
+    if (!canAskQuestion) return
+    stopInspirationTyping()
+    let characterIndex = 0
+    setDraftQuestion('')
+    setIsDrawingInspiration(true)
+    questionComposerRef.current?.focus()
+
+    inspirationTypeTimerRef.current = window.setInterval(() => {
+      characterIndex += 1
+      setDraftQuestion(prompt.slice(0, characterIndex))
+      if (characterIndex >= prompt.length) {
+        stopInspirationTyping()
+        window.requestAnimationFrame(() => questionComposerRef.current?.focus())
+      }
+    }, INSPIRATION_TYPE_INTERVAL_MS)
+  }, [canAskQuestion, stopInspirationTyping])
+
+  const drawInspiration = useCallback(() => {
+    let nextIndex = Math.floor(Math.random() * LIUYAO_INSPIRATION_PROMPTS.length)
+    if (LIUYAO_INSPIRATION_PROMPTS.length > 1 && nextIndex === lastInspirationIndexRef.current) {
+      nextIndex = (nextIndex + 1) % LIUYAO_INSPIRATION_PROMPTS.length
+    }
+    lastInspirationIndexRef.current = nextIndex
+    typeQuestion(LIUYAO_INSPIRATION_PROMPTS[nextIndex])
+  }, [typeQuestion])
+
   const clearLocalState = useCallback(() => {
     analysisAbortRef.current?.abort()
     followUpAbortRef.current?.abort()
+    stopInspirationTyping()
     setStage('empty')
     setDraftQuestion('')
     setFollowUpInput('')
@@ -190,7 +280,7 @@ export function LiuYaoChat({
     setAnalysisText('')
     setErrorText(null)
     setFollowUpMessages([])
-  }, [])
+  }, [stopInspirationTyping])
 
   useEffect(() => {
     if (!currentSessionId) clearLocalState()
@@ -217,11 +307,16 @@ export function LiuYaoChat({
   ])
 
   const fillQuestionFromCard = useCallback((item: typeof FUTURE_FLOW_CARDS[number]) => {
-    setDraftQuestion(item.prompt)
-    window.requestAnimationFrame(() => {
-      questionComposerRef.current?.focus()
-    })
-  }, [])
+    let nextIndex = Math.floor(Math.random() * item.prompts.length)
+    if (
+      item.prompts.length > 1 &&
+      nextIndex === lastCategoryInspirationIndexRef.current[item.id]
+    ) {
+      nextIndex = (nextIndex + 1) % item.prompts.length
+    }
+    lastCategoryInspirationIndexRef.current[item.id] = nextIndex
+    typeQuestion(item.prompts[nextIndex])
+  }, [typeQuestion])
 
   const restoreSession = useCallback(async (sessionId: string) => {
     analysisAbortRef.current?.abort()
@@ -663,29 +758,49 @@ export function LiuYaoChat({
   useEffect(() => () => {
     analysisAbortRef.current?.abort()
     followUpAbortRef.current?.abort()
+    if (inspirationTypeTimerRef.current !== null) {
+      window.clearInterval(inspirationTypeTimerRef.current)
+    }
   }, [])
 
   const committedActive = session && activeLineIndex
     ? session.lines.find(line => line.lineIndex === activeLineIndex) || null
     : null
+  const showBlankChat = stage === 'empty' && !(sessionStatus === 'loading' && currentSessionId)
+  const showEmptyHome = showBlankChat && !dockEmptyComposer
+  const showDockedEmptyChat = showBlankChat && dockEmptyComposer
+
+  useEffect(() => {
+    if (!showDockedEmptyChat || !canAskQuestion) return
+    const frame = window.requestAnimationFrame(() => questionComposerRef.current?.focus())
+    return () => window.cancelAnimationFrame(frame)
+  }, [canAskQuestion, resetKey, showDockedEmptyChat])
 
   return (
     <>
       <div
         ref={scrollRef}
-        className="relative flex-1 overflow-y-auto px-3 pb-6 pt-16 [scrollbar-gutter:stable] md:px-6 md:pb-8"
+        className={`relative flex-1 overflow-y-auto px-3 [scrollbar-gutter:stable] md:px-6 ${
+          showEmptyHome ? 'pb-8 pt-0' : 'pb-6 pt-16 md:pb-8'
+        }`}
       >
-        <div className="mx-auto w-full max-w-3xl">
+        <div className={`mx-auto w-full max-w-3xl ${showBlankChat ? 'h-full' : ''}`}>
           {sessionStatus === 'loading' && currentSessionId ? (
             <TimelineLoading />
-          ) : stage === 'empty' ? (
-            <>
-              <EmptyLiuYaoState
+          ) : showDockedEmptyChat ? (
+            <div className="flex h-full flex-col items-center justify-center py-6">
+              <BubuEmptyModeHeader
+                activeMode="liuyao"
                 modeSwitch={modeSwitch}
-                onPromptPick={fillQuestionFromCard}
+                title="一卦，只问一件事"
               />
-              <div ref={endRef} />
-            </>
+              <FutureFlowIntroCards
+                variant="pills"
+                onPick={fillQuestionFromCard}
+              />
+            </div>
+          ) : stage === 'empty' ? (
+            <div className="h-full" />
           ) : (
             <div className="space-y-4 py-3 md:space-y-6 md:py-4">
               <UserBubble content={question} />
@@ -729,8 +844,9 @@ export function LiuYaoChat({
 
                   {displayPlot && (
                     <AssistantShell
-                      label={analysisStatus === 'streaming' ? '小象正在解读' : '小象解卦'}
+                      label={analysisStatus === 'streaming' ? '小象正在解读' : analysisCompletionPulse ? '解读完成' : '小象解卦'}
                       streaming={analysisStatus === 'streaming'}
+                      completionPulse={analysisCompletionPulse}
                     >
                       <AnalysisCard
                         content={analysisText}
@@ -747,8 +863,13 @@ export function LiuYaoChat({
                     ) : (
                       <AssistantShell
                         key={message.id}
-                        label={message.status === 'streaming' ? '小象正在回应' : '小象继续解卦'}
+                        label={message.status === 'streaming'
+                          ? '小象正在回应'
+                          : followUpCompletionPulse && message.id === latestFollowUpAssistant?.id
+                          ? '解读完成'
+                          : '小象继续解卦'}
                         streaming={message.status === 'streaming'}
+                        completionPulse={followUpCompletionPulse && message.id === latestFollowUpAssistant?.id}
                       >
                         <MarkdownContent content={message.content} loading={message.status === 'streaming'} />
                         {message.status === 'error' && followUpMessages[index - 1]?.role === 'user' && (
@@ -776,8 +897,22 @@ export function LiuYaoChat({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-border/45 bg-background/90 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl md:px-4">
-        <div className="mx-auto max-w-3xl">
+      <div
+        className={
+          showEmptyHome
+            ? 'pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-y-auto px-3 pb-14 pt-20 md:px-6'
+            : 'shrink-0 border-t border-border/45 bg-background/90 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl md:px-4'
+        }
+      >
+        <div className={`mx-auto max-w-3xl ${showEmptyHome ? 'pointer-events-auto w-full' : ''}`}>
+          {showEmptyHome && (
+            <BubuEmptyModeHeader
+              activeMode="liuyao"
+              modeSwitch={modeSwitch}
+              title="一卦，只问一件事"
+            />
+          )}
+
           {errorText && (stage === 'empty' || sessionStatus === 'error') && (
             <div className="mb-2 rounded-lg border border-destructive/25 bg-destructive/8 px-3 py-2 text-xs text-destructive">
               {errorText}
@@ -790,20 +925,49 @@ export function LiuYaoChat({
               else if (canFollowUp) void submitFollowUp()
             }}
           >
-            <div className="rounded-2xl border border-border/80 bg-card/90 px-2 py-1.5 shadow-[0_16px_48px_oklch(0.245_0.012_255/0.10)] backdrop-blur-xl md:rounded-xl">
+            <div
+              className={`bubu-chat-composer border bg-card/90 px-2 py-1.5 backdrop-blur-xl ${
+                showEmptyHome
+                  ? 'bubu-chat-composer-empty border-border/75 bg-card/96 shadow-[0_18px_60px_oklch(0.245_0.012_255/0.12)] md:px-3 md:py-2'
+                  : 'border-border/80 shadow-[0_16px_48px_oklch(0.245_0.012_255/0.10)]'
+              }`}
+            >
               <div className="flex items-end gap-2">
+                {stage === 'empty' && (
+                  <button
+                    type="button"
+                    onClick={drawInspiration}
+                    disabled={!canAskQuestion}
+                    className="bubu-chat-icon-control flex h-8 w-8 flex-shrink-0 items-center justify-center border border-primary/20 bg-primary/8 text-primary transition-all hover:border-primary/35 hover:bg-primary/12 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="灵感抽签：随机填入一个适合起卦的问题"
+                    aria-label="灵感抽签"
+                  >
+                    <Dices className={`h-4 w-4 ${isDrawingInspiration ? 'animate-pulse' : ''}`} />
+                  </button>
+                )}
                 <textarea
                   ref={questionComposerRef}
                   rows={1}
                   maxLength={stage === 'empty' ? 120 : 500}
                   value={stage === 'empty' ? draftQuestion : followUpInput}
                   onChange={event => {
-                    if (stage === 'empty') setDraftQuestion(event.target.value)
+                    if (stage === 'empty') {
+                      stopInspirationTyping()
+                      setDraftQuestion(event.target.value)
+                    }
                     else setFollowUpInput(event.target.value)
                   }}
                   onKeyDown={event => {
-                    if (event.key === 'Enter' && !event.shiftKey) {
+                    if (
+                      event.key === 'Enter' &&
+                      !event.shiftKey &&
+                      !event.altKey &&
+                      !event.ctrlKey &&
+                      !event.metaKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
                       event.preventDefault()
+                      if (isDrawingInspiration) return
                       if (stage === 'empty') void submitQuestion()
                       else if (canFollowUp) void submitFollowUp()
                     }
@@ -821,10 +985,10 @@ export function LiuYaoChat({
                   type="submit"
                   disabled={
                     stage === 'empty'
-                      ? !draftQuestion.trim() || !canAskQuestion
+                      ? !draftQuestion.trim() || !canAskQuestion || isDrawingInspiration
                       : !followUpInput.trim() || !canFollowUp
                   }
-                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
+                  className="bubu-chat-icon-control flex h-8 w-8 flex-shrink-0 items-center justify-center bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-35"
                   title={stage === 'empty' ? '发送问题' : '发送追问'}
                 >
                   {sessionStatus === 'loading' || followUpStatus === 'streaming' ? (
@@ -838,35 +1002,54 @@ export function LiuYaoChat({
               </div>
             </div>
           </form>
+
+          {showEmptyHome && (
+            <div className="mt-4">
+              <FutureFlowIntroCards
+                variant="pills"
+                onPick={fillQuestionFromCard}
+              />
+            </div>
+          )}
         </div>
       </div>
     </>
   )
 }
 
-function EmptyLiuYaoState({
-  modeSwitch,
-  onPromptPick,
-}: {
-  modeSwitch?: React.ReactNode
-  onPromptPick: (item: typeof FUTURE_FLOW_CARDS[number]) => void
-}) {
-  return (
-    <BubuEmptyModeShell
-      modeKey="liuyao"
-      title="一卦，只问一件事"
-      description="小象会陪你先静下来，再完成六次起爻。把此刻真正想问的事写在下方，后续追问也会围绕同一卦继续。"
-      modeSwitch={modeSwitch}
-      cards={<FutureFlowIntroCards onPick={onPromptPick} />}
-    />
-  )
-}
-
 function FutureFlowIntroCards({
   onPick,
+  variant = 'cards',
 }: {
   onPick: (item: typeof FUTURE_FLOW_CARDS[number]) => void
+  variant?: 'cards' | 'pills'
 }) {
+  if (variant === 'pills') {
+    return (
+      <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-center gap-2">
+        {FUTURE_FLOW_CARDS.map(item => {
+          const Icon = item.icon
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onPick(item)}
+              className="inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-full border border-border bg-card/86 px-3 text-sm font-light text-muted-foreground shadow-sm backdrop-blur-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 hover:border-primary/35 hover:bg-card hover:text-foreground active:scale-[0.98] sm:px-4"
+              title={`在「${item.title}」中抽一个问题`}
+              aria-label={`${item.title}灵感抽签`}
+            >
+              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${FUTURE_FLOW_ACCENT_BG[item.accent]}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="whitespace-nowrap">{item.title}</span>
+              <Dices className="h-3 w-3 shrink-0 text-primary/65" />
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto w-full max-w-3xl">
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
@@ -877,7 +1060,9 @@ function FutureFlowIntroCards({
               key={item.id}
               type="button"
               onClick={() => onPick(item)}
-              className="group h-[132px] min-w-0 rounded-lg border border-border bg-card/76 p-3 text-left backdrop-blur-sm transition-all duration-200 hover:border-primary/35 hover:bg-card hover:shadow-sm sm:h-[132px]"
+              className="group h-[132px] min-w-0 rounded-lg border border-border bg-card/76 p-3 text-left backdrop-blur-sm transition-[color,background-color,border-color,box-shadow,transform] duration-150 hover:border-primary/35 hover:bg-card hover:shadow-sm active:scale-[0.99] sm:h-[132px]"
+              title={`在「${item.title}」中抽一个问题`}
+              aria-label={`${item.title}灵感抽签`}
             >
               <div className="flex h-full flex-col justify-between gap-3">
                 <div className="flex items-center justify-between gap-2">
@@ -886,7 +1071,8 @@ function FutureFlowIntroCards({
                   >
                     <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   </div>
-                  <span className="whitespace-nowrap rounded-md border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-light text-primary/80">
+                  <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-primary/15 bg-primary/8 px-1.5 py-0.5 text-[10px] font-light text-primary/80">
+                    <Dices className="h-2.5 w-2.5" />
                     {item.badge}
                   </span>
                 </div>
@@ -935,10 +1121,12 @@ function UserBubble({ content }: { content: string }) {
 function AssistantShell({
   label,
   streaming = false,
+  completionPulse = false,
   children,
 }: {
   label: string
   streaming?: boolean
+  completionPulse?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -949,10 +1137,12 @@ function AssistantShell({
             <Image src="/avatar-small.png" alt="卜卜象" width={28} height={28} className="h-full w-full object-contain" />
           </span>
           <span className="font-medium text-foreground/80">卜卜象</span>
-          <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-muted/55 px-2 py-0.5 text-[10px] text-muted-foreground">
+          <span className={`inline-flex min-w-0 items-center gap-1.5 rounded-full bg-muted/55 px-2 py-0.5 text-[10px] text-muted-foreground ${completionPulse ? 'bubu-completion-pulse' : ''}`}>
             {streaming && <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />}
+            {completionPulse && <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />}
             <span>{label}</span>
           </span>
+          <span className="sr-only" role="status" aria-live="polite">{completionPulse ? label : ''}</span>
         </div>
         {children}
       </article>
@@ -1001,7 +1191,7 @@ function RitualCard({
             <button
               type="button"
               onClick={onReady}
-              className="mt-6 h-10 rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground shadow-[0_10px_28px_oklch(0.696_0.137_3.34/0.25)] transition-all hover:-translate-y-0.5 hover:opacity-90"
+              className="mt-6 h-10 rounded-full bg-primary px-6 text-sm font-medium text-primary-foreground shadow-[0_10px_28px_oklch(0.705_0.158_357.00/0.25)] transition-all hover:-translate-y-0.5 hover:opacity-90"
             >
               我准备好了
             </button>
@@ -1267,7 +1457,7 @@ function CompletedCastingSummary({
         changedName={plot.payload.movingLines.length ? plot.view.changed : undefined}
       />
       {detailsOpen && (
-        <div className="mt-3 w-full animate-fade-in rounded-2xl border border-border/75 bg-card/98 p-3 shadow-2xl backdrop-blur-xl md:ml-auto md:max-w-xl md:p-4">
+        <div className="bubu-chat-popover mt-3 w-full animate-fade-in border border-border/75 bg-card/98 p-3 shadow-2xl backdrop-blur-xl md:ml-auto md:max-w-xl md:p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-medium text-foreground">卦象与排盘</h3>
@@ -1276,7 +1466,7 @@ function CompletedCastingSummary({
             <button
               type="button"
               onClick={onToggleDetails}
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-border bg-muted/35 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="bubu-chat-icon-control flex h-8 w-8 flex-shrink-0 items-center justify-center border border-border bg-muted/35 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               aria-label="关闭排盘"
             >
               <X className="h-4 w-4" />
@@ -1320,6 +1510,7 @@ function AnalysisCard({
 
 const MarkdownContent = React.memo(function MarkdownContent({ content, loading }: { content: string; loading?: boolean }) {
   if (!content) {
+    if (loading) return <BubuLoadingCue scenario="liuyao" />
     return (
       <div className="space-y-3" aria-label={loading ? '正在生成' : '暂无内容'}>
         <span className="block h-3 w-full animate-pulse rounded-full bg-muted" />

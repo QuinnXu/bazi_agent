@@ -64,6 +64,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
+          aria-label="关闭修改密码窗口"
           className="absolute right-4 top-4 w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
         >
           <X className="w-4 h-4 text-muted-foreground" />
@@ -86,7 +87,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
+                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-150"
                 placeholder="••••••••"
                 required
                 minLength={6}
@@ -104,7 +105,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-300"
+                className="w-full pl-10 pr-4 py-3 rounded-lg bg-card/60 border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:border-primary/60 focus:bg-card/80 transition-all duration-150"
                 placeholder="••••••••"
                 required
                 minLength={6}
@@ -127,7 +128,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-300"
+            className="w-full py-3 rounded-lg bg-primary text-primary-foreground font-light hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-150"
           >
             {loading ? '小象处理中...' : '交给小象修改'}
           </button>

@@ -16,48 +16,36 @@ export const GUEST_FIRST_QA_FLOW = {
   reportPreference: { mode: 'balanced' } as AgentReportPreference,
   copy: {
     landing: {
+      homeTitle: '初次相逢，听听八字如何定义「我」',
       badge: '免费先看一次',
       headlineLead: '先免费认识「我」，',
       headlineAccent: '小象带路。',
       description: '你可以先留下想问的问题。补完「我」的人物信息后，小象先给一次入门画像；注册后保存记录，并继续深入刚才的问题。',
       primaryCta: '免费先看一次',
       secondaryCta: '登录保存',
-      inputPlaceholder: '试试：我想注册后继续问，最近适合把重点放在哪里？',
+      inputPlaceholder: '随便跟小象聊聊你的困惑，比如：我最近总是很焦虑，适合做什么？',
       trialPoints: ['一次入门画像', '问题注册后继续', '保存后深入追问'],
       finalCtaEyebrow: 'Free trial',
       finalCtaTitle: '不确定从哪开始，就先让小象认识「我」。',
     },
-    assistantIntro:
-      '小象已经收到啦。免费试用会先从「我」的人物入门画像开始，看性格底色、过去经历和当下阶段。',
-    profileCardTitle: '先建立「我」的人物信息',
-    profileCardMessage: (question: string) =>
-      [
-        '先补「我」的出生信息，小象会先给一次入门画像。',
-        question ? `已收到你的问题，注册后继续深入：「${question}」` : null,
-      ].filter(Boolean).join('\n'),
-    profileSubmitLabel: '创建「我」并开始试用',
+    assistantIntro: '',
+    profileCardTitle: '结缘档案：留下您降生这世界的时刻',
+    profileCardMessage: (_question: string) =>
+      '小象已将您的疑问珍藏。初次相识，为了证明小象的能力，我们先为您免费排一次【本命底色预测】。如果您觉得说得到位，稍后我们再来解开心中的结。',
+    profileSubmitLabel: '排盘起卦，看小象解析',
+    trialRequestVisibleText: '命盘已备好，请小象为我展开第一份「本命入门录」。',
+    trialAnswerOpening: '命盘已铺开，八字流转。这是小象为您解析的第一份「本命入门录」。',
+    postTrialComposerPlaceholder: '入阁后，小象会先回答你最初的问题',
+    registrationHookButton: '立即入阁，继续深聊',
+    registrationHookMessage: (question?: string | null) => {
+      const trimmed = question?.trim()
+      return trimmed
+        ? `命理浩瀚，以上只是冰山一角。您之前留下的问题是『${trimmed}』。想要立刻让小象解答，并永久保存您的本命手札吗？`
+        : '命理浩瀚，以上只是冰山一角。想要立刻让小象解开心中的结，并永久保存您的本命手札吗？'
+    },
     trialSummaryTopic: '性格底色、过去经历、当下阶段',
     deferredQuestionLabel: (question: string) =>
       `已收到你的问题，注册后继续深入：「${question}」`,
-    authHintTitle: {
-      collecting: '先补「我」的人物信息',
-      completed: '注册后保存并继续原问题',
-      ready: '免费试用已准备好',
-    },
-    authHintDescription: {
-      collecting: '小象会默认使用人物「我」来分析。完成资料后会先给一次入门画像，原问题会留到注册后继续。',
-      completed: '这次试用已经完成。登录或注册后，小象会把这段记录写入正式会话，并自动接着你在首页输入的问题继续回答。',
-      ready: '可以先留下问题，小象会在需要命盘时引导你补「我」的人物信息；免费试用先看入门画像。',
-    },
-    tutorialTitle: '第一次来，可以这样开始',
-    tutorialDescription: '不用先研究功能。把问题先留下，小象会先从「我」的人物画像开始。',
-    tutorialDismissLabel: '知道了',
-    tutorialSteps: [
-      { label: '留', title: '留下问题', description: '输入真实问题，注册后继续。' },
-      { label: '补', title: '补「我」的信息', description: '需要命盘时再补出生资料。' },
-      { label: '看', title: '看入门画像', description: '免费先看性格和阶段。' },
-      { label: '存', title: '注册后继续', description: '保存记录和人物，接着深入聊。' },
-    ],
   },
   promptGuidance:
     '按报告长度卡片里的「均衡分析」口径处理：中等长度、层级清楚、围绕固定游客首问自然展开；要覆盖性格底色、过去经历印记、当下阶段、主要风险和行动建议，但不要套固定小标题，也不要写成 1/2/3/4 的拼装模板。',
@@ -81,9 +69,9 @@ export function buildGuestFirstQaAnswerPrompt(
   profileName: string = GUEST_FIRST_QA_FLOW.defaultProfileName,
 ): string {
   return [
-    '试用资料已补齐',
-    `分析对象：「${profileName || GUEST_FIRST_QA_FLOW.defaultProfileName}」`,
-    `本次先看：${GUEST_FIRST_QA_FLOW.copy.trialSummaryTopic}`,
+    `请为「${profileName || GUEST_FIRST_QA_FLOW.defaultProfileName}」铺开命盘，写下第一份「本命入门录」。`,
+    `请先解析：${GUEST_FIRST_QA_FLOW.copy.trialSummaryTopic}。`,
+    `报告必须直接以这句话开场，前面不要添加标题或说明：“${GUEST_FIRST_QA_FLOW.copy.trialAnswerOpening}”`,
   ].filter(Boolean).join('\n')
 }
 
@@ -98,10 +86,7 @@ export function buildGuestFirstQaVisibleQuestionSummary(question?: string | null
 }
 
 export function buildGuestFirstQaPostRegistrationPrompt(question: string): string {
-  return [
-    '试用记录已保存',
-    `继续问题：「${question}」`,
-  ].join('\n')
+  return question.trim()
 }
 
 export function buildGuestFirstQaTrialPromptContext(question?: string | null): string {
@@ -110,17 +95,18 @@ export function buildGuestFirstQaTrialPromptContext(question?: string | null): s
   return [
     '【游客首次试用配置】',
     `flowId：${GUEST_FIRST_QA_FLOW.id}`,
-    '入口：landing 免费先看一次。',
+    '入口：首页固定免费试用。',
     `默认人物：${GUEST_FIRST_QA_FLOW.defaultProfileName}`,
     `复杂度：${GUEST_FIRST_QA_FLOW.complexity}`,
     `报告偏好：${GUEST_FIRST_QA_FLOW.reportPreference.mode}`,
     '试用额度：游客 30 天内 1 次最终答复；本轮答复需要给到可感知价值，但仍保持克制。',
     `免费第一问固定为：${GUEST_FIRST_QA_FLOW.fixedTrialQuestion}`,
-    '用户可见消息已做产品化压缩，只展示资料已补齐、本次先看范围，以及注册后继续的问题；不要向用户复述这些内部配置。',
+    '用户可见消息已做产品化压缩；不要向用户复述这些内部配置。',
     trimmedQuestion
-      ? `landing 原始问题是注册后的第二题隐藏 hint：${trimmedQuestion}`
-      : '本次没有 landing 原始问题；注册后不要自动生成第二题。',
-    '免费首答禁止直接回答 landing 原始问题；只能在固定入门画像中轻微参考其关注方向。',
+      ? `首页原始问题是注册后的第二题隐藏 hint：${trimmedQuestion}`
+      : '本次没有首页原始问题；注册后不要自动生成第二题。',
+    '免费首答禁止直接回答首页原始问题；只能在固定入门画像中轻微参考其关注方向。',
+    `最终报告必须直接以“${GUEST_FIRST_QA_FLOW.copy.trialAnswerOpening}”开场；这句话之前不要输出标题、寒暄、序号或其他文字。`,
     '不要要求用户选择报告长度、输出形式、分析重点、时间范围，也不要再发起人物选择卡片。',
     balancedInstruction,
     GUEST_FIRST_QA_FLOW.promptGuidance,
@@ -132,6 +118,6 @@ export function buildGuestFirstQaSystemPrompt(question?: string | null): string 
   return [
     '【游客首次问答链路 guest_first_qa_v1】',
     buildGuestFirstQaTrialPromptContext(question),
-    '用户从 landing page 进入后，已经补充默认人物的出生信息。请回答固定游客首问，不要直接回答 landing 原始问题。',
+    '用户从首页固定试用入口进入后，已经补充默认人物的出生信息。请回答固定游客首问，不要直接回答首页原始问题。',
   ].join('\n')
 }

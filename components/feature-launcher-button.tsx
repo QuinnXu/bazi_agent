@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Plus,
   Users,
@@ -80,7 +80,7 @@ export function FeatureLauncherButton({
   const [open, setOpen] = useState(false)
   const [profiles, setProfiles] = useState<BaziProfileRow[]>([])
   const { user } = useAuth()
-  const supabase = createBrowserClient()
+  const supabase = useMemo(() => createBrowserClient(), [])
 
   // Load profiles when popover opens (so newly created ones show up)
   useEffect(() => {
@@ -108,11 +108,11 @@ export function FeatureLauncherButton({
     return () => {
       cancelled = true
     }
-  }, [open, user])
+  }, [open, supabase, user])
 
   const sizeClass =
     variant === 'sm' ? 'w-8 h-8' : 'w-10 h-10'
-  const shapeClass = variant === 'sm' ? 'rounded-full' : 'rounded-lg'
+  const shapeClass = variant === 'sm' ? 'bubu-chat-icon-control' : 'rounded-lg'
 
   const selected = profiles.find(p => p.id === selectedProfileId) || null
   const selectedSummary = selected
@@ -158,7 +158,7 @@ export function FeatureLauncherButton({
             className="fixed inset-0 z-40"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute left-0 bottom-full mb-3 w-72 max-w-[calc(100vw-1.5rem)] bg-card border border-border rounded-lg shadow-2xl z-50 overflow-hidden glass-minimal">
+          <div className="bubu-chat-popover bubu-mode-enter absolute left-0 bottom-full mb-3 w-72 max-w-[calc(100vw-1.5rem)] bg-card border border-border shadow-2xl z-50 overflow-hidden glass-minimal">
             {/* ---------- Section 1: Current bazi subject ---------- */}
             {user && onSelectProfile && (
               <>

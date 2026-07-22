@@ -4,10 +4,13 @@ import React, { useMemo, useState } from 'react'
 import { Heart, Users, Sparkles } from 'lucide-react'
 import { FeaturePageShell } from '@/components/feature-page-shell'
 import { ProfilePicker } from './profile-picker'
+import { ReportLengthSelector } from './report-length-selector'
 import { useAuth } from '@/contexts/auth-context'
 import { FEATURE_APPLE_COSTS } from '@/lib/apple-costs'
+import { DEFAULT_FEATURE_REPORT_LENGTH } from '@/lib/feature-types'
 import type {
   FeatureParticipant,
+  FeatureReportLength,
   HepanParams,
   HepanSubtype,
 } from '@/lib/feature-types'
@@ -71,6 +74,7 @@ export function HepanPage({
   const [relationLabel, setRelationLabel] = useState<string>('')
   const [customRelation, setCustomRelation] = useState<string>('')
   const [eventDesc, setEventDesc] = useState<string>('')
+  const [reportLength, setReportLength] = useState<FeatureReportLength>(DEFAULT_FEATURE_REPORT_LENGTH)
 
   const minPeople = subtype === 'pair' ? 2 : subtype === 'multi' ? 2 : 1
   const maxPeople = subtype === 'multi' ? 4 : subtype === 'pair' ? 2 : 4
@@ -97,6 +101,7 @@ export function HepanPage({
       participants,
       relationLabel: finalRelation || undefined,
       eventDesc: eventDesc.trim() || undefined,
+      reportPreference: { mode: reportLength },
     }
     onSubmit(params)
   }
@@ -262,6 +267,12 @@ export function HepanPage({
               className="w-full px-3 py-2.5 rounded-xl bg-card/60 border border-border text-foreground text-sm placeholder-muted-foreground/60 focus:outline-none focus:border-primary/50 resize-none"
             />
           </div>
+
+          <ReportLengthSelector
+            value={reportLength}
+            onChange={setReportLength}
+            disabled={loading}
+          />
 
           <div className="rounded-lg bg-secondary/40 border border-border/40 p-3 text-xs text-muted-foreground leading-relaxed">
             点击「让小象开看」后，卜卜象会带着 {participants.length} 位人物的命盘来给你做合盘解读。

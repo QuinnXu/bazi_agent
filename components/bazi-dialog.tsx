@@ -132,6 +132,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
       <div className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card/95 p-6 shadow-xl backdrop-blur-sm glass-minimal">
         <button
           onClick={onClose}
+          aria-label="关闭生辰信息窗口"
           className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-muted transition-colors hover:bg-muted/80"
           type="button"
         >
@@ -166,7 +167,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
               name="profileName"
               value={baziData.profileName || ""}
               onChange={handleInputChange}
-              className="w-full rounded-lg border border-border bg-card/60 px-3 py-2 text-foreground placeholder-muted-foreground transition-all duration-300 focus:border-primary/60 focus:bg-card/80 focus:outline-none"
+              className="w-full rounded-lg border border-border bg-card/60 px-3 py-2 text-foreground placeholder-muted-foreground transition-all duration-150 focus:border-primary/60 focus:bg-card/80 focus:outline-none"
               placeholder="例如：本人、伴侣、朋友的名字"
               autoFocus={!initialData?.profileName}
               required
@@ -205,7 +206,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
               <button
                 type="button"
                 onClick={() => handleGenderChange(false)}
-                className={`rounded-full px-3 py-1 text-xs font-light transition-all duration-300 ${
+                className={`rounded-full px-3 py-1 text-xs font-light transition-all duration-150 ${
                   !baziData.isFemale
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
@@ -216,7 +217,7 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
               <button
                 type="button"
                 onClick={() => handleGenderChange(true)}
-                className={`rounded-full px-3 py-1 text-xs font-light transition-all duration-300 ${
+                className={`rounded-full px-3 py-1 text-xs font-light transition-all duration-150 ${
                   baziData.isFemale
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted text-muted-foreground hover:bg-muted/80"
@@ -246,20 +247,20 @@ export function BaziDialog({ isOpen, onClose, onSubmit, initialData }: BaziDialo
                   locationName: DEFAULT_BIRTH_LOCATION.name,
                 }))
               }}
-              className="rounded-full bg-accent/20 px-4 py-2 text-sm font-light text-accent transition-all duration-300 hover:bg-accent/30"
+              className="rounded-full bg-accent/20 px-4 py-2 text-sm font-light text-accent transition-all duration-150 hover:bg-accent/30"
             >
               小象示例
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-full bg-muted px-4 py-2 text-sm font-light text-muted-foreground transition-all duration-300 hover:bg-muted/80"
+              className="rounded-full bg-muted px-4 py-2 text-sm font-light text-muted-foreground transition-all duration-150 hover:bg-muted/80"
             >
               先不填
             </button>
             <button
               type="submit"
-              className="rounded-full bg-primary px-4 py-2 text-sm font-light text-primary-foreground transition-all duration-300 hover:opacity-90"
+              className="rounded-full bg-primary px-4 py-2 text-sm font-light text-primary-foreground transition-all duration-150 hover:opacity-90"
             >
               交给小象
             </button>

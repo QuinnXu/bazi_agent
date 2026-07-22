@@ -11,6 +11,7 @@ import {
 import {
   normalizeAgentComplexityMode,
   type AgentComplexityMode,
+  type AgentReportPreference,
 } from '@/lib/agent-complexity'
 
 // ==================== Main handler ====================
@@ -32,6 +33,7 @@ export async function POST(req: Request) {
       useUltraMode?: boolean
       chatMode?: 'classic' | 'agent'
       complexity?: AgentComplexityMode
+      reportPreference?: AgentReportPreference | null
     }
 
     const result = await runFeatureAnalysisStream(
@@ -44,6 +46,7 @@ export async function POST(req: Request) {
         complexity: body.complexity
           ? normalizeAgentComplexityMode(body.complexity)
           : undefined,
+        reportPreference: body.reportPreference,
       },
     )
 

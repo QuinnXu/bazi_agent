@@ -724,6 +724,7 @@ async function maybeSelectAgentTool(
   deps: AgentRuntimeDeps,
   latest: string,
 ): Promise<AgentToolDecision | null> {
+  if (input.guestOnboarding) return null
   if (input.pendingConfirmation) return null
   if (!deps.selectTool && !process.env.DEEPSEEK_API_KEY) return null
   const planningInput: AgentToolPlanningInput = {
@@ -820,7 +821,7 @@ export async function* runAgentChatEvents(
   }
 
   let toolDecision: AgentToolDecision | null = null
-  if (!input.pendingConfirmation && (deps.selectTool || process.env.DEEPSEEK_API_KEY)) {
+  if (!input.guestOnboarding && !input.pendingConfirmation && (deps.selectTool || process.env.DEEPSEEK_API_KEY)) {
     yield progressEvent(startedAt, {
       step: 1,
       phase: 'planner',
